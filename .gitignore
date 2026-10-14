@@ -5,3 +5,4 @@ venv/
 data/
 logs/
 *.tmp
+frontend/public/daily_signals.parquet
