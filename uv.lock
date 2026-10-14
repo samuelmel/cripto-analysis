@@ -461,6 +461,7 @@ name = "crypto-analyzer"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "aiohttp" },
     { name = "ccxt" },
     { name = "pandas" },
     { name = "pyarrow" },
@@ -468,6 +469,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiohttp", specifier = ">=3.14.5" },
     { name = "ccxt", specifier = ">=4.3" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "pyarrow", specifier = ">=15.0" },

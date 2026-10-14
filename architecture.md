@@ -75,6 +75,34 @@ df = dset.to_table(
 ).to_pandas()
 ```
 
+## Fontes adicionais
+
+| Script / subcomando | Fonte | Dados | Histórico | Chave |
+|---|---|---|---|---|
+| `extract_binance_vision.py` | data.binance.vision | Klines spot + `quote_volume`, `trades`, `taker_buy_*` (ZIP mensal, SHA-256 verificado) | Desde a listagem do par | Não |
+| `extract_market_context.py fng` | api.alternative.me | Crypto Fear & Greed Index diário | Completo | Não |
+| `extract_market_context.py funding` | fapi.binance.com | Funding rate de perpétuos USDⓈ-M (a cada 8h) + mark price | Desde 2019-09 | Não |
+| `extract_market_context.py coingecko` | api.coingecko.com | Preço, market cap e volume total agregados | 365 dias (plano Demo) | Demo gratuita (`COINGECKO_API_KEY`) |
+
+- O Binance Vision é a via preferida para backfill longo: 1 ZIP por mês em vez de milhares de requisições paginadas. A REST (`extract_historical.py`) cobre o mês corrente.
+- Spot no Binance Vision usa timestamps em microssegundos a partir de 2025-01-01; o parser normaliza para ms.
+- Open interest e long/short ratio da Binance só têm os últimos 30 dias na REST; ficaram fora.
+
+```bash
+uv run extract_binance_vision.py --symbols BTCUSDT ETHUSDT --timeframe 1h --years 10
+uv run extract_market_context.py fng
+uv run extract_market_context.py funding --symbols BTCUSDT ETHUSDT
+COINGECKO_API_KEY=... uv run extract_market_context.py coingecko --coins bitcoin ethereum
+```
+
+Layout:
+```
+data/raw/ohlcv_vision/exchange=binance/timeframe=<tf>/symbol=<SYMBOL>/year=YYYY/month=MM/data.parquet
+data/raw/fear_greed/data.parquet
+data/raw/funding_rate/symbol=<SYMBOL>/year=YYYY/month=MM/data.parquet
+data/raw/coingecko/coin_id=<id>/data.parquet
+```
+
 ## Próximos passos
 - Camada `silver`: validação de gaps, deduplicação e compactação mensal das partes.
 - Consulta via DuckDB direto sobre os arquivos Parquet.
