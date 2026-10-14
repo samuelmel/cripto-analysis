@@ -103,6 +103,21 @@ data/raw/funding_rate/symbol=<SYMBOL>/year=YYYY/month=MM/data.parquet
 data/raw/coingecko/coin_id=<id>/data.parquet
 ```
 
+## Nova arquitetura ETL (em construção)
+O dashboard Streamlit foi descartado. O pipeline diário passa a viver em `src/`, com frontend React + TypeScript em `frontend/`.
+```
+src/
+  extractors/   E — um adaptador por fonte, todos com a mesma interface (padrão Adapter)
+    base_extractor.py      BaseExtractor: extract(start, end) -> DataFrame padronizado
+    binance_adapter.py     BinanceAdapter (OHLCV + volume)
+    coingecko_adapter.py   CoinGeckoMarketAdapter (market cap) e CoinGeckoTrendingAdapter (tendências)
+    fng_adapter.py         FearGreedAdapter (Fear & Greed Index)
+  transformers/ T — limpeza, junção de fontes e indicadores
+  loaders/      L — persistência para o frontend
+frontend/       React + TypeScript
+```
+Formato de saída de todo extrator: chaves `timestamp` (UTC), `source`, `symbol` (`MARKET` para séries globais) + as `value_columns` declaradas pelo adaptador. `BaseExtractor.standardize` garante tipos, unicidade de (timestamp, symbol) e ordenação. Os scripts `extract_*.py` da raiz são a referência de implementação até serem migrados para os adaptadores.
+
 ## Próximos passos
 - Camada `silver`: validação de gaps, deduplicação e compactação mensal das partes.
 - Consulta via DuckDB direto sobre os arquivos Parquet.
