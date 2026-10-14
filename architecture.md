@@ -58,10 +58,12 @@ data/raw/ohlcv/
 - Logs em stdout e `logs/extract_historical.log`.
 
 ## Uso
+Dependências gerenciadas com [uv](https://docs.astral.sh/uv/) (`pyproject.toml` + `uv.lock`):
 ```bash
-pip install -r requirements.txt
-python extract_historical.py --symbols BTC/USDT ETH/USDT SOL/USDT --timeframe 1h --years 10
+uv sync
+uv run extract_historical.py --symbols BTC/USDT ETH/USDT SOL/USDT --timeframe 1h --years 10
 ```
+Adicionar dependência: `uv add <pacote>` (atualiza `pyproject.toml` e `uv.lock`).
 
 Leitura:
 ```python
