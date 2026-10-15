@@ -62,14 +62,8 @@ def dip_in_uptrend(
     return pos
 
 
-def main() -> int:
-    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-    candles = read_ohlcv(list(UNIVERSE))
-    if candles.empty:
-        print("base local vazia: rode `uv run python -m src.pipeline` antes")
-        return 1
-    history = classify_history(candles, read_fng())
-
+def build_strategies(history: pd.DataFrame) -> tuple[dict[str, pd.DataFrame], pd.DataFrame, pd.DataFrame]:
+    """As sete estratégias do estudo: (posições por nome, retornos diários, onde a SMA 200 existe)."""
     px = wide(history, "close")
     z = wide(history, "zscore_90")
     ret = px.pct_change(fill_method=None)
@@ -87,6 +81,18 @@ def main() -> int:
         "6 momento 90 dias > 0": (px / px.shift(90) - 1 > 0).astype(float),
         "7 queda dentro da alta": dip_in_uptrend(px, sma200, z),
     }
+    return strategies, ret, valid
+
+
+def main() -> int:
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+    candles = read_ohlcv(list(UNIVERSE))
+    if candles.empty:
+        print("base local vazia: rode `uv run python -m src.pipeline` antes")
+        return 1
+    history = classify_history(candles, read_fng())
+    strategies, ret, valid = build_strategies(history)
+    px = wide(history, "close")
     periods = {
         "treino 2018–2022": tuple(pd.Timestamp(d, tz="UTC") for d in TRAIN_PERIOD),
         "teste 2023–2026": tuple(pd.Timestamp(d, tz="UTC") for d in TEST_PERIOD),

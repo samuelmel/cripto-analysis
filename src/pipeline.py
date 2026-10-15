@@ -13,6 +13,7 @@ Publica em frontend/public/:
     history.parquet         histórico de preço, indicadores e estágio (gráficos)
     backtest.parquet        cada operação histórica da regra de tendência (BTC e ETH)
     performance.parquet     carteira: tendência x comprar e segurar x pânico, em treino e teste
+    forecast.parquet        previsão de 1, 7 e 30 dias de BTC e ETH (faixa P10–P90) contra o baseline
     positions.parquet       suas posições com a recomendação VENDER / SEGURAR
 """
 
@@ -26,7 +27,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .config import FEE_PER_SIDE, RECOMMENDED, TEST_PERIOD, TRAIN_PERIOD, UNIVERSE
+from .config import FEE_PER_SIDE, FORECAST_SEED, RECOMMENDED, TEST_PERIOD, TRAIN_PERIOD, UNIVERSE, VALIDATION_PERIOD
 from .extractors import MARKET_SYMBOL, BaseExtractor, BinanceAdapter, CoinGeckoMarketAdapter, ExtractorError, FearGreedAdapter
 from .loaders.history_store import read_previous, write_snapshot
 from .loaders.market_store import (
@@ -43,6 +44,7 @@ from .loaders.parquet_loader import write_daily_signals, write_parquet
 from .loaders.positions_store import read_positions
 from .loaders.source_log import write_source_log
 from .transformers.anomaly_detector import classify_history, detect
+from .transformers.forecast import forecast_table
 from .transformers.data_quality import audit_candles, availability, clean_candles, mark_unavailable
 from .transformers.daily_alerts import ALERT_BUY, ALERT_EXIT, ALERT_SELL, ALERT_WATCH, compare_with_previous
 from .transformers.position_advisor import ACTION_SELL, ACTION_UNAVAILABLE, advise, realized
@@ -54,6 +56,7 @@ from .transformers.trade_simulator import (
     STRATEGY_TREND,
     backtest,
     performance_summary,
+    wide,
 )
 
 logger = logging.getLogger("pipeline")
@@ -61,6 +64,8 @@ logger = logging.getLogger("pipeline")
 HISTORY_START = datetime(2017, 1, 1, tzinfo=timezone.utc)  # Binance spot começa em 2017
 PUBLIC_DIR = Path("frontend/public")
 
+VALIDATION = (pd.Timestamp(VALIDATION_PERIOD[0], tz="UTC"), pd.Timestamp(VALIDATION_PERIOD[1], tz="UTC"))
+TEST = (pd.Timestamp(TEST_PERIOD[0], tz="UTC"), pd.Timestamp(TEST_PERIOD[1], tz="UTC"))
 PERIODS: dict[str, tuple[pd.Timestamp, pd.Timestamp]] = {
     PERIOD_TRAIN: (pd.Timestamp(TRAIN_PERIOD[0], tz="UTC"), pd.Timestamp(TRAIN_PERIOD[1], tz="UTC")),
     PERIOD_TEST: (pd.Timestamp(TEST_PERIOD[0], tz="UTC"), pd.Timestamp(TEST_PERIOD[1], tz="UTC")),
@@ -154,15 +159,19 @@ def analyze(today: pd.Timestamp) -> dict[str, pd.DataFrame]:
         history, {"PRINCIPAIS": RECOMMENDED, "TODAS": selection.kept}, PERIODS, FEE_PER_SIDE
     )
     positions = _publish_positions(history, available)
+    # Só prevê moedas com dado confiável hoje; sem dado, não há previsão (nunca uma antiga apresentada como atual).
+    usable = tuple(s for s in RECOMMENDED if s in set(available.loc[available["available"], "symbol"]))
+    forecast = forecast_table(wide(history, "close"), usable, VALIDATION, TEST, FORECAST_SEED)
 
     write_snapshot(signals, day)
     write_daily_signals(signals)
     write_parquet(history, PUBLIC_DIR / "history.parquet")
     write_parquet(trades, PUBLIC_DIR / "backtest.parquet")
     write_parquet(performance, PUBLIC_DIR / "performance.parquet")
+    write_parquet(forecast, PUBLIC_DIR / "forecast.parquet")
     dropped = pd.DataFrame({"symbol": list(selection.dropped), "reason": list(selection.dropped.values())})
     return {
-        "signals": signals, "backtest": trades, "performance": performance, "positions": positions,
+        "signals": signals, "backtest": trades, "performance": performance, "positions": positions, "forecast": forecast,
         "availability": available, "issues": issues, "dropped": dropped,
     }
 
@@ -218,6 +227,9 @@ def report(result: dict[str, pd.DataFrame], source_errors: pd.DataFrame | None =
             f"  carteira BTC+ETH {r['period'].lower()} · {r['strategy']}: {r['total_return_pct']:+.1f}% "
             f"({r['annual_return_pct']:+.1f}%/ano) · pior queda {r['max_drawdown_pct']:.1f}%"
         )
+    model = result["forecast"][result["forecast"]["role"].eq("MODELO")]
+    if not model.empty:
+        lines.append(f"  previsão 1/7/30 dias: {int(model['beats_baseline'].sum())} de {len(model)} superam o baseline no teste")
     for _, p in positions.iterrows():
         if p["action"] == ACTION_UNAVAILABLE:
             tag = f"INDISPONÍVEL ({p['data_note']})"

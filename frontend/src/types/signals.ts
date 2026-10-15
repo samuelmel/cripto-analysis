@@ -5,6 +5,7 @@
  *   HistoryPoint  anomaly_detector.HISTORY_SCHEMA  (history.parquet)
  *   Trade         trade_simulator.TRADE_SCHEMA     (backtest.parquet)
  *   Performance   trade_simulator.PERFORMANCE_SCHEMA (performance.parquet)
+ *   Forecast      forecast.FORECAST_SCHEMA         (forecast.parquet)
  *   Position      position_advisor.POSITION_SCHEMA (positions.parquet)
  */
 
@@ -93,6 +94,50 @@ export interface Performance {
   readonly max_drawdown_pct: number;
   readonly sharpe: number | null;
   readonly invested_pct: number;
+}
+
+export const FORECAST_ROLES = ["BASELINE", "MODELO"] as const;
+export type ForecastRole = (typeof FORECAST_ROLES)[number];
+
+/** Uma linha de forecast.parquet: previsão de hoje e avaliação no teste, de um método num horizonte. */
+export interface Forecast {
+  readonly symbol: string;
+  readonly horizon_days: number;
+  readonly role: ForecastRole;
+  readonly method: string;
+  readonly params: string;
+  readonly window_days: number;
+  readonly n_obs: number;
+  readonly asof: Date;
+  readonly last_close: number;
+  readonly expected_return_pct: number;
+  readonly vol_pct: number;
+  readonly daily_vol_pct: number;
+  readonly p10_pct: number;
+  readonly p50_pct: number;
+  readonly p90_pct: number;
+  readonly p10_price: number;
+  readonly p50_price: number;
+  readonly p90_price: number;
+  readonly n_eval: number;
+  readonly test_start: Date;
+  readonly test_end: Date;
+  readonly mae_pct: number;
+  readonly rmse_pct: number;
+  readonly directional_acc: number;
+  readonly coverage: number;
+  readonly coverage_nominal: number;
+  readonly coverage_ok: boolean;
+  readonly width_pct: number;
+  readonly pinball_pct: number;
+  readonly base_mae_pct: number;
+  readonly base_rmse_pct: number;
+  readonly base_directional_acc: number;
+  readonly base_coverage: number;
+  readonly base_width_pct: number;
+  readonly base_pinball_pct: number;
+  readonly beats_baseline: boolean;
+  readonly verdict: string;
 }
 
 export interface Position {

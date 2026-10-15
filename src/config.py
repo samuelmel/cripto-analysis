@@ -57,5 +57,12 @@ TRAIN_PERIOD: tuple[str, str] = ("2018-01-01", "2022-12-31")
 TEST_PERIOD: tuple[str, str] = ("2023-01-01", "2026-12-31")
 """Períodos do backtest de carteira: a regra foi escolhida no treino e conferida no teste."""
 
+VALIDATION_PERIOD: tuple[str, str] = ("2021-01-01", TRAIN_PERIOD[1])
+"""Parte final do treino usada para escolher parâmetros (laboratório de estratégias e previsão); o que vem antes
+é só treino e o TEST_PERIOD nunca entra em escolha nenhuma."""
+
+FORECAST_SEED = 20261015
+"""Semente da previsão por bootstrap: fixa, para a mesma base dar sempre a mesma previsão."""
+
 FEE_PER_SIDE = 0.001
 """Taxa de 0,1% sobre cada mudança de posição (entrar ou sair)."""

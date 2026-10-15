@@ -180,6 +180,75 @@ O `mcp_server.py` expõe a tool `run_crypto_pipeline`. Adicione dentro de `mcpSe
 }
 ```
 
+## Laboratório de estratégias
+
+O sinal do painel (SMA 200) não muda com nada daqui. O laboratório existe para responder, com o mesmo motor de carteira do pipeline (taxa de 0,1% por lado, posição decidida em t vale para t+1, peso igual), se alguma outra ideia merece entrar.
+
+```bash
+uv run python research/strategy_lab.py
+```
+
+**Protocolo.** Treino 2018–2020 (olhar à vontade), **validação 2021–2022** (só aqui se escolhem os parâmetros: maior Sharpe de cada estratégia, com ao menos 3 operações) e **teste 2023 em diante**, que só mede, nunca escolhe. A grade completa de parâmetros fica em `data/research/strategy_lab_grid.parquet` e traz apenas treino e validação; os resultados, em `data/research/strategy_lab.parquet`.
+
+**Estratégias.** As sete de `strategy_comparison.py` (comprar e segurar, pânico, tendência, tendência + BTC, cruzamento de médias, momento de 90 dias, queda dentro da alta), mais: DCA fixo (aporte semanal), rompimento de Donchian, reversão de Bollinger, RSI sobrevendido e rompimento com confirmação de volume. Cada uma é uma função pura `signal(market, **params) -> posições 0/1` (`research/lab.py`).
+
+**Referência aleatória.** Para cada estratégia, 200 sorteios com sementes fixas (1000 a 1199): a mesma exposição e as mesmas durações de operação, mas em dias deslocados ao acaso (deslocamento circular por moeda). A coluna `beats_random_pct` diz em quantos sorteios a estratégia rendeu mais.
+
+**Métricas.** Retorno total e ao ano, pior queda, Sharpe (média diária × 365 dividida pelo desvio × √365, coerente com candle diário de cripto, sem taxa livre de risco), tempo comprado, número de operações, acerto, fator de lucro, trocas de posição por ano, taxas pagas (% do capital) e `beats_random_pct`.
+
+Resultado no **teste** (2023 até hoje), BTC + ETH, ordenado por Sharpe. Tudo aparece, inclusive o que perde:
+
+| Estratégia | Parâmetros (da validação) | Total | Ao ano | Pior queda | Sharpe | Comprado | Operações | Acerto | Fator de lucro | Taxas | Bate o aleatório |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Tendência + BTC em alta (regra do painel) | fixa | +209,5% | 34,7% | -29,3% | 1,0 | 60% | 30 | 33% | 6,9 | 2,9% | 81,5% |
+| Tendência (> SMA 200) | fixa | +197,7% | 33,4% | -29,3% | 1,0 | 61% | 30 | 37% | 7,0 | 2,9% | 79,5% |
+| Momento 90 dias > 0 | fixa | +176,1% | 30,7% | -32,0% | 0,9 | 59% | 51 | 37% | 3,3 | 5,0% | 78,5% |
+| Comprar e segurar | fixa | +235,0% | 37,6% | -59,9% | 0,9 | 100% | 2 | 100% | ∞ | 0% | não se aplica |
+| Rompimento + volume | n=55, k=1,5 | +94,5% | 19,2% | -28,0% | 0,7 | 49% | 20 | 55% | 3,5 | 1,9% | 63,0% |
+| Donchian | n=100 | +55,3% | 12,3% | -34,0% | 0,5 | 44% | 11 | 45% | 3,2 | 1,0% | 45,0% |
+| Cruzamento SMA 50 > SMA 200 | fixa | +48,6% | 11,0% | -41,0% | 0,5 | 59% | 10 | 70% | 2,9 | 0,9% | 23,0% |
+| Bollinger (reversão) | n=20, k=1,5 | +42,5% | 9,8% | -50,9% | 0,5 | 32% | 73 | 75% | 1,5 | 7,1% | 47,5% |
+| DCA fixo | a cada 7 dias | +31,0% | 7,4% | -54,6% | 0,4 | 57% | 396 aportes | 58% | 4,7 | 0,1% | não se aplica |
+| Regra antiga (pânico) | fixa | +22,0% | 5,4% | -22,8% | 0,4 | 18% | 10 | 80% | 2,6 | 1,0% | 37,0% |
+| RSI sobrevendido | 25 / 50 | +14,3% | 3,6% | -21,2% | 0,3 | 9% | 10 | 50% | 2,1 | 1,0% | 54,5% |
+| Queda dentro da alta | fixa | +4,9% | 1,3% | -21,3% | 0,2 | 6% | 11 | 36% | 1,3 | 1,1% | 42,0% |
+
+Como ler:
+
+- **Nada novo superou a regra do painel no teste.** Das cinco novas (DCA, Donchian, Bollinger, RSI e rompimento com volume), nenhuma passou de 0,7 de Sharpe, abaixo do 1,0 da tendência. Os parâmetros escolhidos na validação não se sustentaram: o Donchian (n=100) teve Sharpe 1,2 na validação e 0,5 no teste, com apenas 3 operações na validação.
+- **Comprar e segurar rendeu mais** (+235,0% contra +209,5%), com quase o dobro da queda (-59,9% contra -29,3%). A vantagem da regra é suportar melhor, não render mais.
+- **Contra o acaso, a vantagem não é esmagadora:** a regra do painel bateu 81,5% dos sorteios com a mesma exposição, ou seja, 18,5% dos sorteios fizeram o mesmo ou melhor. Com uma única história de mercado e poucas operações independentes, isso é compatível com sorte parcial. O cruzamento de médias (23%) rendeu menos que a maioria dos sorteios.
+- **Nas 15 moedas** a história é pior para as estratégias de tendência (a regra do painel bate só 23% dos sorteios no teste) e o rompimento com volume (n=20, k=1,5) só empatou em Sharpe com comprar e segurar (0,7 dos dois), com +98,4% contra +164,9%.
+- **Custos:** Bollinger fez 73 operações e pagou 7,1% do capital em taxas; o DCA semanal paga pouco por aporte, mas o DCA também perdeu na validação (-43%) e rendeu +31% no teste, abaixo do comprar e segurar.
+- **Limitações específicas:** a validação tem só dois anos e, em BTC + ETH, de 3 a 7 operações nas estratégias de rompimento e RSI; os parâmetros escolhidos nela são ruidosos. O universo é de moedas que existem hoje (viés de sobrevivência) e os números não incluem impostos.
+
+**Estratégias pendentes (não implementadas):** pairs trading (arbitragem estatística entre pares), rotação entre moedas (por exemplo, sempre comprar as de maior momento) e ensemble (combinar vários sinais).
+
+## Previsão estatística
+
+`src/transformers/forecast.py` (função pura: sem rede, disco nem relógio; só numpy e pandas; semente injetada, `FORECAST_SEED`). Para BTC e ETH, em 1, 7 e 30 dias, publica P10/P50/P90 do retorno, o retorno estimado (mediana), a volatilidade, o método, a janela e o número de observações em `frontend/public/forecast.parquet`. Se o dado de uma moeda estiver desatualizado, ela não recebe previsão.
+
+**Métodos.** Passeio aleatório (baseline: sem tendência, volatilidade da janela × raiz do horizonte; é "o preço de hoje com ruído"), bootstrap de retornos em blocos e volatilidade EWMA (RiskMetrics). O modelo publicado é o melhor dos dois últimos na validação, então o EWMA só aparece quando os dados o justificam.
+
+**Walk-forward.** Em cada origem a previsão usa só dados até aquele dia, e o realizado são os dias seguintes; as origens ficam a cada `h` dias para as janelas não se sobreporem, e o realizado tem de terminar dentro do próprio período (a validação nunca olha dentro do teste). Janela, bloco e lambda (e a janela do baseline) são escolhidos na **validação 2021–2022** pela perda de quantis (pinball); o **teste 2023 em diante é lido uma única vez**, com os parâmetros já escolhidos.
+
+**Regra de veredito.** `beats_baseline` só é verdadeiro se o modelo vencer o baseline em perda de quantis, MAE e RMSE no teste. `coverage_ok` exige cobertura compatível com os 80% nominais da faixa P10–P90 (intervalo binomial de 95% para o número de janelas). Sem `beats_baseline`, a coluna `verdict` diz "sem vantagem demonstrada sobre o preço de hoje".
+
+Resultado no teste (retornos logarítmicos, em pontos percentuais; cobertura nominal de 80%; erro direcional: o baseline conta como "sempre alta"):
+
+| Ativo | Horizonte | Método (parâmetros) | Janelas | MAE modelo / baseline | RMSE modelo / baseline | Acerto direcional modelo / baseline | Cobertura modelo / baseline | Largura modelo / baseline | Vence o baseline |
+|---|---|---|---|---|---|---|---|---|---|
+| BTC | 1 dia | EWMA (janela 365, λ 0,94) | 1382 | 1,69 / 1,68 | 2,42 / 2,41 | 51,4% / 50,6% | 83,0% / 85,7% | 5,96 / 6,51 | não |
+| BTC | 7 dias | EWMA (janela 365, λ 0,99) | 197 | 4,74 / 4,63 | 6,41 / 6,35 | 51,3% / 51,3% | 84,3% / 83,2% | 16,7 / 17,2 | não |
+| BTC | 30 dias | Bootstrap (janela 365, bloco 10) | 46 | 10,97 / 10,03 | 14,28 / 13,86 | 47,8% / 50,0% | 69,6% / 80,4% | 34,7 / 35,8 | não |
+| ETH | 1 dia | EWMA (janela 365, λ 0,94) | 1382 | 2,26 / 2,26 | 3,28 / 3,27 | 50,9% / 50,9% | 83,5% / 85,7% | 8,06 / 8,86 | não |
+| ETH | 7 dias | Bootstrap (janela 180, bloco 5) | 197 | 6,59 / 6,27 | 8,76 / 8,49 | 48,7% / 50,3% | 75,1% / 83,2% | 20,5 / 22,5 | não |
+| ETH | 30 dias | Bootstrap (janela 365, bloco 10) | 46 | 14,75 / 13,31 | 19,22 / 17,94 | 41,3% / 50,0% | 76,1% / 82,6% | 46,8 / 48,6 | não |
+
+**Conclusão: nenhum modelo superou o baseline em nenhum dos seis casos.** O EWMA de 1 dia teve perda de quantis um pouco menor (a faixa é mais estreita e reage à volatilidade), mas MAE e RMSE iguais ou piores, e a cobertura das faixas de 1 dia fica acima do nominal (83% a 86% contra 80%) porque a normal não pega as caudas pesadas. Em 30 dias os modelos pioram de forma clara (acerto direcional de 41% a 48%). A previsão deve ser lida como **faixa de incerteza**, não como palpite de direção.
+
+**Limitações.** Viés de sobrevivência (BTC e ETH são as sobreviventes mais fortes). Poucas janelas independentes no horizonte de 30 dias: 46 por ativo no teste, com erro-padrão da cobertura de cerca de 6 pontos percentuais, então diferenças pequenas não são conclusivas. Uma única história de mercado (dois ciclos). Não inclui impostos, taxas nem execução. O passado não garante o futuro, e nada disso é recomendação de investimento.
+
 ## Fontes de dados e qualidade
 
 | Fonte | O que traz | Chamada | Persistência |
@@ -295,6 +364,7 @@ src/
     daily_alerts.py          alertas de virada contra o dia anterior
     trade_simulator.py       operações da tendência e backtest de carteira (treino/teste, taxa)
     panic_backtest.py        a regra antiga do pânico, congelada só para comparação
+    forecast.py              previsão P10/P50/P90 de BTC e ETH contra o baseline
     position_advisor.py      SEGURAR / VENDER das suas posições
   loaders/                 L — Parquet com escrita atômica
     market_store.py          base histórica (data/market)
@@ -304,6 +374,8 @@ src/
     parquet_loader.py        publicação para o painel
 research/
   strategy_comparison.py   reproduz a tabela de estratégias (treino x teste)
+  strategy_lab.py          laboratório: novas estratégias, validação, referência aleatória (data/research/)
+  lab.py                   sinais puros, DCA, estatísticas de operações, sorteio
 frontend/                  React + TypeScript + Tailwind
   DESIGN.md                contrato visual: tokens, tipografia, componentes, o que evitar
   src/data/                leitura e validação do Parquet + cálculos e textos puros do painel
@@ -320,6 +392,7 @@ Arquivos publicados em `frontend/public/` (gerados, fora do Git):
 | `history.parquet` | Preço, indicadores (SMA 90 e 200, RSI, z-score) e estágio de todos os dias |
 | `backtest.parquet` | Cada operação simulada da regra de tendência (BTC e ETH) |
 | `performance.parquet` | Carteira: tendência x comprar e segurar x pânico, em treino e teste |
+| `forecast.parquet` | Previsão de 1, 7 e 30 dias de BTC e ETH, com a avaliação contra o baseline |
 | `positions.parquet` | Suas posições com a recomendação |
 
 ## Desenvolvimento

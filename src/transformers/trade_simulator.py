@@ -245,26 +245,42 @@ def positions_from_trades(trades: pd.DataFrame, index: pd.DatetimeIndex, columns
     return steps.cumsum().gt(0).astype(float)
 
 
-def evaluate_portfolio(
+@dataclass(frozen=True)
+class PortfolioRun:
+    """Carteira de peso igual simulada num período: base de `evaluate_portfolio` e do laboratório (`research/`)."""
+
+    daily: pd.Series         # retorno diário da carteira, já líquido de taxa
+    held: pd.DataFrame       # posição carregada em cada dia (a decidida em t-1), por moeda
+    asset_daily: pd.DataFrame  # retorno diário líquido de cada moeda (NaN onde a SMA 200 ainda não existe)
+    fee_cost: pd.Series      # taxa paga em cada dia, como fração do capital da carteira
+    turnover: pd.DataFrame   # |mudança de posição| decidida em cada dia, por moeda
+    valid: pd.DataFrame      # onde a moeda tem dados (SMA 200 existe)
+    returns: pd.DataFrame    # retorno diário bruto de cada moeda no período
+
+
+def run_portfolio(
     positions: pd.DataFrame,
     returns: pd.DataFrame,
     valid: pd.DataFrame,
     start: pd.Timestamp,
     end: pd.Timestamp,
     fee: float,
-) -> dict[str, float | pd.Timestamp]:
-    """Métricas da carteira de peso igual entre as moedas com dados, no período [start, end]."""
+) -> PortfolioRun:
+    """Aplica a metodologia da carteira (posição de t vale para t+1, taxa sobre a mudança) em [start, end]."""
     p = positions.where(valid).loc[start:end]
     r = returns.loc[start:end]
     v = valid.loc[start:end]
     held = p.shift(1)  # decide no fechamento de t, ganha o retorno de t+1
     turnover = p.diff().abs().fillna(0.0)
-    daily = held * r - turnover.shift(1).fillna(0.0) * fee
+    fee_drag = turnover.shift(1).fillna(0.0) * fee
+    daily = held * r - fee_drag
     port = daily.where(v).mean(axis=1, skipna=True).fillna(0.0)
-    if port.empty:
-        nan = float("nan")
-        return {"start": start, "end": end, "total": nan, "annual": nan, "drawdown": nan, "sharpe": nan, "invested": nan}
+    cost = fee_drag.where(v).mean(axis=1, skipna=True).fillna(0.0)
+    return PortfolioRun(port, held, daily.where(v), cost, turnover, v, r)
 
+
+def summarize_returns(port: pd.Series, invested_pct: float) -> dict[str, float | pd.Timestamp]:
+    """Retorno total e anual, pior queda e Sharpe de uma série de retornos diários de cripto (365 dias por ano)."""
     equity = (1.0 + port).cumprod()
     years = len(port) / 365
     vol = float(port.std() * np.sqrt(365))
@@ -275,8 +291,24 @@ def evaluate_portfolio(
         "annual": (float(equity.iloc[-1]) ** (1.0 / years) - 1.0) * 100.0,
         "drawdown": float((equity / equity.cummax() - 1.0).min()) * 100.0,
         "sharpe": float(port.mean() * 365) / vol if vol > 0 else float("nan"),
-        "invested": float(held.where(v).mean().mean()) * 100.0,
+        "invested": invested_pct,
     }
+
+
+def evaluate_portfolio(
+    positions: pd.DataFrame,
+    returns: pd.DataFrame,
+    valid: pd.DataFrame,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    fee: float,
+) -> dict[str, float | pd.Timestamp]:
+    """Métricas da carteira de peso igual entre as moedas com dados, no período [start, end]."""
+    run = run_portfolio(positions, returns, valid, start, end, fee)
+    if run.daily.empty:
+        nan = float("nan")
+        return {"start": start, "end": end, "total": nan, "annual": nan, "drawdown": nan, "sharpe": nan, "invested": nan}
+    return summarize_returns(run.daily, float(run.held.where(run.valid).mean().mean()) * 100.0)
 
 
 def performance_summary(
