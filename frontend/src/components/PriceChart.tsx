@@ -11,10 +11,12 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 import { useEffect, useRef, useState } from "react";
-import { distanceFromAverage, fmt } from "../data/analytics";
-import type { HistoryPoint, Position, Trade } from "../types/signals";
+import { fmt } from "../data/analytics";
+import type { Forecast, HistoryPoint, Position, Trade } from "../types/signals";
+import { Term } from "./Glossary";
 
-/* Cores do DESIGN.md (validadas com validate_palette.js). O canvas não lê CSS vars. */
+/* Cores do DESIGN.md (validadas com validate_palette.js). O canvas não lê CSS vars.
+   A estimativa usa a cor do preço com transparência e traço, para nunca se confundir com o histórico. */
 const C = {
   surface: "#fcfcfb",
   muted: "#55544f",
@@ -23,37 +25,51 @@ const C = {
   price: "#2a78d6",
   average: "#eb6834",
   trend: "#4a3aa7",
+  estimate: "rgba(42, 120, 214, 0.5)",
+  estimateMid: "rgba(42, 120, 214, 0.9)",
   good: "#0ca30c",
   critical: "#d03b3b",
   ink: "#121417",
 } as const;
 
+const DAY_S = 86_400;
+const TIP_WIDTH = 248;
+const SOURCE_PRICE = "Binance, candle diário (UTC)";
+
 const toTime = (d: Date): UTCTimestamp => Math.floor(d.getTime() / 1000) as UTCTimestamp;
 
-interface Readout {
-  readonly date: Date;
-  readonly close: number;
-  readonly sma: number | null;
-  readonly sma200: number | null;
+interface Tip {
+  readonly x: number;
+  readonly title: string;
+  readonly lines: readonly string[];
+  readonly source: string;
+  readonly estimate: boolean;
 }
 
 interface Props {
   readonly history: readonly HistoryPoint[];
   readonly trades: readonly Trade[];
   readonly positions: readonly Position[];
+  /** Linhas do modelo para esta moeda (vazio = sem previsão). */
+  readonly forecast: readonly Forecast[];
+  readonly showForecast: boolean;
 }
 
-/** Preço e médias de 90 e 200 dias, com entradas e saídas da regra de tendência e suas compras. */
-export function PriceChart({ history, trades, positions }: Props) {
+/** Preço e médias de 90 e 200 dias, entradas e saídas da regra, suas compras e, se pedido, a faixa de previsão. */
+export function PriceChart({ history, trades, positions, forecast, showForecast }: Props) {
   const container = useRef<HTMLDivElement>(null);
-  const last = history.at(-1);
-  const [readout, setReadout] = useState<Readout | null>(null);
-  const shown: Readout | null = readout ?? (last === undefined ? null : { date: last.timestamp, close: last.close, sma: last.sma_90, sma200: last.sma_200 });
+  const [tip, setTip] = useState<Tip | null>(null);
+  const withForecast = showForecast && forecast.length > 0;
 
   useEffect(() => {
     const el = container.current;
     if (el === null) return;
     const byTime = new Map(history.map((h) => [toTime(h.timestamp), h]));
+    const last = history.at(-1);
+    const estimates = new Map<UTCTimestamp, Forecast>();
+    if (withForecast && last !== undefined) {
+      for (const f of forecast) estimates.set((toTime(last.timestamp) + f.horizon_days * DAY_S) as UTCTimestamp, f);
+    }
 
     const chart: IChartApi = createChart(el, {
       height: 360,
@@ -75,7 +91,7 @@ export function PriceChart({ history, trades, positions }: Props) {
       localization: { locale: "pt-BR" },
     });
 
-    const price = chart.addSeries(LineSeries, { color: C.price, lineWidth: 2, priceLineVisible: false });
+    const price = chart.addSeries(LineSeries, { color: C.price, lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
     price.setData(history.map((h) => ({ time: toTime(h.timestamp), value: h.close })));
 
     const average = chart.addSeries(LineSeries, {
@@ -87,6 +103,22 @@ export function PriceChart({ history, trades, positions }: Props) {
       color: C.trend, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
     });
     trend.setData(history.flatMap((h) => (h.sma_200 === null ? [] : [{ time: toTime(h.timestamp), value: h.sma_200 }])));
+
+    if (last !== undefined && estimates.size > 0) {
+      const start = { time: toTime(last.timestamp), value: last.close };
+      const bands = [
+        { key: "p90_price", title: "P90 (estimativa)", color: C.estimate, width: 1 },
+        { key: "p50_price", title: "P50 (estimativa)", color: C.estimateMid, width: 2 },
+        { key: "p10_price", title: "P10 (estimativa)", color: C.estimate, width: 1 },
+      ] as const;
+      for (const band of bands) {
+        const series = chart.addSeries(LineSeries, {
+          color: band.color, lineWidth: band.width, lineStyle: LineStyle.Dashed, priceLineVisible: false,
+          lastValueVisible: true, title: band.title, crosshairMarkerVisible: false,
+        });
+        series.setData([start, ...[...estimates].map(([time, f]) => ({ time, value: f[band.key] }))]);
+      }
+    }
 
     const markers: SeriesMarker<UTCTimestamp>[] = [
       ...trades.flatMap((t): SeriesMarker<UTCTimestamp>[] => [
@@ -109,41 +141,97 @@ export function PriceChart({ history, trades, positions }: Props) {
     createSeriesMarkers(price, markers);
 
     chart.subscribeCrosshairMove((param) => {
-      const h = param.time === undefined ? undefined : byTime.get(param.time as UTCTimestamp);
-      setReadout(h === undefined ? null : { date: h.timestamp, close: h.close, sma: h.sma_90, sma200: h.sma_200 });
+      const time = param.time === undefined ? undefined : (param.time as UTCTimestamp);
+      const point = param.point;
+      if (time === undefined || point === undefined) {
+        setTip(null);
+        return;
+      }
+      const day = fmt.day(new Date(time * 1000));
+      const x = Math.max(0, Math.min(point.x + 14, el.clientWidth - TIP_WIDTH));
+      const f = estimates.get(time);
+      if (f !== undefined) {
+        setTip({
+          x,
+          title: `${day} (estimativa)`,
+          lines: [
+            `Faixa de ${f.horizon_days === 1 ? "1 dia" : `${f.horizon_days} dias`}: ${fmt.price(f.p10_price)} a ${fmt.price(f.p90_price)}`,
+            `Valor do meio (P50): ${fmt.price(f.p50_price)}`,
+            "Não é dado real: é uma estimativa.",
+          ],
+          source: `Modelo estatístico (${f.method.toLowerCase().replace(/_/g, " ")}), avaliado em ${f.n_eval} janelas de teste`,
+          estimate: true,
+        });
+        return;
+      }
+      const h = byTime.get(time);
+      if (h === undefined) {
+        setTip(null);
+        return;
+      }
+      setTip({
+        x,
+        title: day,
+        lines: [
+          `Preço de fechamento: ${fmt.price(h.close)}`,
+          `Média de 90 dias: ${fmt.price(h.sma_90)}`,
+          `Média de 200 dias: ${fmt.price(h.sma_200)}`,
+        ],
+        source: `${SOURCE_PRICE}; médias calculadas aqui`,
+        estimate: false,
+      });
     });
 
-    chart.timeScale().fitContent();
+    if (last !== undefined && estimates.size > 0) {
+      // Com previsão, o foco é o presente: 2 anos de histórico e a faixa à direita (o resto fica a um arrasto de distância).
+      const end = toTime(last.timestamp);
+      chart.timeScale().setVisibleRange({ from: (end - 730 * DAY_S) as UTCTimestamp, to: (end + 45 * DAY_S) as UTCTimestamp });
+    } else {
+      chart.timeScale().fitContent();
+    }
     return () => chart.remove();
-  }, [history, trades, positions]);
-
-  const dist = shown === null ? null : distanceFromAverage(shown.close, shown.sma200);
+  }, [history, trades, positions, forecast, withForecast]);
 
   return (
     <figure>
-      <figcaption className="mb-3 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px]">
-        <span className="text-muted">{shown === null ? "—" : fmt.day(shown.date)}</span>
+      <figcaption className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-[13px]">
         <span className="flex items-center gap-2">
           <span aria-hidden className="inline-block h-0.5 w-4 bg-series-price" />
-          Preço <strong className="num font-medium">{fmt.price(shown?.close ?? null)}</strong>
+          Preço de fechamento
         </span>
         <span className="flex items-center gap-2">
           <span aria-hidden className="inline-block h-0.5 w-4 bg-series-average" />
-          Média de 90 dias <strong className="num font-medium">{fmt.price(shown?.sma ?? null)}</strong>
+          Média de 90 dias
         </span>
         <span className="flex items-center gap-2">
           <span aria-hidden className="inline-block h-0.5 w-4 bg-series-trend" />
-          Média de 200 dias <strong className="num font-medium">{fmt.price(shown?.sma200 ?? null)}</strong>
+          <Term id="sma200">Média de 200 dias</Term>
         </span>
-        <span className="text-muted">
-          {dist === null ? "" : `preço ${fmt.num(Math.abs(dist), 1)}% ${dist < 0 ? "abaixo" : "acima"} da média de 200 dias`}
-        </span>
+        {withForecast && (
+          <span className="flex items-center gap-2">
+            <span aria-hidden className="inline-block w-4 border-t-2 border-dashed border-series-price opacity-60" />
+            Estimativa (<Term id="faixa">faixa P10 a P90</Term>)
+          </span>
+        )}
       </figcaption>
-      <div ref={container} className="w-full" />
+      <div className="relative">
+        <div ref={container} className="w-full" />
+        {tip !== null && (
+          <div
+            role="status"
+            className={`pointer-events-none absolute top-2 z-10 rounded-md border bg-surface p-3 text-[13px] ${tip.estimate ? "border-dashed border-series-price" : "border-hairline"}`}
+            style={{ left: tip.x, width: TIP_WIDTH }}
+          >
+            <p className="font-medium">{tip.title}</p>
+            {tip.lines.map((l) => <p key={l} className="num">{l}</p>)}
+            <p className="mt-1 text-muted">Fonte: {tip.source}</p>
+          </div>
+        )}
+      </div>
       <p className="mt-3 text-[13px] text-muted">
-        Setas azuis para cima: dias em que a regra mandou comprar (preço e Bitcoin acima da média de 200 dias). Setas para baixo:
-        quando a regra mandou vender, com o resultado (verde lucro, vermelho perda). A linha violeta é a média de 200 dias, a que decide tudo. Círculo preto: suas compras. O eixo de preço é proporcional: a mesma
-        distância vertical representa a mesma variação em %. Passe o mouse para ver o preço de cada dia.
+        Setas azuis para cima: dias em que a regra mandou comprar. Setas para baixo: quando mandou vender, com o resultado (verde lucro,
+        vermelho perda). Círculo preto: suas compras. O eixo de preço é proporcional: a mesma distância vertical é a mesma variação em %.
+        {withForecast && " Linhas tracejadas à direita são estimativas, não preços reais. Arraste o gráfico para ver todo o histórico."}
       </p>
     </figure>
   );

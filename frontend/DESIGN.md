@@ -47,7 +47,14 @@ IBM Plex Sans, self-hosted via @fontsource (400/500/600). Escala: 13 (rótulos d
 
 ## Layout
 
-Coluna única de até 1120px, alinhada à esquerda, com seções na ordem das decisões do usuário: o que fazer hoje → suas posições → moedas → detalhe da moeda → a regra funciona? → como funciona. Tabelas ocupam a largura toda; números alinhados à direita.
+Largura máxima de 1120px, alinhada à esquerda, em quatro visões escolhidas por uma navegação em abas: **Visão geral**, **Histórico**, **Previsões** e **Pesquisa**. Cada visão é uma grade de 12 colunas e espaçamento `lg` entre blocos.
+
+- **Visão geral**, de cima para baixo: faixa de estado (3 fatos lado a lado) → área de avisos → o que fazer hoje → cartões de BTC e ETH lado a lado → bloco de previsão com 1, 7 e 30 dias → gráfico principal na largura toda → suas posições.
+- **Histórico**: todas as moedas e as operações simuladas da moeda escolhida.
+- **Previsões**: gráfico com as faixas e a tabela de avaliação contra o preço de hoje.
+- **Pesquisa**: comparação de estratégias, laboratório, como funciona e glossário.
+
+Abaixo de 768px tudo vira uma coluna, na mesma ordem. A página nunca rola na horizontal: colunas secundárias das tabelas somem no celular (`hidden md:table-cell`) e a leitura completa fica no desktop. Tabelas ocupam a largura do bloco; números alinhados à direita.
 
 ## Elevation & Depth
 
@@ -58,6 +65,14 @@ Plano. Nenhuma sombra. Blocos se separam por fundo (surface sobre ground) e hair
 `sm` 4px em etiquetas de status e botões de moeda; `md` 6px em blocos. Nada além disso.
 
 ## Components
+
+- **Navegação** — abas em texto sobre uma linha `hairline`; a aba ativa tem sublinhado `signal` de 2px e `aria-selected`. Sem ícones, sem caixa alta.
+- **Faixa de estado** — um bloco `surface` com três fatos (estado do mercado, atualização dos dados, data da análise): rótulo `muted` 13px em cima, valor 18px embaixo, divididos por `hairline`.
+- **Área de avisos** — separada das recomendações por fundo tint de status (`warning-bg` para pânico e dado velho, `critical-bg` para falha de coleta), ícone Phosphor e título; diz sempre "não é recomendação". Sem avisos, vira uma linha `muted` com um ícone de confirmação.
+- **Cartão de moeda** — logo, nome, etiqueta do sinal, preço em `figure`, variação de 24 horas e de 30 dias em `good`/`critical` com sinal, distância da média de 200 dias com a barra de distância e uma frase de razão. Dois lado a lado.
+- **Faixa de previsão** — uma linha por horizonte: nome, trilho `ground` com o zero marcado, segmento tracejado de P10 a P90 (borda `series-price` tracejada, preenchimento `series-price` a 15%) e um traço no P50. Sempre rotulada "estimativa". Quando o modelo não vence a referência, vem junto uma etiqueta `warning`: "sem vantagem demonstrada sobre o preço de hoje".
+- **Dica de glossário** — o termo com sublinhado pontilhado e um balão `surface` com borda `hairline`, sem sombra; abre ao passar o mouse, ao focar com o teclado e some com Esc; no celular vira uma faixa fixa na base da tela. O texto longo mora em `src/data/glossary.ts`, nunca no cartão.
+- **Tooltip do gráfico** — balão `surface` com data, valor e fonte (Binance para preço, "calculada aqui" para médias, "modelo estatístico" para estimativas). Estimativas aparecem tracejadas, com a mesma cor do preço e transparência, e nunca se confundem com o histórico.
 
 - **Bloco** — surface, hairline, `md`, padding lg. Um nível só: bloco nunca contém bloco.
 - **Etiqueta de status** — texto + fundo tint da cor de status, `sm`, peso 500.

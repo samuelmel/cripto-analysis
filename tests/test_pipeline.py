@@ -17,7 +17,7 @@ from src.loaders.source_log import read_source_log
 from src.transformers.anomaly_detector import STAGE_BUY, STAGE_UNAVAILABLE
 from tests.helpers import make_candles, ramp
 
-PUBLISHED = ("daily_signals", "history", "backtest", "performance", "forecast", "positions", "closed_positions")
+PUBLISHED = ("daily_signals", "history", "backtest", "performance", "forecast", "sources", "positions", "closed_positions")
 
 
 def _yesterday() -> pd.Timestamp:

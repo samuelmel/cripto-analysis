@@ -102,12 +102,16 @@ npm --prefix frontend run dev
 
 Acesse o endereço que aparece na linha `Local:` do terminal, normalmente http://localhost:5173. O painel só funciona enquanto esse comando estiver rodando. Ele mostra:
 
-- **Hoje:** o que fazer, em uma frase, e o humor do mercado (Fear & Greed).
-- **Suas posições:** uma ficha por compra com Segurar/Vender, o motivo em português simples, o resultado, o preço abaixo do qual vender e o limite de perda.
-- **Todas as moedas:** a recomendação para BTC e ETH, e a distância da média de 200 dias de todas. Clique numa para ver o gráfico.
-- **Gráfico da moeda:** preço, média de 90 dias e média de 200 dias desde o início dos dados, entradas e saídas da regra e as suas compras. Passe o mouse para ler o preço de cada dia.
-- **A regra de compra funciona?:** a comparação de carteira com comprar e segurar (retorno, por ano, pior queda e tempo comprado), em treino e teste.
-- **Como funciona:** as regras de compra e venda explicadas.
+O painel tem quatro abas:
+
+- **Visão geral:** faixa de estado (mercado, atualização dos dados, data da análise), área de **avisos** separada das recomendações (pânico, dado desatualizado, falha de coleta), o que fazer hoje, os cartões de **Bitcoin e Ethereum** lado a lado (preço, sinal, variação em 24 horas e 30 dias, distância da média de 200 dias), a **previsão** de 1, 7 e 30 dias com a faixa P10 a P90, o gráfico principal e **suas posições**.
+- **Histórico:** todas as moedas, o gráfico e as operações simuladas da moeda escolhida.
+- **Previsões:** o gráfico com a faixa tracejada (rotulada como estimativa) e a tabela de avaliação contra o preço de hoje. Quando o modelo não vence a referência, o painel diz "sem vantagem demonstrada sobre o preço de hoje".
+- **Pesquisa:** a comparação de carteira com comprar e segurar (incluindo a pior queda), o laboratório de estratégias (treino, validação e teste), como funciona e o glossário.
+
+Termos como média de 200 dias, tendência, pior queda, volatilidade, faixa de previsão e Sharpe têm dica ao passar o mouse, focar com o teclado ou tocar (Esc fecha). O tooltip do gráfico mostra data, valor e fonte. Em telas estreitas tudo vira uma coluna, sem rolagem horizontal; as colunas secundárias das tabelas aparecem só no desktop.
+
+Arquivos opcionais: `forecast.parquet`, `sources.parquet` e `strategy_lab.parquet` (este último vem de `uv run python research/strategy_lab.py`). Se faltarem, a aba mostra um estado vazio com o comando para gerá-los, em vez de erro.
 
 As decisões visuais (cores, tipografia, componentes) estão em [frontend/DESIGN.md](frontend/DESIGN.md).
 
@@ -460,6 +464,8 @@ Arquivos publicados em `frontend/public/` (gerados, fora do Git):
 | `backtest.parquet` | Cada operação simulada da regra de tendência (BTC e ETH) |
 | `performance.parquet` | Carteira: tendência x comprar e segurar x pânico, em treino e teste |
 | `forecast.parquet` | Previsão de 1, 7 e 30 dias de BTC e ETH, com a avaliação contra o baseline |
+| `sources.parquet` | Quando e como cada fonte foi atualizada (alerta de falha de coleta) |
+| `strategy_lab.parquet` | Resultados do laboratório de estratégias (opcional, vem de `research/strategy_lab.py`) |
 | `positions.parquet` | Suas posições com a recomendação |
 
 ## Desenvolvimento

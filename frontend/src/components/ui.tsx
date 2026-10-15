@@ -42,7 +42,7 @@ export function Block({ children, className = "" }: { readonly children: ReactNo
 
 export function Badge({ tone, children }: { readonly tone: Tone; readonly children: ReactNode }) {
   return (
-    <span className={`inline-block whitespace-nowrap rounded-sm px-2 py-0.5 text-[13px] font-medium ${BADGE_TONE[tone]}`}>
+    <span className={`inline-block rounded-sm px-2 py-0.5 md:whitespace-nowrap text-[13px] font-medium ${BADGE_TONE[tone]}`}>
       {children}
     </span>
   );
@@ -66,7 +66,12 @@ export function Figure({ label, value, tone = "neutral", note }: {
 export interface Column {
   readonly label: string;
   readonly numeric?: boolean;
+  /** "hide": a coluna some abaixo de 768px (a leitura completa fica no desktop). */
+  readonly narrow?: "hide";
 }
+
+/** Classe das células das colunas com `narrow: "hide"`. */
+export const hideNarrow = "hidden md:table-cell";
 
 export function Table({ columns, caption, children }: {
   readonly columns: readonly Column[];
@@ -83,7 +88,7 @@ export function Table({ columns, caption, children }: {
               <th
                 key={`${i}:${c.label}`}
                 scope="col"
-                className={`whitespace-nowrap px-4 py-3 text-[13px] font-medium text-muted ${c.numeric === true ? "text-right" : ""}`}
+                className={`px-2 py-3 text-[13px] font-medium text-muted md:whitespace-nowrap md:px-4 ${c.numeric === true ? "text-right" : ""} ${c.narrow === "hide" ? hideNarrow : ""}`}
               >
                 {c.label}
               </th>
@@ -96,7 +101,7 @@ export function Table({ columns, caption, children }: {
   );
 }
 
-export const cell = "whitespace-nowrap px-4 py-3";
+export const cell = "px-2 py-3 md:whitespace-nowrap md:px-4";
 export const numCell = `${cell} num text-right`;
 
 /* ---------- formulários ---------- */

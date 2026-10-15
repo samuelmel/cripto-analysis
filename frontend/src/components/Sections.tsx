@@ -31,7 +31,8 @@ import {
 import { CoinLabel } from "./CoinLabel";
 import { REASON_ICON, STAGE_ICON, VERDICT_ICON } from "./icons";
 import { Sparkline } from "./Sparkline";
-import { Badge, Block, Figure, TEXT_TONE, Table, cell, numCell } from "./ui";
+import { Term } from "./Glossary";
+import { Badge, Block, Figure, TEXT_TONE, Table, cell, hideNarrow, numCell } from "./ui";
 
 /* ---------- hoje ---------- */
 
@@ -109,7 +110,7 @@ function FngScale({ value }: { readonly value: number | null }) {
 
 /* ---------- moedas ---------- */
 
-function DistanceBar({ pct }: { readonly pct: number | null }) {
+export function DistanceBar({ pct }: { readonly pct: number | null }) {
   if (pct === null) return <span className="text-muted">—</span>;
   const width = (Math.min(Math.abs(pct), 60) / 60) * 100; // ±60% enche metade da barra
   const below = pct < 0;
@@ -149,8 +150,9 @@ export function MarketTable({ rows, sparks, recommended, selected, onSelect }: {
     <Table
       caption="Todas as moedas monitoradas e a recomendação da regra de tendência para Bitcoin e Ethereum"
       columns={[
-        { label: "Moeda" }, { label: "O que fazer" }, { label: "Preço", numeric: true }, { label: "Últimos 90 dias" },
-        { label: "Distância da média de 200 dias", numeric: true }, { label: "Tendência da moeda" },
+        { label: "Moeda" }, { label: "O que fazer" }, { label: "Preço", numeric: true },
+        { label: "Últimos 90 dias", narrow: "hide" },
+        { label: "Distância da média de 200 dias", numeric: true, narrow: "hide" }, { label: "Tendência", narrow: "hide" },
       ]}
     >
       {rows.map((s) => {
@@ -200,9 +202,9 @@ export function MarketTable({ rows, sparks, recommended, selected, onSelect }: {
               {s.panic && <span className="ml-2 text-[13px] text-warning">em pânico</span>}
             </td>
             <td className={numCell}>{fmt.price(s.close)}</td>
-            <td className={cell}><Sparkline values={sparks.get(s.symbol) ?? []} label={`Preço de ${coinName(s.symbol)}`} /></td>
-            <td className={numCell}><DistanceBar pct={distance} /></td>
-            <td className={cell}><Trend pct={distance} /></td>
+            <td className={`${cell} ${hideNarrow}`}><Sparkline values={sparks.get(s.symbol) ?? []} label={`Preço de ${coinName(s.symbol)}`} /></td>
+            <td className={`${numCell} ${hideNarrow}`}><DistanceBar pct={distance} /></td>
+            <td className={`${cell} ${hideNarrow}`}><Trend pct={distance} /></td>
           </tr>
         );
       })}
@@ -238,18 +240,18 @@ export function TradeList({ trades, coin, recommended }: {
     <Table
       caption={`Cada período em que a regra mandou comprar ou segurar ${coin}`}
       columns={[
-        { label: "Entrada em" }, { label: "Preço", numeric: true }, { label: "Venda simulada em" },
-        { label: "Motivo" }, { label: "Resultado", numeric: true }, { label: "Dias", numeric: true },
+        { label: "Entrada em" }, { label: "Preço", numeric: true, narrow: "hide" }, { label: "Venda simulada em" },
+        { label: "Motivo" }, { label: "Resultado", numeric: true }, { label: "Dias", numeric: true, narrow: "hide" },
       ]}
     >
       {trades.toSorted((a, b) => b.entry_ts.getTime() - a.entry_ts.getTime()).map((t) => (
         <tr key={t.trade_id} className="border-b border-hairline">
           <td className={cell}>{fmt.day(t.entry_ts)}</td>
-          <td className={numCell}>{fmt.price(t.entry_price)}</td>
+          <td className={`${numCell} ${hideNarrow}`}>{fmt.price(t.entry_price)}</td>
           <td className={cell}>{t.status === "ABERTA" ? <span className="text-muted">ainda aberta</span> : fmt.day(t.exit_ts)}</td>
           <td className={cell}><ReasonCell reason={t.exit_reason} /></td>
           <td className={`${numCell} ${TEXT_TONE[signTone(t.return_pct)]}`}>{fmt.pct(t.return_pct)}</td>
-          <td className={numCell}>{t.days_held ?? "—"}</td>
+          <td className={`${numCell} ${hideNarrow}`}>{t.days_held ?? "—"}</td>
         </tr>
       ))}
     </Table>
@@ -270,8 +272,8 @@ function PerformanceTable({ rows, universe, period }: {
     <Table
       caption={`Resultado da carteira no período ${label}, com taxa de 0,1% em cada compra e venda`}
       columns={[
-        { label }, { label: "Retorno total", numeric: true }, { label: "Por ano", numeric: true },
-        { label: "Pior queda", numeric: true }, { label: "Tempo comprado", numeric: true },
+        { label }, { label: "Retorno total", numeric: true }, { label: "Por ano", numeric: true, narrow: "hide" },
+        { label: "Pior queda", numeric: true }, { label: "Tempo comprado", numeric: true, narrow: "hide" },
       ]}
     >
       {STRATEGY_ORDER.flatMap((strategy) => {
@@ -281,9 +283,9 @@ function PerformanceTable({ rows, universe, period }: {
           <tr key={strategy} className="border-b border-hairline">
             <td className={`${cell} ${strategy === "TENDENCIA" ? "font-medium" : ""}`}>{STRATEGY_NAME[strategy]}</td>
             <td className={`${numCell} ${TEXT_TONE[signTone(p.total_return_pct)]}`}>{fmt.pct(p.total_return_pct, 0)}</td>
-            <td className={`${numCell} ${TEXT_TONE[signTone(p.annual_return_pct)]}`}>{fmt.pct(p.annual_return_pct)}</td>
+            <td className={`${numCell} ${hideNarrow} ${TEXT_TONE[signTone(p.annual_return_pct)]}`}>{fmt.pct(p.annual_return_pct)}</td>
             <td className={`${numCell} text-critical`}>{fmt.pct(p.max_drawdown_pct)}</td>
-            <td className={numCell}>{fmt.num(p.invested_pct, 0)}%</td>
+            <td className={`${numCell} ${hideNarrow}`}>{fmt.num(p.invested_pct, 0)}%</td>
           </tr>,
         ];
       })}
@@ -346,6 +348,11 @@ export function BacktestPanel({ performance, trades }: {
         )}
       </Block>
 
+      <p className="mt-4 max-w-[72ch] text-[13px] text-muted">
+        A <Term id="drawdown">pior queda</Term> é o que importa para aguentar a <Term id="tendencia">tendência</Term> sem desistir. O{" "}
+        <Term id="sharpe">Sharpe</Term> do laboratório (aba Pesquisa) compara retorno e risco.
+      </p>
+
       <h3 className="mt-8 font-medium">Bitcoin e Ethereum: o que as regras teriam rendido</h3>
       <div className="mt-3 space-y-4">
         <PerformanceTable rows={performance} universe="PRINCIPAIS" period="TREINO" />
@@ -376,8 +383,8 @@ export function BacktestPanel({ performance, trades }: {
           caption="Operações da regra de tendência agrupadas pelo motivo da venda"
           columns={[
             { label: "Motivo da venda" }, { label: "Operações", numeric: true }, { label: "Com lucro", numeric: true },
-            { label: "Resultado médio", numeric: true }, { label: "Pior", numeric: true }, { label: "Melhor", numeric: true },
-            { label: "Dias até vender", numeric: true },
+            { label: "Resultado médio", numeric: true }, { label: "Pior", numeric: true, narrow: "hide" }, { label: "Melhor", numeric: true, narrow: "hide" },
+            { label: "Dias até vender", numeric: true, narrow: "hide" },
           ]}
         >
           {EXIT_REASONS.flatMap((reason) => {
@@ -389,9 +396,9 @@ export function BacktestPanel({ performance, trades }: {
                 <td className={numCell}>{x.count}</td>
                 <td className={numCell}>{fmt.num(x.winRate, 0)}%</td>
                 <td className={`${numCell} ${TEXT_TONE[signTone(x.mean)]}`}>{fmt.pct(x.mean)}</td>
-                <td className={`${numCell} ${TEXT_TONE[signTone(x.worst)]}`}>{fmt.pct(x.worst)}</td>
-                <td className={`${numCell} ${TEXT_TONE[signTone(x.best)]}`}>{fmt.pct(x.best)}</td>
-                <td className={numCell}>{fmt.num(x.meanDays, 0)}</td>
+                <td className={`${numCell} ${hideNarrow} ${TEXT_TONE[signTone(x.worst)]}`}>{fmt.pct(x.worst)}</td>
+                <td className={`${numCell} ${hideNarrow} ${TEXT_TONE[signTone(x.best)]}`}>{fmt.pct(x.best)}</td>
+                <td className={`${numCell} ${hideNarrow}`}>{fmt.num(x.meanDays, 0)}</td>
               </tr>,
             ];
           })}

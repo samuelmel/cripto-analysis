@@ -1,4 +1,20 @@
-import type { Alert, DailySignal, ExitReason, HistoryPoint, Performance, Period, Portfolio, Position, Stage, Strategy, Trade } from "../types/signals";
+import type {
+  Alert,
+  DailySignal,
+  ExitReason,
+  Forecast,
+  HistoryPoint,
+  LabPeriod,
+  LabResult,
+  Performance,
+  Period,
+  Portfolio,
+  Position,
+  SourceEvent,
+  Stage,
+  Strategy,
+  Trade,
+} from "../types/signals";
 
 /* ---------- estatística do backtest ---------- */
 
@@ -267,3 +283,137 @@ export function parseAmount(text: string): number | null {
 
 /** Número para um campo de texto no padrão brasileiro, sem separador de milhar ("2421,6"). */
 export const toInput = (n: number): string => String(n).replace(".", ",");
+
+/* ---------- painel: estado, avisos, cartões e previsão ---------- */
+
+const DAY_MS = 86_400_000;
+
+/** Variação do último fechamento contra o de `days` dias antes, em %. */
+export function changeOver(history: readonly HistoryPoint[], symbol: string, days: number): number | null {
+  const own = history.filter((h) => h.symbol === symbol);
+  const last = own.at(-1);
+  const before = own.at(-1 - days);
+  return last === undefined || before === undefined || before.close === 0 ? null : (last.close / before.close - 1) * 100;
+}
+
+/** Quantos dias o último candle está atrás do último candle fechado esperado (ontem, em UTC). */
+export function dataLagDays(lastCandle: Date | null, now: Date): number | null {
+  if (lastCandle === null) return null;
+  const expected = Math.floor(now.getTime() / DAY_MS) * DAY_MS - DAY_MS;
+  const last = Math.floor(lastCandle.getTime() / DAY_MS) * DAY_MS;
+  return Math.round((expected - last) / DAY_MS);
+}
+
+/** O que o painel mostra de cada sinal: rótulo, tom e a razão em uma frase. */
+export interface SignalView {
+  readonly text: string;
+  readonly tone: Tone;
+  readonly stage: Stage;
+  readonly why: string;
+}
+
+export function signalView(s: DailySignal): SignalView {
+  if (s.stage === "INDISPONÍVEL") {
+    return { text: "Sem dados confiáveis", tone: "warning", stage: s.stage, why: s.stage_reason ?? "Dado desatualizado ou insuficiente." };
+  }
+  if (s.alert === "VENDER AGORA") {
+    return { text: "Vender", tone: "critical", stage: s.stage, why: "Saiu da tendência de alta hoje." };
+  }
+  const label = STAGE_LABEL[s.stage];
+  const why: Record<Stage, string> = {
+    COMPRAR: "Fechou acima da média de 200 dias, e o Bitcoin também.",
+    PREPARAR: "Perto de voltar à tendência de alta: até 3% abaixo da média e subindo.",
+    NEUTRO: "Abaixo da média de 200 dias, ou o Bitcoin está abaixo da dele.",
+    INDISPONÍVEL: "",
+  };
+  return { text: label.text, tone: label.tone, stage: s.stage, why: why[s.stage] };
+}
+
+export interface Notice {
+  readonly kind: "panic" | "stale" | "collect";
+  readonly tone: Tone;
+  readonly title: string;
+  readonly text: string;
+}
+
+/** Avisos do dia, separados das recomendações: pânico, dado desatualizado e falha de coleta. */
+export function notices(signals: readonly DailySignal[], sources: readonly SourceEvent[], lag: number | null): readonly Notice[] {
+  const out: Notice[] = [];
+  const panic = signals.filter((s) => s.panic).map((s) => coinName(s.symbol));
+  if (panic.length > 0) {
+    out.push({
+      kind: "panic",
+      tone: "warning",
+      title: `Mercado em pânico em ${list(panic)}`,
+      text: "Queda forte com medo no mercado. É só um aviso: comprar no pânico perdeu dinheiro nos testes.",
+    });
+  }
+  const stale = signals.filter((s) => s.stage === "INDISPONÍVEL");
+  for (const s of stale) {
+    out.push({
+      kind: "stale",
+      tone: "warning",
+      title: `${coinName(s.symbol)} sem dados confiáveis`,
+      text: `${s.stage_reason ?? "Dado desatualizado."} Sem sinal para esta moeda.`,
+    });
+  }
+  if (lag !== null && lag > 0 && stale.length === 0) {
+    out.push({
+      kind: "stale",
+      tone: "warning",
+      title: "Dados com atraso",
+      text: `O último candle está ${plural(lag, "dia", "dias")} atrás do esperado. Os sinais valem com ressalva.`,
+    });
+  }
+  for (const e of sources.filter((x) => x.status === "erro")) {
+    out.push({
+      kind: "collect",
+      tone: "critical",
+      title: `Falha na coleta: ${e.source} (${e.scope === "MARKET" ? "mercado" : coinName(e.scope)})`,
+      text: e.detail === "" ? "A fonte não respondeu." : e.detail,
+    });
+  }
+  return out;
+}
+
+/** Última atualização das fontes: quando a coleta mais recente aconteceu e quantas falharam. */
+export function lastCollection(sources: readonly SourceEvent[]): { readonly at: Date | null; readonly failures: number } {
+  const at = sources.reduce<Date | null>((m, e) => (m === null || e.updated_at > m ? e.updated_at : m), null);
+  return { at, failures: sources.filter((e) => e.status === "erro").length };
+}
+
+export const NO_EDGE = "sem vantagem demonstrada sobre o preço de hoje";
+
+/** Previsão do modelo (não do baseline) de uma moeda, do horizonte curto ao longo. */
+export const modelForecast = (rows: readonly Forecast[], symbol: string): readonly Forecast[] =>
+  rows.filter((f) => f.symbol === symbol && f.role === "MODELO").toSorted((a, b) => a.horizon_days - b.horizon_days);
+
+export const horizonName = (days: number): string => (days === 1 ? "Amanhã" : `Em ${days} dias`);
+
+/** Posição de um valor numa escala simétrica em torno de zero, de 0 a 100 (50 = zero). */
+export const bandPercent = (value: number, limit: number): number => 50 + (Math.max(-limit, Math.min(limit, value)) / limit) * 50;
+
+/** Resultados do laboratório de um universo e período, sem as linhas de sorteio, do maior Sharpe ao menor. */
+export function labRows(rows: readonly LabResult[], universe: Portfolio, period: LabPeriod): readonly LabResult[] {
+  return rows
+    .filter((r) => r.universe === universe && r.period === period && !r.strategy.startsWith("Aleatória"))
+    .toSorted((a, b) => (b.sharpe ?? -Infinity) - (a.sharpe ?? -Infinity));
+}
+
+/** Data e hora no fuso de Fortaleza, ex.: "15 out 2026 21:10". */
+export function fmtDateTime(d: Date | null): string {
+  if (d === null) return "—";
+  const f = new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "America/Fortaleza",
+  });
+  return f.format(d).replace(/ de /g, " ").replace(".", "").replace(",", "");
+}
+
+/** Número com casas fixas; Infinity (nenhuma operação perdedora) vira texto. */
+export const fmtRatio = (n: number | null, digits = 1): string =>
+  n === null ? "—" : n === Infinity ? "sem perdas" : nf({ minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);

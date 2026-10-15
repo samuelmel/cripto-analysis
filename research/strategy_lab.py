@@ -49,6 +49,7 @@ from src.transformers.trade_simulator import run_portfolio  # noqa: E402
 from src.transformers.universe import select_universe  # noqa: E402
 
 OUT_DIR = Path("data/research")
+PUBLIC_DIR = Path("frontend/public")  # cópia dos resultados para a aba "Pesquisa" do painel (opcional)
 RANDOM_SIMS = 200
 RANDOM_FIRST_SEED = 1000
 DCA_EVERY_DAYS = 7
@@ -177,6 +178,7 @@ def main() -> int:
     results, grid = run_lab(history, market_from_candles(candles), {"PRINCIPAIS": RECOMMENDED, "TODAS": kept})
     write_parquet(results, OUT_DIR / "strategy_lab.parquet")
     write_parquet(grid, OUT_DIR / "strategy_lab_grid.parquet")
+    write_parquet(results, PUBLIC_DIR / "strategy_lab.parquet", compression="snappy")
     pd.set_option("display.width", 250)
     pd.set_option("display.max_columns", 30)
     print(show(results))

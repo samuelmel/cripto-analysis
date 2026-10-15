@@ -14,6 +14,7 @@ Publica em frontend/public/:
     backtest.parquet        cada operação histórica da regra de tendência (BTC e ETH)
     performance.parquet     carteira: tendência x comprar e segurar x pânico, em treino e teste
     forecast.parquet        previsão de 1, 7 e 30 dias de BTC e ETH (faixa P10–P90) contra o baseline
+    sources.parquet         quando e como cada fonte foi atualizada (alerta de falha de coleta)
     positions.parquet       suas posições com a recomendação VENDER / SEGURAR
 """
 
@@ -44,7 +45,7 @@ from .loaders.market_store import (
 )
 from .loaders.parquet_loader import write_daily_signals, write_parquet
 from .loaders.positions_store import read_positions
-from .loaders.source_log import write_source_log
+from .loaders.source_log import read_source_log, write_source_log
 from .transformers.anomaly_detector import classify_history, detect
 from .transformers.forecast import forecast_table
 from .transformers.notification import format_error, format_report, redact, validate_messages
@@ -172,6 +173,7 @@ def analyze(today: pd.Timestamp) -> dict[str, pd.DataFrame]:
     write_parquet(trades, PUBLIC_DIR / "backtest.parquet")
     write_parquet(performance, PUBLIC_DIR / "performance.parquet")
     write_parquet(forecast, PUBLIC_DIR / "forecast.parquet")
+    write_parquet(read_source_log(), PUBLIC_DIR / "sources.parquet")
     dropped = pd.DataFrame({"symbol": list(selection.dropped), "reason": list(selection.dropped.values())})
     return {
         "signals": signals, "backtest": trades, "performance": performance, "positions": positions, "forecast": forecast,

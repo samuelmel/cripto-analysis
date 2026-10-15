@@ -6,6 +6,8 @@
  *   Trade         trade_simulator.TRADE_SCHEMA     (backtest.parquet)
  *   Performance   trade_simulator.PERFORMANCE_SCHEMA (performance.parquet)
  *   Forecast      forecast.FORECAST_SCHEMA         (forecast.parquet)
+ *   SourceEvent   loaders.source_log.SOURCE_LOG_SCHEMA (sources.parquet)
+ *   LabResult     research/strategy_lab.RESULT_SCHEMA (strategy_lab.parquet, opcional)
  *   Position      position_advisor.POSITION_SCHEMA (positions.parquet)
  */
 
@@ -140,6 +142,46 @@ export interface Forecast {
   readonly verdict: string;
 }
 
+export const LAB_PERIODS = ["TREINO", "VALIDACAO", "TESTE"] as const;
+export type LabPeriod = (typeof LAB_PERIODS)[number];
+
+export const SOURCE_STATUSES = ["ok", "erro"] as const;
+export type SourceStatus = (typeof SOURCE_STATUSES)[number];
+
+/** Uma linha de sources.parquet: a última atualização de uma fonte para um escopo (símbolo ou MARKET). */
+export interface SourceEvent {
+  readonly source: string;
+  readonly scope: string;
+  readonly updated_at: Date;
+  readonly status: SourceStatus;
+  readonly rows: number;
+  readonly last_data_ts: Date | null;
+  readonly detail: string;
+}
+
+/** Uma linha de strategy_lab.parquet: uma estratégia numa carteira e num período (treino, validação ou teste). */
+export interface LabResult {
+  readonly universe: Portfolio;
+  readonly strategy: string;
+  readonly params: string;
+  readonly period: LabPeriod;
+  readonly selected_on: string;
+  readonly start: Date;
+  readonly end: Date;
+  readonly total_return_pct: number;
+  readonly annual_return_pct: number;
+  readonly max_drawdown_pct: number;
+  readonly sharpe: number | null;
+  readonly invested_pct: number;
+  readonly n_trades: number | null;
+  readonly win_rate_pct: number | null;
+  readonly profit_factor: number | null;
+  readonly turnover_per_year: number | null;
+  readonly fee_cost_pct: number | null;
+  readonly beats_random_pct: number | null;
+  readonly random_sims: number | null;
+}
+
 export interface Position {
   readonly position_id: string;
   readonly symbol: string;
@@ -178,6 +220,9 @@ export interface Dashboard {
   readonly history: readonly HistoryPoint[];
   readonly trades: readonly Trade[];
   readonly performance: readonly Performance[];
+  readonly forecast: readonly Forecast[];
+  readonly sources: readonly SourceEvent[];
+  readonly lab: readonly LabResult[];
   readonly positions: readonly Position[];
   readonly closed: readonly ClosedPosition[];
 }
