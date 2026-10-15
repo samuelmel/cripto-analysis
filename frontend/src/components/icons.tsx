@@ -1,12 +1,10 @@
 import {
   CheckCircle,
-  Clock,
+  CurrencyBtc,
   Eye,
-  Fire,
   HandCoins,
-  LockKey,
   ShieldWarning,
-  Target,
+  TrendDown,
   WarningCircle,
   type Icon,
 } from "@phosphor-icons/react";
@@ -17,10 +15,8 @@ import type { ExitReason, Stage } from "../types/signals";
 
 export const REASON_ICON: Record<ExitReason, Icon> = {
   STOP: ShieldWarning,
-  "PROTEGER LUCRO": LockKey,
-  ALVO: Target,
-  SOBRECOMPRADO: Fire,
-  TEMPO: Clock,
+  TENDENCIA: TrendDown,
+  MERCADO: CurrencyBtc,
 };
 
 export const STAGE_ICON: Record<Stage, Icon | null> = {

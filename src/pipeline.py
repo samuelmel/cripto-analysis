@@ -11,7 +11,8 @@ Fear & Greed completo (desde 2018). A primeira execução faz o download complet
 Publica em frontend/public/:
     daily_signals.parquet   snapshot do dia com estágio e alertas
     history.parquet         histórico de preço, indicadores e estágio (gráficos)
-    backtest.parquet        cada sinal histórico de COMPRAR simulado com as regras de saída
+    backtest.parquet        cada operação histórica da regra de tendência (BTC e ETH)
+    performance.parquet     carteira: tendência x comprar e segurar x pânico, em treino e teste
     positions.parquet       suas posições com a recomendação VENDER / SEGURAR
 """
 
@@ -25,7 +26,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .config import UNIVERSE
+from .config import FEE_PER_SIDE, RECOMMENDED, TEST_PERIOD, TRAIN_PERIOD, UNIVERSE
 from .extractors import BaseExtractor, BinanceAdapter, CoinGeckoMarketAdapter, ExtractorError, FearGreedAdapter
 from .loaders.history_store import read_previous, write_snapshot
 from .loaders.market_store import (
@@ -40,14 +41,27 @@ from .loaders.market_store import (
 from .loaders.parquet_loader import write_daily_signals, write_parquet
 from .loaders.positions_store import read_positions
 from .transformers.anomaly_detector import classify_history, detect
-from .transformers.daily_alerts import ALERT_BUY, ALERT_EXIT, ALERT_WATCH, compare_with_previous
+from .transformers.daily_alerts import ALERT_BUY, ALERT_EXIT, ALERT_SELL, ALERT_WATCH, compare_with_previous
 from .transformers.position_advisor import ACTION_SELL, advise, realized
-from .transformers.trade_simulator import STRATEGY_SIGNAL, backtest
+from .transformers.trade_simulator import (
+    PERIOD_TEST,
+    PERIOD_TRAIN,
+    STRATEGY_HOLD,
+    STRATEGY_TREND,
+    backtest,
+    performance_summary,
+)
 
 logger = logging.getLogger("pipeline")
 
 HISTORY_START = datetime(2017, 1, 1, tzinfo=timezone.utc)  # Binance spot começa em 2017
 PUBLIC_DIR = Path("frontend/public")
+
+PERIODS: dict[str, tuple[pd.Timestamp, pd.Timestamp]] = {
+    PERIOD_TRAIN: (pd.Timestamp(TRAIN_PERIOD[0], tz="UTC"), pd.Timestamp(TRAIN_PERIOD[1], tz="UTC")),
+    PERIOD_TEST: (pd.Timestamp(TEST_PERIOD[0], tz="UTC"), pd.Timestamp(TEST_PERIOD[1], tz="UTC")),
+}
+PORTFOLIOS: dict[str, tuple[str, ...]] = {"PRINCIPAIS": RECOMMENDED, "TODAS": tuple(UNIVERSE)}
 
 
 def _optional(adapter: BaseExtractor, start: datetime | None, now: datetime) -> pd.DataFrame:
@@ -89,16 +103,21 @@ def analyze() -> dict[str, pd.DataFrame]:
     history = classify_history(candles, read_fng())
     today = detect(candles, read_coingecko(), read_fng(), history=history)
     day = pd.Timestamp(today["timestamp"].max())
-    signals = compare_with_previous(today, read_previous(day))
+    # O dia anterior vem do próprio histórico recalculado: o alerta segue a regra atual mesmo que
+    # os snapshots antigos em data/signals tenham sido gerados por uma regra diferente.
+    previous = history[history["timestamp"].eq(day - pd.Timedelta(days=1))]
+    signals = compare_with_previous(today, previous if not previous.empty else read_previous(day))
 
-    trades = backtest(history)
+    trades = backtest(history, RECOMMENDED)
+    performance = performance_summary(history, PORTFOLIOS, PERIODS, FEE_PER_SIDE)
     positions = _publish_positions(history)
 
     write_snapshot(signals, day)
     write_daily_signals(signals)
     write_parquet(history, PUBLIC_DIR / "history.parquet")
     write_parquet(trades, PUBLIC_DIR / "backtest.parquet")
-    return {"signals": signals, "backtest": trades, "positions": positions}
+    write_parquet(performance, PUBLIC_DIR / "performance.parquet")
+    return {"signals": signals, "backtest": trades, "performance": performance, "positions": positions}
 
 
 def _publish_positions(history: pd.DataFrame) -> pd.DataFrame:
@@ -118,21 +137,28 @@ def refresh_positions() -> pd.DataFrame:
 
 
 def report(result: dict[str, pd.DataFrame]) -> str:
-    signals, backtest, positions = result["signals"], result["backtest"], result["positions"]
+    signals, trades, performance, positions = result["signals"], result["backtest"], result["performance"], result["positions"]
     day = pd.Timestamp(signals["timestamp"].max())
     lines = [f"Ciclo {day:%Y-%m-%d} · {len(signals)} ativos · F&G {signals['fng_value'].iloc[0]}"]
-    for label in (ALERT_BUY, ALERT_WATCH, ALERT_EXIT):
+    for label in (ALERT_BUY, ALERT_SELL, ALERT_WATCH, ALERT_EXIT):
         hits = signals.loc[signals["alert"].eq(label).fillna(False), "symbol"].tolist()
         if hits:
             lines.append(f"  {label}: {', '.join(hits)}")
     lines.append(f"  estágios: {signals['stage'].value_counts().to_dict()}")
+    panic = signals.loc[signals["panic"], "symbol"].tolist()
+    if panic:
+        lines.append(f"  mercado em pânico (só alerta, sem recomendação): {', '.join(panic)}")
 
-    closed = backtest[backtest["status"].eq("FECHADA")]
-    for strategy, part in closed.groupby("strategy"):
-        label = "sinal COMPRAR" if strategy == STRATEGY_SIGNAL else "referência semanal"
+    closed = trades[trades["status"].eq("FECHADA")]
+    lines.append(
+        f"  operações da tendência (BTC/ETH): {len(closed)} fechadas · acerto {closed['return_pct'].gt(0).mean() * 100:.0f}% · "
+        f"retorno médio {closed['return_pct'].mean():+.1f}%"
+    )
+    main = performance[performance["universe"].eq("PRINCIPAIS") & performance["strategy"].isin([STRATEGY_TREND, STRATEGY_HOLD])]
+    for _, r in main.iterrows():
         lines.append(
-            f"  backtest {label}: {len(part)} operações · acerto {part['return_pct'].gt(0).mean() * 100:.0f}% · "
-            f"retorno médio {part['return_pct'].mean():+.1f}% · mediana {part['return_pct'].median():+.1f}%"
+            f"  carteira BTC+ETH {r['period'].lower()} · {r['strategy']}: {r['total_return_pct']:+.1f}% "
+            f"({r['annual_return_pct']:+.1f}%/ano) · pior queda {r['max_drawdown_pct']:.1f}%"
         )
     for _, p in positions.iterrows():
         tag = f"VENDER ({p['reason']})" if p["action"] == ACTION_SELL else "SEGURAR"

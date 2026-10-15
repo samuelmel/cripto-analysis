@@ -13,6 +13,7 @@ colors:
   signal-active: "#104281"
   series-price: "#2a78d6"
   series-average: "#eb6834"
+  series-trend: "#4a3aa7"   # 3ª série (média de 200 dias)
   good: "#006300"        # texto de ganho / SEGURAR · marca #0ca30c
   good-bg: "#e3f1e3"
   critical: "#b42d2d"    # texto de perda / VENDER · marca #d03b3b
@@ -37,7 +38,7 @@ Ferramenta pessoal de monitoramento de criptomoedas para uma pessoa que não dom
 - **ground / surface** — cinza-claro neutro (não creme) para a página e quase-branco para blocos; o contraste entre os dois separa áreas sem sombra.
 - **ink / muted** — texto principal e secundário, ambos acima de 4.5:1.
 - **signal** (azul profundo) — um único trabalho: indicar o que é interativo ou selecionado (moeda escolhida, foco, links).
-- **series-price / series-average** — azul e laranja da paleta categórica validada (`validate_palette.js`: CVD ΔE 24.7, todas as checagens passam). Usados só no gráfico.
+- **series-price / series-average / series-trend** — azul, laranja e violeta da paleta categórica validada (`validate_palette.js --pairs all`: CVD ΔE ≥ 13, normal ≥ 16, contraste ≥ 3:1, todas as checagens passam). Usados só no gráfico, sempre com legenda e valor do dia ao lado.
 - **good / critical / warning** — status. Sempre acompanhados de texto ("Vender", "Segurar", "Ficar de olho"); nunca a cor sozinha. Verde/vermelho também significam ganho/perda em números com sinal + ou −.
 
 ## Typography
@@ -64,7 +65,7 @@ Plano. Nenhuma sombra. Blocos se separam por fundo (surface sobre ground) e hair
 - **Tabela** — cabeçalho em muted 13px peso 500, linhas com hairline, linha selecionável com foco visível.
 - **Botão** — principal: fundo signal, texto surface (hover/active escurecem); secundário: hairline; perigo: borda e texto critical; fantasma: só texto. Ícone de 18px à esquerda quando ajuda a reconhecer a ação.
 - **Seletor de moeda** — logo + ticker, hairline; selecionado = borda signal e fundo signal-bg.
-- **Ícones** — Phosphor, peso regular, sem moldura ou quadradinho; cada ícone tem um significado fixo (escudo = limite de perda, cadeado = garantir lucro, alvo = preço médio, fogo = subiu demais, relógio = tempo, olho = ficar de olho, mão com moedas = zona de compra).
+- **Ícones** — Phosphor, peso regular, sem moldura ou quadradinho; cada ícone tem um significado fixo (escudo = limite de perda, seta de queda = tendência acabou, moeda Bitcoin = mercado virou, olho = ficar de olho, mão com moedas = comprar ou segurar).
 - **Logos das moedas** — SVG oficial (cryptocurrency-icons, CC0) em 20–36px, sempre ao lado do ticker.
 
 ## Do's and Don'ts

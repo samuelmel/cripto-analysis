@@ -22,6 +22,7 @@ const C = {
   axis: "#e1e0d9",
   price: "#2a78d6",
   average: "#eb6834",
+  trend: "#4a3aa7",
   good: "#0ca30c",
   critical: "#d03b3b",
   ink: "#121417",
@@ -33,6 +34,7 @@ interface Readout {
   readonly date: Date;
   readonly close: number;
   readonly sma: number | null;
+  readonly sma200: number | null;
 }
 
 interface Props {
@@ -41,12 +43,12 @@ interface Props {
   readonly positions: readonly Position[];
 }
 
-/** Preço e média de 90 dias, com sinais passados, saídas simuladas e suas compras. */
+/** Preço e médias de 90 e 200 dias, com entradas e saídas da regra de tendência e suas compras. */
 export function PriceChart({ history, trades, positions }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const last = history.at(-1);
   const [readout, setReadout] = useState<Readout | null>(null);
-  const shown: Readout | null = readout ?? (last === undefined ? null : { date: last.timestamp, close: last.close, sma: last.sma_90 });
+  const shown: Readout | null = readout ?? (last === undefined ? null : { date: last.timestamp, close: last.close, sma: last.sma_90, sma200: last.sma_200 });
 
   useEffect(() => {
     const el = container.current;
@@ -81,6 +83,11 @@ export function PriceChart({ history, trades, positions }: Props) {
     });
     average.setData(history.flatMap((h) => (h.sma_90 === null ? [] : [{ time: toTime(h.timestamp), value: h.sma_90 }])));
 
+    const trend = chart.addSeries(LineSeries, {
+      color: C.trend, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+    });
+    trend.setData(history.flatMap((h) => (h.sma_200 === null ? [] : [{ time: toTime(h.timestamp), value: h.sma_200 }])));
+
     const markers: SeriesMarker<UTCTimestamp>[] = [
       ...trades.flatMap((t): SeriesMarker<UTCTimestamp>[] => [
         { time: toTime(t.entry_ts), position: "belowBar", color: C.price, shape: "arrowUp", size: 1 },
@@ -103,14 +110,14 @@ export function PriceChart({ history, trades, positions }: Props) {
 
     chart.subscribeCrosshairMove((param) => {
       const h = param.time === undefined ? undefined : byTime.get(param.time as UTCTimestamp);
-      setReadout(h === undefined ? null : { date: h.timestamp, close: h.close, sma: h.sma_90 });
+      setReadout(h === undefined ? null : { date: h.timestamp, close: h.close, sma: h.sma_90, sma200: h.sma_200 });
     });
 
     chart.timeScale().fitContent();
     return () => chart.remove();
   }, [history, trades, positions]);
 
-  const dist = shown === null ? null : distanceFromAverage(shown.close, shown.sma);
+  const dist = shown === null ? null : distanceFromAverage(shown.close, shown.sma200);
 
   return (
     <figure>
@@ -124,14 +131,18 @@ export function PriceChart({ history, trades, positions }: Props) {
           <span aria-hidden className="inline-block h-0.5 w-4 bg-series-average" />
           Média de 90 dias <strong className="num font-medium">{fmt.price(shown?.sma ?? null)}</strong>
         </span>
+        <span className="flex items-center gap-2">
+          <span aria-hidden className="inline-block h-0.5 w-4 bg-series-trend" />
+          Média de 200 dias <strong className="num font-medium">{fmt.price(shown?.sma200 ?? null)}</strong>
+        </span>
         <span className="text-muted">
-          {dist === null ? "" : `preço ${fmt.pct(dist)} ${dist < 0 ? "abaixo" : "acima"} da média`}
+          {dist === null ? "" : `preço ${fmt.num(Math.abs(dist), 1)}% ${dist < 0 ? "abaixo" : "acima"} da média de 200 dias`}
         </span>
       </figcaption>
       <div ref={container} className="w-full" />
       <p className="mt-3 text-[13px] text-muted">
-        Setas azuis para cima: dias em que o sinal de compra disparou. Setas para baixo: quando a regra de venda teria vendido, com o
-        resultado (verde lucro, vermelho perda). Círculo preto: suas compras. O eixo de preço é proporcional: a mesma
+        Setas azuis para cima: dias em que a regra mandou comprar (preço e Bitcoin acima da média de 200 dias). Setas para baixo:
+        quando a regra mandou vender, com o resultado (verde lucro, vermelho perda). A linha violeta é a média de 200 dias, a que decide tudo. Círculo preto: suas compras. O eixo de preço é proporcional: a mesma
         distância vertical representa a mesma variação em %. Passe o mouse para ver o preço de cada dia.
       </p>
     </figure>

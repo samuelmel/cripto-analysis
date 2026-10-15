@@ -1,20 +1,33 @@
 import { Gauge, HandCoins, Scales, TrendDown, TrendUp } from "@phosphor-icons/react";
 import {
+  PERIOD_NAME,
   REASON_SHORT,
   RULE_TEXT,
   STAGE_LABEL,
+  STRATEGY_NAME,
   byReason,
   coinName,
   distanceFromAverage,
   fmt,
-  momentumLabel,
+  performanceOf,
+  periodYears,
   signTone,
-  signalHasEdge,
   summarize,
+  trendVerdict,
   type Tone,
+  type TrendVerdict,
   type Verdict,
 } from "../data/analytics";
-import { EXIT_REASONS, type DailySignal, type Trade } from "../types/signals";
+import {
+  EXIT_REASONS,
+  type DailySignal,
+  type ExitReason,
+  type Performance,
+  type Period,
+  type Portfolio,
+  type Strategy,
+  type Trade,
+} from "../types/signals";
 import { CoinLabel } from "./CoinLabel";
 import { REASON_ICON, STAGE_ICON, VERDICT_ICON } from "./icons";
 import { Sparkline } from "./Sparkline";
@@ -80,7 +93,7 @@ function FngScale({ value }: { readonly value: number | null }) {
   return (
     <div className="mt-4" aria-hidden>
       <div className="relative h-2 rounded-sm bg-ground">
-        {/* faixa de pânico (< 25), onde a regra de compra pode disparar */}
+        {/* faixa de pânico (< 25): só um aviso, a regra de compra não usa o humor do mercado */}
         <span className="absolute inset-y-0 left-0 w-1/4 rounded-l-sm bg-critical-bg" />
         {[25, 50, 75].map((t) => <span key={t} className="absolute inset-y-0 w-px bg-hairline" style={{ left: `${t}%` }} />)}
         <span className="absolute -top-1 h-4 w-1 -translate-x-1/2 rounded-sm bg-ink" style={{ left: `${Math.min(Math.max(value, 0), 100)}%` }} />
@@ -98,7 +111,7 @@ function FngScale({ value }: { readonly value: number | null }) {
 
 function DistanceBar({ pct }: { readonly pct: number | null }) {
   if (pct === null) return <span className="text-muted">—</span>;
-  const width = (Math.min(Math.abs(pct), 30) / 30) * 100; // ±30% enche metade da barra
+  const width = (Math.min(Math.abs(pct), 60) / 60) * 100; // ±60% enche metade da barra
   const below = pct < 0;
   return (
     <span className="flex items-center justify-end gap-3">
@@ -114,35 +127,37 @@ function DistanceBar({ pct }: { readonly pct: number | null }) {
   );
 }
 
-function Momentum({ rsi }: { readonly rsi: number | null }) {
-  const m = momentumLabel(rsi);
-  const Icon = rsi === null ? null : rsi < 30 ? TrendDown : rsi > 70 ? TrendUp : null;
+function Trend({ pct }: { readonly pct: number | null }) {
+  if (pct === null) return <span className="text-muted">sem dados</span>;
+  const Icon = pct >= 0 ? TrendUp : TrendDown;
   return (
-    <span className={`flex items-center gap-1.5 ${m.tone === "warning" ? "text-warning" : "text-muted"}`}>
-      {Icon !== null && <Icon size={16} aria-hidden />}
-      {m.text}
+    <span className={`flex items-center gap-1.5 ${pct >= 0 ? "text-good" : "text-muted"}`}>
+      <Icon size={16} aria-hidden />
+      {pct >= 0 ? "em alta" : "em baixa"}
     </span>
   );
 }
 
-export function MarketTable({ rows, sparks, selected, onSelect }: {
+export function MarketTable({ rows, sparks, recommended, selected, onSelect }: {
   readonly rows: readonly DailySignal[];
   readonly sparks: ReadonlyMap<string, readonly number[]>;
+  readonly recommended: ReadonlySet<string>;
   readonly selected: string;
   readonly onSelect: (symbol: string) => void;
 }) {
   return (
     <Table
-      caption="Todas as moedas monitoradas, da mais abaixo do normal para a mais acima"
+      caption="Todas as moedas monitoradas e a recomendação da regra de tendência para Bitcoin e Ethereum"
       columns={[
-        { label: "Moeda" }, { label: "Situação" }, { label: "Preço", numeric: true }, { label: "Últimos 90 dias" },
-        { label: "Distância da média de 90 dias", numeric: true }, { label: "Ritmo dos últimos 14 dias" },
+        { label: "Moeda" }, { label: "O que fazer" }, { label: "Preço", numeric: true }, { label: "Últimos 90 dias" },
+        { label: "Distância da média de 200 dias", numeric: true }, { label: "Tendência da moeda" },
       ]}
     >
       {rows.map((s) => {
         const stage = STAGE_LABEL[s.stage];
         const StageIcon = STAGE_ICON[s.stage];
         const isSelected = s.symbol === selected;
+        const distance = distanceFromAverage(s.close, s.sma_200);
         return (
           <tr
             key={s.symbol}
@@ -161,10 +176,13 @@ export function MarketTable({ rows, sparks, selected, onSelect }: {
               <span className="flex items-center gap-2">
                 <CoinLabel symbol={s.symbol} detailed />
                 {s.alert === "COMPRAR AGORA" && <Badge tone="signal">novo hoje</Badge>}
+                {s.alert === "VENDER AGORA" && <Badge tone="critical">saiu da alta</Badge>}
               </span>
             </td>
             <td className={cell}>
-              {s.stage === "NEUTRO" ? (
+              {!recommended.has(s.symbol) ? (
+                <span className="text-muted">Só acompanhada</span>
+              ) : s.stage === "NEUTRO" ? (
                 <span className="text-muted">{stage.text}</span>
               ) : (
                 <Badge tone={stage.tone}>
@@ -174,11 +192,12 @@ export function MarketTable({ rows, sparks, selected, onSelect }: {
                   </span>
                 </Badge>
               )}
+              {s.panic && <span className="ml-2 text-[13px] text-warning">em pânico</span>}
             </td>
             <td className={numCell}>{fmt.price(s.close)}</td>
             <td className={cell}><Sparkline values={sparks.get(s.symbol) ?? []} label={`Preço de ${coinName(s.symbol)}`} /></td>
-            <td className={numCell}><DistanceBar pct={distanceFromAverage(s.close, s.sma_90)} /></td>
-            <td className={cell}><Momentum rsi={s.rsi_14} /></td>
+            <td className={numCell}><DistanceBar pct={distance} /></td>
+            <td className={cell}><Trend pct={distance} /></td>
           </tr>
         );
       })}
@@ -199,15 +218,22 @@ function ReasonCell({ reason }: { readonly reason: Trade["exit_reason"] }) {
   );
 }
 
-export function TradeList({ trades, coin }: { readonly trades: readonly Trade[]; readonly coin: string }) {
+export function TradeList({ trades, coin, recommended }: {
+  readonly trades: readonly Trade[];
+  readonly coin: string;
+  readonly recommended: boolean;
+}) {
+  if (!recommended) {
+    return <p className="text-muted">A regra só recomenda comprar Bitcoin e Ethereum. {coin} é apenas acompanhada, então não há operações simuladas.</p>;
+  }
   if (trades.length === 0) {
-    return <p className="text-muted">O sinal de compra nunca disparou para {coin} desde o início dos dados.</p>;
+    return <p className="text-muted">A regra nunca mandou comprar {coin} desde o início dos dados.</p>;
   }
   return (
     <Table
-      caption={`Cada vez que o sinal de compra disparou para ${coin}`}
+      caption={`Cada período em que a regra mandou comprar ou segurar ${coin}`}
       columns={[
-        { label: "Sinal em" }, { label: "Preço", numeric: true }, { label: "Venda simulada em" },
+        { label: "Entrada em" }, { label: "Preço", numeric: true }, { label: "Venda simulada em" },
         { label: "Motivo" }, { label: "Resultado", numeric: true }, { label: "Dias", numeric: true },
       ]}
     >
@@ -227,53 +253,122 @@ export function TradeList({ trades, coin }: { readonly trades: readonly Trade[];
 
 /* ---------- a regra funciona? ---------- */
 
-export function BacktestPanel({ signal, reference, since }: {
-  readonly signal: readonly Trade[];
-  readonly reference: readonly Trade[];
-  readonly since: string;
+const STRATEGY_ORDER: readonly Strategy[] = ["TENDENCIA", "COMPRAR_E_SEGURAR", "PANICO"];
+
+function PerformanceTable({ rows, universe, period }: {
+  readonly rows: readonly Performance[];
+  readonly universe: Portfolio;
+  readonly period: Period;
 }) {
-  const s = summarize(signal);
-  const r = summarize(reference);
-  const edge = signalHasEdge(s, r);
-  const reasons = byReason(signal);
+  const label = `${PERIOD_NAME[period]} (${periodYears(rows, period)})`;
+  return (
+    <Table
+      caption={`Resultado da carteira no período ${label}, com taxa de 0,1% em cada compra e venda`}
+      columns={[
+        { label }, { label: "Retorno total", numeric: true }, { label: "Por ano", numeric: true },
+        { label: "Pior queda", numeric: true }, { label: "Tempo comprado", numeric: true },
+      ]}
+    >
+      {STRATEGY_ORDER.flatMap((strategy) => {
+        const p = performanceOf(rows, universe, strategy, period);
+        if (p === null) return [];
+        return [
+          <tr key={strategy} className="border-b border-hairline">
+            <td className={`${cell} ${strategy === "TENDENCIA" ? "font-medium" : ""}`}>{STRATEGY_NAME[strategy]}</td>
+            <td className={`${numCell} ${TEXT_TONE[signTone(p.total_return_pct)]}`}>{fmt.pct(p.total_return_pct, 0)}</td>
+            <td className={`${numCell} ${TEXT_TONE[signTone(p.annual_return_pct)]}`}>{fmt.pct(p.annual_return_pct)}</td>
+            <td className={`${numCell} text-critical`}>{fmt.pct(p.max_drawdown_pct)}</td>
+            <td className={numCell}>{fmt.num(p.invested_pct, 0)}%</td>
+          </tr>,
+        ];
+      })}
+    </Table>
+  );
+}
+
+const VERDICT_HEADLINE: Record<TrendVerdict, string> = {
+  better: "Sim. No passado, a regra de tendência rendeu mais do que comprar e segurar, nos dois períodos.",
+  safer: "Em parte. A regra rendeu parecido com comprar e segurar, mas com uma queda bem menor pelo caminho.",
+  worse: "Não. No passado, a regra rendeu menos do que comprar e segurar, e a queda não compensou.",
+};
+
+export function BacktestPanel({ performance, trades }: {
+  readonly performance: readonly Performance[];
+  readonly trades: readonly Trade[];
+}) {
+  const verdict = trendVerdict(performance, "PRINCIPAIS");
+  const trend = performanceOf(performance, "PRINCIPAIS", "TENDENCIA", "TESTE");
+  const hold = performanceOf(performance, "PRINCIPAIS", "COMPRAR_E_SEGURAR", "TESTE");
+  const all = summarize(trades);
+  const reasons = byReason(trades);
   return (
     <>
       <Block>
         <p className="flex items-start gap-3 text-lg font-semibold">
-          <Scales size={28} weight="duotone" className={`shrink-0 ${edge === false ? "text-critical" : "text-good"}`} aria-hidden />
-          <span>
-            {edge === false && "Não. No passado, comprar no sinal rendeu menos do que comprar num dia qualquer."}
-            {edge === true && "Sim. No passado, comprar no sinal rendeu mais do que comprar num dia qualquer."}
-            {edge === null && "Ainda não há operações suficientes para responder."}
-          </span>
+          <Scales size={28} weight="duotone" className={`shrink-0 ${verdict === "worse" ? "text-critical" : "text-good"}`} aria-hidden />
+          <span>{verdict === null ? "Ainda não há dados suficientes para responder." : VERDICT_HEADLINE[verdict]}</span>
         </p>
         <p className="mt-2 max-w-[72ch] text-muted">
-          Simulamos cada vez que o sinal disparou desde {since}, vendendo pelas mesmas regras usadas nas suas posições.
-          Para comparar, simulamos também comprar toda semana, sem critério nenhum, com as mesmas regras de venda.
-          {edge === false && " O pânico extremo costuma continuar por semanas, e o sinal compra cedo demais. Use-o como alerta para prestar atenção, não como ordem de compra."}
+          Simulamos uma carteira com Bitcoin e Ethereum em partes iguais, com taxa de 0,1% a cada compra e venda. A regra foi
+          escolhida olhando só o período de treino; o período de teste são anos que a escolha não viu. Comprar e segurar
+          significa comprar no começo e nunca vender.
         </p>
-        <div className="mt-6 grid gap-6 sm:grid-cols-2">
-          <div className="border-t border-hairline pt-4">
-            <p className="font-medium">Comprando no sinal</p>
-            <div className="mt-3 grid grid-cols-2 gap-4">
-              <Figure label="Resultado médio por operação" value={fmt.pct(s.mean)} tone={signTone(s.mean)} />
-              <Figure label="Operações com lucro" value={`${fmt.num(s.winRate, 0)}%`} note={`de ${s.count} operações`} />
+        {trend !== null && hold !== null && (
+          <div className="mt-6 grid gap-6 sm:grid-cols-2">
+            <div className="border-t border-hairline pt-4">
+              <p className="font-medium">Pior queda no teste: regra de tendência</p>
+              <div className="mt-3">
+                <Figure
+                  label="Quanto a carteira chegou a perder do topo até o fundo"
+                  value={fmt.pct(trend.max_drawdown_pct, 0)}
+                  tone="critical"
+                  note={`Retorno de ${fmt.pct(trend.total_return_pct, 0)} no período`}
+                />
+              </div>
+            </div>
+            <div className="border-t border-hairline pt-4">
+              <p className="font-medium">Pior queda no teste: comprar e segurar</p>
+              <div className="mt-3">
+                <Figure
+                  label="Quanto a carteira chegou a perder do topo até o fundo"
+                  value={fmt.pct(hold.max_drawdown_pct, 0)}
+                  tone="critical"
+                  note={`Retorno de ${fmt.pct(hold.total_return_pct, 0)} no período`}
+                />
+              </div>
             </div>
           </div>
-          <div className="border-t border-hairline pt-4">
-            <p className="font-medium">Comprando toda semana, sem critério</p>
-            <div className="mt-3 grid grid-cols-2 gap-4">
-              <Figure label="Resultado médio por operação" value={fmt.pct(r.mean)} tone={signTone(r.mean)} />
-              <Figure label="Operações com lucro" value={`${fmt.num(r.winRate, 0)}%`} note={`de ${r.count.toLocaleString("pt-BR")} operações`} />
-            </div>
-          </div>
-        </div>
+        )}
       </Block>
 
-      <h3 className="mt-8 font-medium">Como as compras do sinal terminaram</h3>
+      <h3 className="mt-8 font-medium">Bitcoin e Ethereum: o que as regras teriam rendido</h3>
+      <div className="mt-3 space-y-4">
+        <PerformanceTable rows={performance} universe="PRINCIPAIS" period="TREINO" />
+        <PerformanceTable rows={performance} universe="PRINCIPAIS" period="TESTE" />
+      </div>
+      <p className="mt-3 max-w-[72ch] text-[13px] text-muted">
+        A regra antiga, comprar quando o mercado entra em pânico, perdeu dinheiro no treino e rendeu pouco no teste.
+        Por isso o pânico virou só um aviso.
+      </p>
+
+      <h3 className="mt-8 font-medium">E com as 15 moedas?</h3>
+      <p className="mt-1 max-w-[72ch] text-muted">
+        Aplicada a todas as moedas, a regra continua reduzindo a queda, mas rende bem menos do que comprar e segurar no
+        teste. Por isso o painel só recomenda Bitcoin e Ethereum.
+      </p>
+      <div className="mt-3 space-y-4">
+        <PerformanceTable rows={performance} universe="TODAS" period="TREINO" />
+        <PerformanceTable rows={performance} universe="TODAS" period="TESTE" />
+      </div>
+
+      <h3 className="mt-8 font-medium">Como as compras de Bitcoin e Ethereum terminaram</h3>
+      <p className="mt-1 max-w-[72ch] text-muted">
+        De {all.count} compras simuladas, {fmt.num(all.winRate, 0)}% terminaram com lucro e o resultado médio foi {fmt.pct(all.mean)}.
+        A regra erra muitas vezes com perdas pequenas e acerta algumas vezes com ganhos enormes: é assim que seguir a tendência funciona.
+      </p>
       <div className="mt-3">
         <Table
-          caption="Operações do sinal de compra agrupadas pelo motivo da venda"
+          caption="Operações da regra de tendência agrupadas pelo motivo da venda"
           columns={[
             { label: "Motivo da venda" }, { label: "Operações", numeric: true }, { label: "Com lucro", numeric: true },
             { label: "Resultado médio", numeric: true }, { label: "Pior", numeric: true }, { label: "Melhor", numeric: true },
@@ -297,6 +392,12 @@ export function BacktestPanel({ signal, reference, since }: {
           })}
         </Table>
       </div>
+
+      <p className="mt-6 max-w-[72ch] text-[13px] text-muted">
+        Limites desta análise: só entram moedas que existem hoje (as que sumiram não aparecem, o que favorece os
+        resultados); é uma única história de mercado, com poucos ciclos; não há impostos nem diferença entre o preço
+        do fechamento e o que você de fato consegue pagar. O passado não garante o futuro.
+      </p>
     </>
   );
 }
@@ -307,23 +408,28 @@ export function HowItWorks() {
   return (
     <div className="grid gap-6 md:grid-cols-2">
       <Block>
-        <h3 className="flex items-center gap-2 font-medium"><HandCoins size={22} aria-hidden /> Quando uma moeda entra na zona de compra</h3>
-        <p className="mt-2 text-muted">As três coisas precisam acontecer ao mesmo tempo:</p>
+        <h3 className="flex items-center gap-2 font-medium"><HandCoins size={22} aria-hidden /> Quando comprar ou segurar</h3>
+        <p className="mt-2 text-muted">Vale para Bitcoin e Ethereum. As duas coisas precisam acontecer ao mesmo tempo:</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">
-          <li>O preço caiu muito abaixo do normal dos últimos 90 dias (mais de 2,5 vezes a variação típica).</li>
-          <li>A queda foi rápida: o indicador RSI, que mede o ritmo dos últimos 14 dias, está abaixo de 30.</li>
-          <li>O mercado inteiro está em pânico: o Fear & Greed está abaixo de 25.</li>
+          <li>O preço da moeda fechou o dia acima da média dos últimos 200 dias. É o sinal de que ela está em tendência de alta.</li>
+          <li>O Bitcoin também fechou acima da média dele. Quando o Bitcoin cai, quase tudo cai junto.</li>
         </ul>
         <p className="mt-3 text-muted">
-          <strong className="font-medium text-ink">Ficar de olho</strong> é a etapa anterior: a moeda está caindo nessa
-          direção (abaixo de 1,5 vez a variação típica e RSI abaixo de 40), mas ainda não chegou lá.
+          Enquanto as duas valem, quem não tem pode comprar e quem já tem deve segurar.{" "}
+          <strong className="font-medium text-ink">Ficar de olho</strong> é a etapa anterior: o preço está até 3% abaixo
+          da média de 200 dias e subindo, perto de cruzá-la.
+        </p>
+        <p className="mt-3 text-muted">
+          As outras 13 moedas aparecem na tabela, mas sem recomendação: o teste mostrou que a regra não compensa nelas.
+          O <strong className="font-medium text-ink">pânico</strong> (queda forte com medo no mercado) aparece só como aviso.
+          Comprar nele perdeu dinheiro.
         </p>
       </Block>
       <Block>
         <h3 className="font-medium">Quando vender o que você comprou</h3>
         <p className="mt-2 text-muted">A primeira regra que acontecer manda vender:</p>
         <ul className="mt-3 space-y-3">
-          {EXIT_REASONS.map((r) => {
+          {SELL_ORDER.map((r) => {
             const Icon = REASON_ICON[r];
             return (
               <li key={r} className="flex gap-3">
@@ -341,3 +447,5 @@ export function HowItWorks() {
     </div>
   );
 }
+
+const SELL_ORDER: readonly ExitReason[] = ["TENDENCIA", "MERCADO", "STOP"];

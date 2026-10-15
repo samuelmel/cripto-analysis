@@ -1,25 +1,30 @@
-"""Detector de anomalias de reversão à média: cruza Binance, CoinGecko e Fear & Greed.
+"""Classificação diária de cada moeda: tendência de alta (regra de compra) e alerta de pânico.
 
 Puro (CLAUDE.md §1): recebe os DataFrames padronizados dos extratores; a persistência é feita
 por `src.loaders`. Sem loops Python: indicadores por ativo via groupby + rolling/ewm (cython).
 
-Regra de compra (todas obrigatórias, NaN conta como "não atende"):
-    zscore_90 < -2.5      preço 2,5 desvios abaixo da SMA de 90 dias
-    rsi_14    < 30        sobrevenda
-    fng_value < 25        pânico generalizado (alternative.me: 0–24 = "Extreme Fear")
+Regra de compra (validada em treino 2018–2022 e teste 2023–2026, ver `research/`):
+    tendência de alta = fechamento acima da SMA de 200 dias da moeda
+                        E BTC com fechamento acima da sua própria SMA de 200 dias (filtro de mercado)
 
-Estágio (`stage`): COMPRAR se a regra acima dispara; PREPARAR (radar) se zscore_90 < -1.5 e
-rsi_14 < 40, ou seja, escorregando para a zona de compra; NEUTRO nos demais casos.
+Estágio (`stage`), só para as moedas em `SignalRules.recommended` (padrão: BTC e ETH):
+    COMPRAR    tendência de alta: comprar, ou segurar se já tem. Sai quando a condição deixa de valer
+    PREPARAR   radar: fechou até 3% abaixo da SMA 200 e está subindo (perto do cruzamento)
+    NEUTRO     fora da tendência, ou moeda só monitorada (sem recomendação)
 
-`classify_history` aplica a regra a todos os dias (base do backtest); `detect` devolve só o
+Alerta de pânico (`panic`), apenas informativo e SEM recomendação de compra: a regra antiga
+(zscore_90 < -2.5, RSI < 30 e Fear & Greed < 25) perdeu dinheiro no backtest.
+
+`classify_history` aplica as regras a todos os dias (base do backtest); `detect` devolve só o
 snapshot do dia, com market cap. Os dois usam a mesma classificação.
 
 Tratamento de NaN:
     - candles com close nulo ou <= 0 são descartados antes dos indicadores;
-    - indicadores ficam NaN até haver janela completa (90 candles para z-score, 14 para RSI);
+    - indicadores ficam NaN até haver janela completa (200 candles para a SMA 200, 90 para o z-score,
+      14 para o RSI); NaN conta como "não atende" em toda condição;
     - desvio padrão 0 (preço constante) gera z-score NaN, não infinito;
     - o candle do dia D fecha às 00:00 de D+1: recebe o F&G publicado até esse fechamento
-      (no máximo `asof_tolerance` antes); sem leitura, o F&G fica nulo e COMPRAR não dispara.
+      (no máximo `asof_tolerance` antes); sem leitura, o F&G fica nulo e o pânico não dispara.
 """
 
 from __future__ import annotations
@@ -29,7 +34,10 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from ..config import RECOMMENDED, REGIME_SYMBOL
+
 SMA_WINDOW = 90
+TREND_WINDOW = 200
 RSI_PERIOD = 14
 
 STAGE_BUY = "COMPRAR"
@@ -42,38 +50,42 @@ HISTORY_SCHEMA: dict[str, str] = {
     "close": "float64",
     "sma_90": "float64",
     "zscore_90": "float64",
+    "sma_200": "float64",
     "rsi_14": "float64",
     "fng_value": "Int64",
     "fng_classification": "string",
-    "buy_signal": "bool",
+    "regime_up": "bool",   # BTC acima da SMA 200 neste dia
+    "uptrend": "bool",     # moeda acima da SMA 200 E regime_up
+    "panic": "bool",       # alerta de pânico (informativo)
     "stage": "string",
 }
 
+_SNAPSHOT_TAIL = ("fng_value", "fng_classification", "regime_up", "uptrend", "panic", "stage")
 OUTPUT_SCHEMA: dict[str, str] = {
-    **{k: v for k, v in HISTORY_SCHEMA.items() if k not in ("fng_value", "fng_classification", "buy_signal", "stage")},
+    **{k: v for k, v in HISTORY_SCHEMA.items() if k not in _SNAPSHOT_TAIL},
     "market_cap_usd": "float64",
     "total_volume_usd": "float64",
-    "fng_value": "Int64",
-    "fng_classification": "string",
-    "buy_signal": "bool",
-    "stage": "string",
+    **{k: v for k, v in HISTORY_SCHEMA.items() if k in _SNAPSHOT_TAIL},
 }
 
 
 @dataclass(frozen=True)
 class SignalRules:
+    recommended: tuple[str, ...] = RECOMMENDED
+    regime_symbol: str = REGIME_SYMBOL
+    # Radar: até esta distância abaixo da SMA 200 e subindo há `rising_days` dias.
+    watch_distance: float = 0.03
+    rising_days: int = 5
+    # Alerta de pânico (informativo).
     zscore_max: float = -2.5
     rsi_max: float = 30.0
     fng_panic_max: int = 25
-    # Radar: ativo escorregando para a zona de compra, mas ainda sem disparar.
-    watch_zscore_max: float = -1.5
-    watch_rsi_max: float = 40.0
     # Leitura mais antiga aceita de F&G/CoinGecko em relação ao fechamento do candle.
     asof_tolerance: pd.Timedelta = pd.Timedelta(days=1)
 
 
 def compute_indicators(binance: pd.DataFrame) -> pd.DataFrame:
-    """Histórico com sma_90, zscore_90 e rsi_14 por ativo. Uma linha por (symbol, dia)."""
+    """Histórico com sma_90, zscore_90, sma_200 e rsi_14 por ativo. Uma linha por (symbol, dia)."""
     df = binance.loc[binance["close"].gt(0), ["timestamp", "symbol", "close"]]
     df = df.assign(
         timestamp=df["timestamp"].dt.floor("D"),
@@ -94,8 +106,11 @@ def compute_indicators(binance: pd.DataFrame) -> pd.DataFrame:
     rsi = 100.0 - 100.0 / (1.0 + avg_gain / avg_loss.replace(0.0, np.nan))
     rsi = rsi.mask(avg_loss.eq(0.0) & avg_gain.notna(), 100.0)  # sem perdas na janela => 100
 
+    trend = close.rolling(TREND_WINDOW, min_periods=TREND_WINDOW).mean().droplevel(0)
+
     return df.assign(
         sma_90=sma,
+        sma_200=trend,
         zscore_90=(df["close"] - sma) / std.replace(0.0, np.nan),
         rsi_14=rsi,
     )
@@ -107,6 +122,28 @@ def _wilder_mean(values: pd.Series, keys: pd.Series) -> pd.Series:
     return grouped.ewm(alpha=1 / RSI_PERIOD, adjust=False, min_periods=RSI_PERIOD).mean().droplevel(0)
 
 
+def _with_trend(ind: pd.DataFrame, rules: SignalRules) -> pd.DataFrame:
+    """Acrescenta `regime_up` (BTC acima da SMA 200 no dia) e `uptrend` (moeda E regime em alta)."""
+    above = ind["close"].gt(ind["sma_200"])
+    regime_days = ind.loc[above & ind["symbol"].eq(rules.regime_symbol), "timestamp"]
+    regime_up = ind["timestamp"].isin(regime_days)
+    return ind.assign(regime_up=regime_up, uptrend=above & regime_up)
+
+
+def _stage(out: pd.DataFrame, rules: SignalRules) -> pd.Series:
+    """COMPRAR / PREPARAR / NEUTRO. Só as moedas `recommended` saem de NEUTRO."""
+    recommended = out["symbol"].isin(list(rules.recommended))
+    rising = out["close"].gt(out.groupby("symbol", observed=True)["close"].shift(rules.rising_days))
+    gap = out["close"] / out["sma_200"] - 1.0
+    # Se cruzar a SMA 200, a moeda só entra em COMPRAR com o BTC em alta (o BTC é o próprio filtro).
+    regime_ok = out["regime_up"] | out["symbol"].eq(rules.regime_symbol)
+    near = ~out["uptrend"] & gap.lt(0.0) & gap.ge(-rules.watch_distance) & rising & regime_ok
+    return pd.Series(
+        np.select([recommended & out["uptrend"], recommended & near], [STAGE_BUY, STAGE_WATCH], STAGE_NEUTRAL),
+        index=out.index,
+    )
+
+
 def _close_time(timestamp: pd.Series) -> pd.Series:
     """Horário de fechamento do candle diário que abre em `timestamp`."""
     return timestamp + pd.Timedelta(days=1)
@@ -114,7 +151,7 @@ def _close_time(timestamp: pd.Series) -> pd.Series:
 
 def classify_history(binance: pd.DataFrame, fng: pd.DataFrame, rules: SignalRules = SignalRules()) -> pd.DataFrame:
     """Indicadores + F&G + estágio para todos os dias de todos os ativos (HISTORY_SCHEMA)."""
-    ind = compute_indicators(binance)
+    ind = _with_trend(compute_indicators(binance), rules)
     if ind.empty:
         return _empty(HISTORY_SCHEMA)
 
@@ -142,10 +179,9 @@ def classify_history(binance: pd.DataFrame, fng: pd.DataFrame, rules: SignalRule
     ).astype({"fng_value": "Int64", "fng_classification": "string"})
 
     panic = out["fng_value"].lt(rules.fng_panic_max).fillna(False).astype(bool)
-    out["buy_signal"] = out["zscore_90"].lt(rules.zscore_max) & out["rsi_14"].lt(rules.rsi_max) & panic
-    watch = out["zscore_90"].lt(rules.watch_zscore_max) & out["rsi_14"].lt(rules.watch_rsi_max)
-    out["stage"] = np.select([out["buy_signal"], watch], [STAGE_BUY, STAGE_WATCH], STAGE_NEUTRAL)
+    out["panic"] = out["zscore_90"].lt(rules.zscore_max) & out["rsi_14"].lt(rules.rsi_max) & panic
     out["symbol"] = out["symbol"].astype("string")
+    out["stage"] = _stage(out, rules)
 
     out = out[list(HISTORY_SCHEMA)].astype(HISTORY_SCHEMA)
     return out.sort_values(["symbol", "timestamp"], ignore_index=True)
@@ -167,7 +203,7 @@ def detect(
         coingecko  CoinGeckoMarketAdapter  (symbol = ticker, "BTC"); leitura até 1 dia após o fechamento
         fng        FearGreedAdapter        (symbol "MARKET")
     `history`: resultado já calculado de `classify_history` (evita recalcular).
-    Ativos sem candle no dia são omitidos. Ordenado por buy_signal e depois zscore_90 crescente.
+    Ativos sem candle no dia são omitidos. Ordenado por símbolo (a ordem de exibição vem de `daily_alerts`).
     """
     hist = classify_history(binance, fng, rules) if history is None else history
     if hist.empty:
@@ -192,7 +228,7 @@ def detect(
     out = snap.assign(base=snap["symbol"].str.split("/", n=1).str[0].str.upper()).merge(market, on="base", how="left")
 
     out = out[list(OUTPUT_SCHEMA)].astype(OUTPUT_SCHEMA)
-    return out.sort_values(["buy_signal", "zscore_90"], ascending=[False, True], ignore_index=True)
+    return out.sort_values("symbol", ignore_index=True)
 
 
 def _empty(schema: dict[str, str]) -> pd.DataFrame:

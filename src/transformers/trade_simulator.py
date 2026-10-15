@@ -1,15 +1,23 @@
-"""Regras de saída e simulação de operações (backtest e posições reais usam o mesmo código).
+"""Backtest da regra de tendência: operações individuais e carteira (com taxa) contra comprar e segurar.
 
-Puro e vetorizado: cada operação vira um "caminho" (os candles depois da entrada) e as regras de
-saída são avaliadas em todas as linhas de uma vez; a saída é a primeira linha que dispara.
+Puro e vetorizado (CLAUDE.md §1). Dois níveis:
 
-Regras de saída, em ordem de prioridade no mesmo dia:
-    STOP            perda >= 20% sobre a entrada: corta antes de cair mais
-    PROTEGER LUCRO  já subiu >= 15% e recuou 10% a partir do pico: trava o lucro
-    ALVO            entrou abaixo da SMA de 90 dias e o preço voltou a ela (zscore_90 >= 0) com
-                    lucro: reversão completa (não se aplica a quem comprou acima da média)
-    SOBRECOMPRADO   RSI >= 70 com lucro: euforia, realiza
-    TEMPO           180 dias sem resolver
+    Operações (`backtest`, `simulate`)   cada entrada vira um "caminho" (os candles depois da entrada) e as
+                                         regras de saída são avaliadas em todas as linhas de uma vez; a saída
+                                         é a primeira linha que dispara. Servem ao gráfico, à lista de
+                                         operações e às posições reais (`position_advisor`).
+    Carteira (`performance_summary`)     posição de cada moeda em cada dia, peso igual entre as moedas com
+                                         dados, taxa sobre cada mudança de posição. Compara a tendência com
+                                         comprar e segurar e com a regra antiga do pânico.
+
+Regra de saída (`ExitRules`), a primeira que ocorrer:
+    STOP        perda de `stop_loss` sobre a entrada (opcional; ver `ExitRules.stop_loss`)
+    TENDENCIA   fechou abaixo da SMA 200 da própria moeda
+    MERCADO     o BTC fechou abaixo da SMA 200 (filtro de regime)
+
+Metodologia da carteira: a posição decidida no fechamento do dia t vale para o retorno de t+1;
+a taxa incide sobre a mudança de posição (cobrada no dia em que a nova posição começa a render);
+todas as estratégias só começam quando a SMA 200 da moeda existe.
 """
 
 from __future__ import annotations
@@ -19,16 +27,21 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .anomaly_detector import STAGE_BUY
+from .panic_backtest import panic_trades
 
 EXIT_STOP = "STOP"
-EXIT_TRAIL = "PROTEGER LUCRO"
-EXIT_TARGET = "ALVO"
-EXIT_OVERBOUGHT = "SOBRECOMPRADO"
-EXIT_TIME = "TEMPO"
+EXIT_TREND = "TENDENCIA"
+EXIT_REGIME = "MERCADO"
 
 STATUS_CLOSED = "FECHADA"
 STATUS_OPEN = "ABERTA"
+
+STRATEGY_TREND = "TENDENCIA"
+STRATEGY_HOLD = "COMPRAR_E_SEGURAR"
+STRATEGY_PANIC = "PANICO"
+
+PERIOD_TRAIN = "TREINO"
+PERIOD_TEST = "TESTE"
 
 TRADE_SCHEMA: dict[str, str] = {
     "trade_id": "string",
@@ -45,34 +58,38 @@ TRADE_SCHEMA: dict[str, str] = {
     "days_held": "Int64",
     "last_ts": "datetime64[ns, UTC]",
     "last_close": "float64",
-    "sma_90": "float64",
-    "zscore_90": "float64",
-    "rsi_14": "float64",
+    "sma_200": "float64",
+}
+
+PERFORMANCE_SCHEMA: dict[str, str] = {
+    "universe": "string",
+    "strategy": "string",
+    "period": "string",
+    "start": "datetime64[ns, UTC]",
+    "end": "datetime64[ns, UTC]",
+    "total_return_pct": "float64",
+    "annual_return_pct": "float64",
+    "max_drawdown_pct": "float64",
+    "sharpe": "float64",
+    "invested_pct": "float64",
 }
 
 
 @dataclass(frozen=True)
 class ExitRules:
-    stop_loss: float = -0.20
-    trail_activation: float = 0.15
-    trail_drawdown: float = 0.10
-    target_zscore: float = 0.0
-    overbought_rsi: float = 70.0
-    max_hold_days: int = 180
+    stop_loss: float | None = -0.20  # None desliga o STOP (só tendência e regime mandam sair)
 
 
-@dataclass(frozen=True)
-class EntryRules:
-    # Dias de COMPRAR separados por até `cooldown` pertencem ao mesmo episódio: uma entrada só.
-    cooldown: pd.Timedelta = pd.Timedelta(days=14)
+# ---------------------------------------------------------------------------------------------
+# Operações individuais
+# ---------------------------------------------------------------------------------------------
 
-
-def signal_entries(history: pd.DataFrame, rules: EntryRules = EntryRules()) -> pd.DataFrame:
-    """Uma entrada por episódio de COMPRAR: primeiro dia do episódio, ao preço de fechamento."""
-    buys = history.loc[history["stage"].eq(STAGE_BUY), ["symbol", "timestamp", "close"]]
-    buys = buys.sort_values(["symbol", "timestamp"])
-    gap = buys.groupby("symbol", observed=True)["timestamp"].diff()
-    first = buys[gap.isna() | gap.gt(rules.cooldown)]
+def trend_entries(history: pd.DataFrame, symbols: tuple[str, ...]) -> pd.DataFrame:
+    """Uma entrada por episódio de tendência de alta: primeiro dia, ao preço de fechamento."""
+    h = history[history["symbol"].isin(list(symbols))].sort_values(["symbol", "timestamp"])
+    up = h["uptrend"]
+    started = up & ~up.groupby(h["symbol"]).shift(1, fill_value=False).astype(bool)
+    first = h[started]
     return pd.DataFrame(
         {
             "trade_id": first["symbol"].astype(str) + "@" + first["timestamp"].dt.strftime("%Y-%m-%d"),
@@ -83,38 +100,9 @@ def signal_entries(history: pd.DataFrame, rules: EntryRules = EntryRules()) -> p
     ).reset_index(drop=True)
 
 
-def periodic_entries(history: pd.DataFrame, every_days: int = 7) -> pd.DataFrame:
-    """Referência "sem sinal": entra a cada `every_days` dias em todo ativo com indicadores válidos.
-
-    Se o sinal não bater essa referência com as mesmas regras de saída, ele não tem vantagem.
-    """
-    valid = history[history["zscore_90"].notna()]
-    picked = valid[valid["timestamp"].dt.dayofyear.mod(every_days).eq(0)]
-    return pd.DataFrame(
-        {
-            "trade_id": "REF:" + picked["symbol"].astype(str) + "@" + picked["timestamp"].dt.strftime("%Y-%m-%d"),
-            "symbol": picked["symbol"].astype("string"),
-            "entry_ts": picked["timestamp"],
-            "entry_price": picked["close"],
-        }
-    ).reset_index(drop=True)
-
-
-STRATEGY_SIGNAL = "SINAL"
-STRATEGY_REFERENCE = "REFERENCIA"
-BACKTEST_SCHEMA: dict[str, str] = {"strategy": "string", **TRADE_SCHEMA}
-
-
-def backtest(
-    history: pd.DataFrame,
-    entry_rules: EntryRules = EntryRules(),
-    exit_rules: ExitRules = ExitRules(),
-) -> pd.DataFrame:
-    """Operações do sinal de COMPRAR e da referência semanal, com as mesmas regras de saída."""
-    signal = simulate(signal_entries(history, entry_rules), history, exit_rules).assign(strategy=STRATEGY_SIGNAL)
-    reference = simulate(periodic_entries(history), history, exit_rules).assign(strategy=STRATEGY_REFERENCE)
-    out = pd.concat([signal, reference], ignore_index=True)
-    return out[list(BACKTEST_SCHEMA)].astype(BACKTEST_SCHEMA)
+def backtest(history: pd.DataFrame, symbols: tuple[str, ...], rules: ExitRules = ExitRules()) -> pd.DataFrame:
+    """Operações da regra de tendência nas moedas `symbols`, desde o primeiro dia com SMA 200."""
+    return simulate(trend_entries(history, symbols), history, rules)
 
 
 def _epoch_days(ts: pd.Series) -> np.ndarray:
@@ -156,7 +144,7 @@ def simulate(
 ) -> pd.DataFrame:
     """Aplica as regras de saída a cada entrada (trade_id, symbol, entry_ts, entry_price).
 
-    `history`: candles com indicadores (symbol, timestamp, close, sma_90, zscore_90, rsi_14).
+    `history`: candles com indicadores (symbol, timestamp, close, sma_200, regime_up).
     `include_entry_day`: True para posições reais (compra no meio do dia: o fechamento do próprio
     dia já conta); False no backtest (entra no fechamento do dia do sinal).
     Operação sem saída até o último candle fica ABERTA, com o estado atual em last_*.
@@ -164,17 +152,10 @@ def simulate(
     if entries.empty:
         return pd.DataFrame({c: pd.Series(dtype=t) for c, t in TRADE_SCHEMA.items()})
 
-    cols = ["symbol", "timestamp", "close", "sma_90", "zscore_90", "rsi_14"]
+    cols = ["symbol", "timestamp", "close", "sma_200", "regime_up"]
     hist = history[cols].astype({"symbol": "string"}).sort_values(["symbol", "timestamp"], ignore_index=True)
-    paths = _window_paths(entries, hist, rules.max_hold_days, include_entry_day)
-
-    entry_z = entries.merge(
-        hist[["symbol", "timestamp", "zscore_90"]],
-        left_on=["symbol", "entry_ts"],
-        right_on=["symbol", "timestamp"],
-        how="left",
-    ).set_index("trade_id")["zscore_90"]
-    paths["entry_z"] = paths["trade_id"].map(entry_z)
+    horizon = int(_epoch_days(hist["timestamp"]).max() - _epoch_days(hist["timestamp"]).min()) + 1
+    paths = _window_paths(entries, hist, horizon, include_entry_day)
 
     trade = paths.groupby("trade_id", sort=False)
     paths["ret"] = paths["close"] / paths["entry_price"] - 1.0
@@ -182,20 +163,12 @@ def simulate(
     paths["trough"] = trade["ret"].cummin()
     paths["days"] = (paths["timestamp"] - paths["entry_ts"]).dt.days
 
-    in_profit = paths["ret"].gt(0)
-    reason = np.select(
-        [
-            paths["ret"].le(rules.stop_loss),
-            paths["peak"].ge(rules.trail_activation)
-            & (1.0 + paths["ret"]).le((1.0 + paths["peak"]) * (1.0 - rules.trail_drawdown)),
-            paths["entry_z"].lt(rules.target_zscore) & paths["zscore_90"].ge(rules.target_zscore) & in_profit,
-            paths["rsi_14"].ge(rules.overbought_rsi) & in_profit,
-            paths["days"].ge(rules.max_hold_days),
-        ],
-        [EXIT_STOP, EXIT_TRAIL, EXIT_TARGET, EXIT_OVERBOUGHT, EXIT_TIME],
-        default="",
-    )
-    paths["reason"] = reason
+    conditions = [paths["close"].lt(paths["sma_200"]), ~paths["regime_up"]]
+    reasons = [EXIT_TREND, EXIT_REGIME]
+    if rules.stop_loss is not None:
+        conditions.insert(0, paths["ret"].le(rules.stop_loss))
+        reasons.insert(0, EXIT_STOP)
+    paths["reason"] = np.select(conditions, reasons, default="")
 
     exits = paths[paths["reason"].ne("")].groupby("trade_id", sort=False).head(1).set_index("trade_id")
     path_end = paths.groupby("trade_id", sort=False).tail(1).set_index("trade_id")
@@ -223,9 +196,119 @@ def simulate(
             "days_held": final["days"],
             "last_ts": last["timestamp"].reindex(out.index),
             "last_close": last["close"].reindex(out.index),
-            "sma_90": last["sma_90"].reindex(out.index),
-            "zscore_90": last["zscore_90"].reindex(out.index),
-            "rsi_14": last["rsi_14"].reindex(out.index),
+            "sma_200": last["sma_200"].reindex(out.index),
         }
     )
     return result[list(TRADE_SCHEMA)].astype(TRADE_SCHEMA).reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------------------------
+# Carteira
+# ---------------------------------------------------------------------------------------------
+
+def wide(history: pd.DataFrame, column: str) -> pd.DataFrame:
+    """Uma coluna do histórico em formato largo: índice = dia, colunas = moedas."""
+    return history.pivot(index="timestamp", columns="symbol", values=column).sort_index()
+
+
+def trend_positions(history: pd.DataFrame, rules: ExitRules = ExitRules()) -> pd.DataFrame:
+    """Posição (0/1) de cada moeda em cada dia pela regra de tendência, com o STOP de `rules`.
+
+    Sem STOP, a posição é `uptrend`. Com STOP, a posição zera no dia em que a perda sobre a entrada
+    (fechamento do primeiro dia do episódio) atinge o limite e só volta no próximo episódio.
+    """
+    h = history.sort_values(["symbol", "timestamp"], ignore_index=True)
+    up = h["uptrend"].astype(bool)
+    symbol = h["symbol"]
+    if rules.stop_loss is None:
+        position = up
+    else:
+        started = up & ~up.groupby(symbol).shift(1, fill_value=False).astype(bool)
+        run = started.astype(int).groupby(symbol).cumsum()
+        entry_close = h["close"].where(started).groupby(symbol).ffill()
+        hit = (up & (h["close"] / entry_close - 1.0).le(rules.stop_loss)).astype(int)
+        stopped = hit.groupby([symbol, run]).cummax().astype(bool)
+        position = up & ~stopped
+    return wide(h.assign(position=position.astype(float)), "position")
+
+
+def positions_from_trades(trades: pd.DataFrame, index: pd.DatetimeIndex, columns: pd.Index) -> pd.DataFrame:
+    """Posição (0/1) por moeda e dia: comprado de `entry_ts` (inclusive) até `exit_ts` (exclusive)."""
+    opened = trades.assign(ts=trades["entry_ts"], delta=1)
+    ended = trades[trades["exit_ts"].notna()].assign(ts=lambda t: t["exit_ts"], delta=-1)
+    events = pd.concat([opened[["ts", "symbol", "delta"]], ended[["ts", "symbol", "delta"]]], ignore_index=True)
+    steps = events.groupby(["ts", "symbol"])["delta"].sum().unstack("symbol")
+    steps = steps.reindex(index=index, columns=columns).fillna(0.0)
+    return steps.cumsum().gt(0).astype(float)
+
+
+def evaluate_portfolio(
+    positions: pd.DataFrame,
+    returns: pd.DataFrame,
+    valid: pd.DataFrame,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    fee: float,
+) -> dict[str, float | pd.Timestamp]:
+    """Métricas da carteira de peso igual entre as moedas com dados, no período [start, end]."""
+    p = positions.where(valid).loc[start:end]
+    r = returns.loc[start:end]
+    v = valid.loc[start:end]
+    held = p.shift(1)  # decide no fechamento de t, ganha o retorno de t+1
+    turnover = p.diff().abs().fillna(0.0)
+    daily = held * r - turnover.shift(1).fillna(0.0) * fee
+    port = daily.where(v).mean(axis=1, skipna=True).fillna(0.0)
+    if port.empty:
+        nan = float("nan")
+        return {"start": start, "end": end, "total": nan, "annual": nan, "drawdown": nan, "sharpe": nan, "invested": nan}
+
+    equity = (1.0 + port).cumprod()
+    years = len(port) / 365
+    vol = float(port.std() * np.sqrt(365))
+    return {
+        "start": pd.Timestamp(port.index[0]),
+        "end": pd.Timestamp(port.index[-1]),
+        "total": float(equity.iloc[-1] - 1.0) * 100.0,
+        "annual": (float(equity.iloc[-1]) ** (1.0 / years) - 1.0) * 100.0,
+        "drawdown": float((equity / equity.cummax() - 1.0).min()) * 100.0,
+        "sharpe": float(port.mean() * 365) / vol if vol > 0 else float("nan"),
+        "invested": float(held.where(v).mean().mean()) * 100.0,
+    }
+
+
+def performance_summary(
+    history: pd.DataFrame,
+    universes: dict[str, tuple[str, ...]],
+    periods: dict[str, tuple[pd.Timestamp, pd.Timestamp]],
+    fee: float,
+    rules: ExitRules = ExitRules(),
+) -> pd.DataFrame:
+    """Tendência x comprar e segurar x pânico (regra antiga), por universo e período (PERFORMANCE_SCHEMA).
+
+    `universes`: nome -> moedas da carteira. `periods`: nome -> (início, fim) inclusive.
+    """
+    closes = wide(history, "close")
+    returns = closes.pct_change(fill_method=None)
+    valid = wide(history, "sma_200").notna()
+    strategies = {
+        STRATEGY_TREND: trend_positions(history, rules).reindex_like(closes),
+        STRATEGY_HOLD: pd.DataFrame(1.0, index=closes.index, columns=closes.columns),
+        STRATEGY_PANIC: positions_from_trades(panic_trades(history), pd.DatetimeIndex(closes.index), closes.columns),
+    }
+    rows: list[dict[str, object]] = []
+    for universe, symbols in universes.items():
+        cols = [s for s in symbols if s in closes.columns]
+        for strategy, positions in strategies.items():
+            for period, (start, end) in periods.items():
+                m = evaluate_portfolio(positions[cols], returns[cols], valid[cols], start, end, fee)
+                rows.append(
+                    {
+                        "universe": universe, "strategy": strategy, "period": period,
+                        "start": m["start"], "end": m["end"],
+                        "total_return_pct": m["total"], "annual_return_pct": m["annual"],
+                        "max_drawdown_pct": m["drawdown"], "sharpe": m["sharpe"], "invested_pct": m["invested"],
+                    }
+                )
+    if not rows:
+        return pd.DataFrame({c: pd.Series(dtype=t) for c, t in PERFORMANCE_SCHEMA.items()})
+    return pd.DataFrame(rows)[list(PERFORMANCE_SCHEMA)].astype(PERFORMANCE_SCHEMA)

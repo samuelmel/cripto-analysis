@@ -1,43 +1,48 @@
 # crypto-analyzer
 
-Monitor diário de criptomoedas por **reversão à média**. O projeto faz quatro coisas:
+Monitor diário de criptomoedas que segue a **tendência** de Bitcoin e Ethereum. O projeto faz quatro coisas:
 
 - **Base histórica:** guarda todos os candles diários desde 2017 e o Fear & Greed desde 2018.
-- **Atualização diária:** todo dia baixa só o que falta e classifica cada moeda.
+- **Atualização diária:** todo dia baixa só o que falta e diz, para cada moeda, se está em tendência de alta.
 - **Posições:** acompanha as moedas que você comprou e diz quando vender.
-- **Backtest:** testa as regras em todo o histórico para mostrar se elas funcionam.
+- **Backtest:** simula a regra em todo o histórico, em carteira, e compara com simplesmente comprar e segurar.
 
-> Isto é uma ferramenta estatística, não previsão nem recomendação de investimento. Leia a seção [O que o backtest mostra](#o-que-o-backtest-mostra) antes de usar os sinais para comprar.
+> Isto é uma ferramenta estatística, não previsão nem recomendação de investimento. Leia a seção [O que o backtest mostra](#o-que-o-backtest-mostra), incluindo as limitações, antes de usar os sinais para comprar.
 
 ## Como funciona
 
-### Estágios de compra
+### Regra de compra e venda
 
-| Estágio | Regra | Significado |
+Vale para **BTC e ETH** (configurável em `src/config.py`, `RECOMMENDED`). As outras 13 moedas continuam monitoradas, mas sem recomendação.
+
+| Situação | Regra | O que fazer |
 |---|---|---|
-| **COMPRAR** | Z-Score 90d < -2.5 **e** RSI 14 < 30 **e** Fear & Greed < 25 | Sobrevenda extrema com pânico no mercado |
-| **PREPARAR** | Z-Score 90d < -1.5 **e** RSI 14 < 40 | Radar: escorregando para a zona de compra |
-| **NEUTRO** | demais casos | — |
+| **COMPRAR** | Fechamento acima da média de 200 dias (SMA 200) da moeda **e** o BTC também acima da SMA 200 dele | Comprar, ou segurar se já tem |
+| **PREPARAR** | Fechamento até 3% abaixo da SMA 200 da moeda e subindo há 5 dias (e BTC em alta) | Radar: perto de cruzar |
+| **NEUTRO** | Demais casos | Ficar de fora |
 
 Alertas de virada em relação ao dia anterior:
 
 - `COMPRAR AGORA`: virou COMPRAR hoje.
+- `VENDER AGORA`: estava em COMPRAR e deixou de estar.
 - `NO RADAR`: entrou em PREPARAR hoje.
-- `SAIU DO RADAR`: estava no radar e voltou a NEUTRO.
+- `SAIU DO RADAR`: estava em PREPARAR e voltou a NEUTRO.
+
+**Pânico** (z-score de 90 dias < -2,5, RSI < 30 e Fear & Greed < 25) era a regra de compra anterior. Perdeu dinheiro no backtest e hoje é apenas um aviso (`panic` nos dados, "em pânico" no painel), sem recomendação de compra.
 
 ### Regras de venda
 
 Valem para as suas posições e para o backtest. Quando mais de uma dispara no mesmo dia, vale a primeira da tabela:
 
-| Motivo | Regra | Objetivo |
-|---|---|---|
-| **STOP** | Perda de 20% sobre o preço de compra | Cortar antes de cair mais |
-| **PROTEGER LUCRO** | Subiu 15% ou mais e recuou 10% a partir do pico | Travar o lucro |
-| **ALVO** | Comprou abaixo da média de 90 dias e o preço voltou a ela, com lucro | Reversão completa |
-| **SOBRECOMPRADO** | RSI ≥ 70 com lucro | Realizar na euforia |
-| **TEMPO** | 180 dias sem nenhuma das anteriores | Liberar o capital |
+| Motivo | Regra |
+|---|---|
+| **STOP** | Perda de 20% sobre o preço de compra (proteção extra) |
+| **TENDENCIA** | A moeda fechou abaixo da SMA 200 dela |
+| **MERCADO** | O BTC fechou abaixo da SMA 200 dele |
 
-O painel mostra, para cada posição, SEGURAR ou VENDER com o motivo e a data em que a regra disparou. Também mostra os preços de referência: stop, trava de lucro e alvo.
+O painel mostra, para cada posição, SEGURAR ou VENDER com o motivo e a data em que a regra disparou. O preço de referência é "vender se fechar o dia abaixo de" = a SMA 200 atual.
+
+**Sobre o STOP:** no backtest de carteira do BTC+ETH o resultado é idêntico com e sem ele (a SMA 200 sempre dispara antes ou no mesmo dia), e nas 15 moedas melhora um pouco (treino +383% contra +354%; teste +52% contra +50%). Como não piora, ficou como proteção extra para posições compradas bem acima da média. `ExitRules(stop_loss=None)` o desliga.
 
 ## Requisitos
 
@@ -71,9 +76,12 @@ A primeira execução baixa todo o histórico, em cerca de 40 segundos para as 1
 
 ```
 Ciclo 2026-10-14 · 15 ativos · F&G 53
-  estágios: {'NEUTRO': 15}
-  backtest referência semanal: 5872 operações · acerto 69% · retorno médio +1.7% · mediana +5.1%
-  backtest sinal COMPRAR: 86 operações · acerto 55% · retorno médio -5.1% · mediana +2.0%
+  estágios: {'NEUTRO': 13, 'COMPRAR': 2}
+  operações da tendência (BTC/ETH): 61 fechadas · acerto 26% · retorno médio +25.0%
+  carteira BTC+ETH treino · TENDENCIA: +293.7% (+31.5%/ano) · pior queda -59.1%
+  carteira BTC+ETH teste · TENDENCIA: +209.5% (+34.7%/ano) · pior queda -29.3%
+  carteira BTC+ETH treino · COMPRAR_E_SEGURAR: +67.4% (+10.8%/ano) · pior queda -83.1%
+  carteira BTC+ETH teste · COMPRAR_E_SEGURAR: +235.0% (+37.6%/ano) · pior queda -59.9%
 ```
 
 | Modo | Comando |
@@ -93,10 +101,10 @@ npm --prefix frontend run dev
 Acesse o endereço que aparece na linha `Local:` do terminal, normalmente http://localhost:5173. O painel só funciona enquanto esse comando estiver rodando. Ele mostra:
 
 - **Hoje:** o que fazer, em uma frase, e o humor do mercado (Fear & Greed).
-- **Suas posições:** uma ficha por compra com Segurar/Vender, o motivo em português simples, o resultado e os preços de limite de perda e de garantia de lucro.
-- **Todas as moedas:** da mais barata em relação ao normal para a mais cara, com a distância da média de 90 dias. Clique numa para ver o gráfico.
-- **Gráfico da moeda:** preço e média de 90 dias desde o início dos dados, sinais de compra passados, vendas simuladas com o resultado e as suas compras. Passe o mouse para ler o preço de cada dia.
-- **A regra de compra funciona?:** a resposta direta e a comparação com comprar sem critério.
+- **Suas posições:** uma ficha por compra com Segurar/Vender, o motivo em português simples, o resultado, o preço abaixo do qual vender e o limite de perda.
+- **Todas as moedas:** a recomendação para BTC e ETH, e a distância da média de 200 dias de todas. Clique numa para ver o gráfico.
+- **Gráfico da moeda:** preço, média de 90 dias e média de 200 dias desde o início dos dados, entradas e saídas da regra e as suas compras. Passe o mouse para ler o preço de cada dia.
+- **A regra de compra funciona?:** a comparação de carteira com comprar e segurar (retorno, por ano, pior queda e tempo comprado), em treino e teste.
 - **Como funciona:** as regras de compra e venda explicadas.
 
 As decisões visuais (cores, tipografia, componentes) estão em [frontend/DESIGN.md](frontend/DESIGN.md).
@@ -174,31 +182,66 @@ O `mcp_server.py` expõe a tool `run_crypto_pipeline`. Adicione dentro de `mcpSe
 
 ## O que o backtest mostra
 
-O backtest simula cada sinal COMPRAR desde 2017 com as regras de venda acima. Para dizer se o sinal tem vantagem, compara com uma **referência**: comprar toda semana, em todas as moedas, sem critério, com as mesmas regras de venda.
+O backtest é de **carteira**: peso igual entre as moedas que já têm dados, com taxa de 0,1% sobre cada mudança de posição. A posição decidida no fechamento do dia t vale para o retorno de t+1, e todas as estratégias só começam quando a SMA 200 da moeda existe. A regra foi escolhida no **treino (2018–2022)** e conferida no **teste (2023–2026)**, dados que a escolha não viu.
 
 Resultado com dados até 2026-10-14:
 
-| | Operações | Acerto | Retorno médio | Mediana |
-|---|---|---|---|---|
-| Sinal COMPRAR | 86 | 55% | **-5,1%** | +2,0% |
-| Referência semanal | 5.872 | 69% | **+1,7%** | +5,1% |
+**Só BTC + ETH**
 
-**O sinal de pânico rendeu menos do que comprar sem critério.**
+| Estratégia | Período | Retorno total | Por ano | Pior queda | Sharpe | Tempo comprado |
+|---|---|---|---|---|---|---|
+| Tendência + BTC em alta (regra do painel) | treino | **+293,7%** | 31,5% | -59,1% | 0,8 | 41% |
+| Comprar e segurar | treino | +67,4% | 10,8% | -83,1% | 0,5 | 100% |
+| Regra antiga (pânico) | treino | -49,5% | -12,8% | -50,7% | -0,7 | 9% |
+| Tendência + BTC em alta (regra do painel) | teste | +209,5% | 34,7% | **-29,3%** | 1,0 | 60% |
+| Comprar e segurar | teste | +235,0% | 37,6% | -59,9% | 0,9 | 100% |
+| Regra antiga (pânico) | teste | +22,0% | 5,4% | -22,8% | 0,4 | 18% |
 
-- **Por quê:** 38 das 86 operações bateram no STOP de -20%, em média 3 semanas após a compra. Em mercados de baixa (2018, 2022), o pânico extremo costuma continuar por semanas: o sinal compra a "faca caindo".
-- **Variações testadas:** esperar o repique, comprar só com o BTC acima da média de 200 dias e stops mais largos ou mais curtos. Escolhi a melhor no período 2017–2022 e conferi em 2023–2026, dados que a escolha não viu. Nenhuma ficou consistentemente positiva.
-- **Onde vai melhor:** em BTC/ETH o sinal se sai melhor (-1,8% de média) do que nas altcoins (-6,2%).
+**As 15 moedas** (tendência = fechamento acima da SMA 200 da própria moeda, sem filtro do BTC)
 
-Use COMPRAR como **alerta de pânico** para olhar o mercado com atenção, não como ordem automática de compra. O painel mostra essa comparação sempre atualizada. Se o mercado mudar e o sinal passar a superar a referência, o aviso muda sozinho.
+| Estratégia | Período | Retorno total | Pior queda |
+|---|---|---|---|
+| Tendência | treino | +375% | -60,8% |
+| Comprar e segurar | treino | +132% | -81,7% |
+| Regra antiga (pânico) | treino | -31,7% | -36,1% |
+| Tendência | teste | +53,5% | -50,4% |
+| Comprar e segurar | teste | +164,9% | -67,8% |
+| Regra antiga (pânico) | teste | -3,8% | -20,8% |
+
+O que isso quer dizer:
+
+- **O pânico perdeu dinheiro.** Comprar no pânico rendeu -49,5% no treino com BTC+ETH, contra +67,4% de comprar e segurar. Por isso virou só um aviso.
+- **A tendência rendeu mais no treino e menos no teste, com metade da queda.** No teste o BTC+ETH comprado e segurado rendeu um pouco mais (+235% contra +209,5%), mas passou por uma queda de -59,9% contra -29,3% da regra. A vantagem da regra está em ser mais fácil de suportar, não em render mais.
+- **Nas 15 moedas a regra não compensa no teste** (+53,5% contra +164,9%), por isso a recomendação é só para BTC e ETH.
+- **A regra erra muito e acerta pouco:** das 61 operações simuladas em BTC e ETH, 26% terminaram no lucro, com resultado médio de +25%. As perdas são pequenas (a regra sai cedo) e alguns ganhos são enormes (+318% no BTC em 2020–2021). Quem não aguenta ver várias pequenas perdas seguidas dificilmente segue a regra.
+
+O painel mostra a comparação do pipeline do dia (`performance.parquet`). Ela usa a regra do painel (tendência + BTC em alta + STOP) também para as 15 moedas, então os números de "as 15 moedas" do painel diferem um pouco dos da tabela acima (treino +383%, teste +52% no painel): é o filtro do BTC e o STOP de -20%.
+
+### Reproduzir a tabela
+
+```bash
+uv run python research/strategy_comparison.py
+```
+
+O script lê a base local, avalia sete estratégias (comprar e segurar, pânico, tendência, tendência + BTC, cruzamento de médias, momento de 90 dias e compra de queda dentro da alta) nos dois universos e períodos, e imprime as tabelas. É o mesmo código de carteira do pipeline (`trade_simulator.evaluate_portfolio`).
+
+### Limitações
+
+- **Viés de sobrevivência:** o universo são as moedas que existem hoje. Moedas que quebraram ou saíram do top 15 não estão na amostra, o que favorece qualquer estratégia de comprar moedas.
+- **Uma única amostra histórica:** são poucos ciclos de mercado (dois grandes ciclos de alta e baixa do BTC). Uma regra que funcionou neles pode não funcionar no próximo.
+- **O passado não garante o futuro.** O treino/teste reduz o risco de ajustar a regra aos dados, mas não o elimina.
+- **Sem impostos** (ganho de capital, IR sobre vendas) e execução ideal: compra e venda exatamente no fechamento, sem diferença entre preço e execução (slippage), além da taxa de 0,1%.
+- **A regra atrasa:** a média de 200 dias reage devagar; a regra compra depois da virada e vende depois do topo.
 
 ## Configuração
 
 | O quê | Onde |
 |---|---|
 | Moedas monitoradas (par Binance → id CoinGecko) | `src/config.py` (`UNIVERSE`) |
-| Limiares de COMPRAR e PREPARAR | `src/transformers/anomaly_detector.py` (`SignalRules`) |
-| Regras de venda | `src/transformers/trade_simulator.py` (`ExitRules`) |
-| Janela entre episódios de COMPRAR | `src/transformers/trade_simulator.py` (`EntryRules.cooldown`, 14 dias) |
+| Moedas com recomendação de compra | `src/config.py` (`RECOMMENDED`; no painel, `RECOMMENDED_SYMBOLS` em `frontend/src/data/coins.ts`) |
+| Moeda do filtro de mercado, períodos de treino/teste e taxa | `src/config.py` (`REGIME_SYMBOL`, `TRAIN_PERIOD`, `TEST_PERIOD`, `FEE_PER_SIDE`) |
+| Janela da média, distância do radar e alerta de pânico | `src/transformers/anomaly_detector.py` (`SignalRules`) |
+| Regras de venda (STOP) | `src/transformers/trade_simulator.py` (`ExitRules`) |
 
 Depois de mudar uma regra, rode `uv run python -m src.pipeline --offline` para recalcular tudo sem baixar nada.
 
@@ -214,15 +257,18 @@ src/
     coingecko_adapter.py     market cap atual (/coins/markets)
     fng_adapter.py           Fear & Greed Index (alternative.me)
   transformers/            T — regras de negócio puras, sem I/O
-    anomaly_detector.py      Z-Score, RSI e estágio de cada dia (vetorizado)
+    anomaly_detector.py      SMA 200, tendência, estágio e alerta de pânico de cada dia (vetorizado)
     daily_alerts.py          alertas de virada contra o dia anterior
-    trade_simulator.py       regras de venda, backtest e referência
+    trade_simulator.py       operações da tendência e backtest de carteira (treino/teste, taxa)
+    panic_backtest.py        a regra antiga do pânico, congelada só para comparação
     position_advisor.py      SEGURAR / VENDER das suas posições
   loaders/                 L — Parquet com escrita atômica
     market_store.py          base histórica (data/market)
     history_store.py         snapshot diário (data/signals/history)
     positions_store.py       suas posições (data/positions)
     parquet_loader.py        publicação para o painel
+research/
+  strategy_comparison.py   reproduz a tabela de estratégias (treino x teste)
 frontend/                  React + TypeScript + Tailwind
   DESIGN.md                contrato visual: tokens, tipografia, componentes, o que evitar
   src/data/                leitura e validação do Parquet + cálculos e textos puros do painel
@@ -236,8 +282,9 @@ Arquivos publicados em `frontend/public/` (gerados, fora do Git):
 | Arquivo | Conteúdo |
 |---|---|
 | `daily_signals.parquet` | Estágio e alertas do dia |
-| `history.parquet` | Preço, indicadores e estágio de todos os dias |
-| `backtest.parquet` | Cada operação simulada (sinal e referência) |
+| `history.parquet` | Preço, indicadores (SMA 90 e 200, RSI, z-score) e estágio de todos os dias |
+| `backtest.parquet` | Cada operação simulada da regra de tendência (BTC e ETH) |
+| `performance.parquet` | Carteira: tendência x comprar e segurar x pânico, em treino e teste |
 | `positions.parquet` | Suas posições com a recomendação |
 
 ## Desenvolvimento
@@ -268,5 +315,5 @@ npm --prefix frontend run build
 | localhost não abre ou mostra outra coisa | O painel não está rodando, ou subiu em outra porta | Rode `npm --prefix frontend run dev` e use o endereço da linha `Local:` |
 | Posição nova não aparece | Página em cache | Recarregue a página |
 | Nenhum alerta no primeiro dia | Não há dia anterior salvo | Normal; aparecem a partir do segundo dia |
-| Nenhum ativo em COMPRAR por semanas | O F&G precisa estar abaixo de 25 | Esperado: a regra só dispara em pânico de mercado |
+| BTC e ETH em NEUTRO por meses | O BTC está abaixo da média de 200 dias | Esperado: em mercado de baixa a regra manda ficar de fora |
 | `HTTP 451` da Binance | Bloqueio regional da api.binance.com | Rodar de uma região onde a Binance global atende |

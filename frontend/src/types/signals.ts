@@ -3,21 +3,28 @@
  * Espelham os schemas Python — mudou lá, muda aqui no mesmo commit:
  *   DailySignal   daily_alerts.DAILY_SCHEMA        (daily_signals.parquet)
  *   HistoryPoint  anomaly_detector.HISTORY_SCHEMA  (history.parquet)
- *   Trade         trade_simulator.BACKTEST_SCHEMA  (backtest.parquet)
+ *   Trade         trade_simulator.TRADE_SCHEMA     (backtest.parquet)
+ *   Performance   trade_simulator.PERFORMANCE_SCHEMA (performance.parquet)
  *   Position      position_advisor.POSITION_SCHEMA (positions.parquet)
  */
 
 export const STAGES = ["COMPRAR", "PREPARAR", "NEUTRO"] as const;
 export type Stage = (typeof STAGES)[number];
 
-export const ALERTS = ["COMPRAR AGORA", "NO RADAR", "SAIU DO RADAR"] as const;
+export const ALERTS = ["COMPRAR AGORA", "VENDER AGORA", "NO RADAR", "SAIU DO RADAR"] as const;
 export type Alert = (typeof ALERTS)[number];
 
-export const EXIT_REASONS = ["STOP", "PROTEGER LUCRO", "ALVO", "SOBRECOMPRADO", "TEMPO"] as const;
+export const EXIT_REASONS = ["STOP", "TENDENCIA", "MERCADO"] as const;
 export type ExitReason = (typeof EXIT_REASONS)[number];
 
-export const STRATEGIES = ["SINAL", "REFERENCIA"] as const;
+export const STRATEGIES = ["TENDENCIA", "COMPRAR_E_SEGURAR", "PANICO"] as const;
 export type Strategy = (typeof STRATEGIES)[number];
+
+export const PERIODS = ["TREINO", "TESTE"] as const;
+export type Period = (typeof PERIODS)[number];
+
+export const PORTFOLIOS = ["PRINCIPAIS", "TODAS"] as const;
+export type Portfolio = (typeof PORTFOLIOS)[number];
 
 export const TRADE_STATUSES = ["FECHADA", "ABERTA"] as const;
 export type TradeStatus = (typeof TRADE_STATUSES)[number];
@@ -31,12 +38,15 @@ export interface DailySignal {
   readonly close: number;
   readonly sma_90: number | null;
   readonly zscore_90: number | null;
+  readonly sma_200: number | null;
   readonly rsi_14: number | null;
   readonly market_cap_usd: number | null;
   readonly total_volume_usd: number | null;
   readonly fng_value: number | null;
   readonly fng_classification: string | null;
-  readonly buy_signal: boolean;
+  readonly regime_up: boolean;
+  readonly uptrend: boolean;
+  readonly panic: boolean;
   readonly stage: Stage;
   readonly prev_stage: Stage | null;
   readonly alert: Alert | null;
@@ -48,13 +58,16 @@ export interface HistoryPoint {
   readonly close: number;
   readonly sma_90: number | null;
   readonly zscore_90: number | null;
+  readonly sma_200: number | null;
   readonly rsi_14: number | null;
   readonly fng_value: number | null;
+  readonly regime_up: boolean;
+  readonly uptrend: boolean;
+  readonly panic: boolean;
   readonly stage: Stage;
 }
 
 export interface Trade {
-  readonly strategy: Strategy;
   readonly trade_id: string;
   readonly symbol: string;
   readonly entry_ts: Date;
@@ -65,6 +78,20 @@ export interface Trade {
   readonly exit_reason: ExitReason | null;
   readonly return_pct: number | null;
   readonly days_held: number | null;
+}
+
+/** Uma linha de performance.parquet: uma estratégia numa carteira e num período. */
+export interface Performance {
+  readonly universe: Portfolio;
+  readonly strategy: Strategy;
+  readonly period: Period;
+  readonly start: Date;
+  readonly end: Date;
+  readonly total_return_pct: number;
+  readonly annual_return_pct: number;
+  readonly max_drawdown_pct: number;
+  readonly sharpe: number | null;
+  readonly invested_pct: number;
 }
 
 export interface Position {
@@ -82,8 +109,8 @@ export interface Position {
   readonly reason: ExitReason | null;
   readonly signal_ts: Date | null;
   readonly stop_price: number | null;
-  readonly trail_price: number | null;
-  readonly target_price: number | null;
+  readonly sell_below_price: number | null;
+  readonly above_sma_pct: number | null;
 }
 
 /** position_advisor.CLOSED_SCHEMA (closed_positions.parquet) */
@@ -103,6 +130,7 @@ export interface Dashboard {
   readonly signals: readonly DailySignal[];
   readonly history: readonly HistoryPoint[];
   readonly trades: readonly Trade[];
+  readonly performance: readonly Performance[];
   readonly positions: readonly Position[];
   readonly closed: readonly ClosedPosition[];
 }

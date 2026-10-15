@@ -1,4 +1,4 @@
-import { Check, CurrencyDollar, Plus, Receipt, ShieldWarning, LockKey, Tag, Target, Trash, X } from "@phosphor-icons/react";
+import { Check, CurrencyDollar, Plus, Receipt, ShieldWarning, Tag, Trash, TrendDown, X } from "@phosphor-icons/react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { ApiError, addPurchase, deletePosition, registerSale } from "../data/api";
 import { REASON_TEXT, coinName, fmt, parseAmount, signTone, toInput, todayIso } from "../data/analytics";
@@ -167,20 +167,21 @@ function PositionCard({ p, onChanged }: { readonly p: Position; readonly onChang
         <span>
           {sell && p.reason !== null
             ? `${REASON_TEXT[p.reason].replace(/^./, (c) => c.toUpperCase())} (desde ${fmt.day(p.signal_ts)}).`
-            : "Nenhuma regra de venda disparou. Pode continuar com ela."}
+            : "Nenhuma regra de venda disparou. A moeda segue em tendência de alta: pode continuar com ela."}
         </span>
       </p>
 
       <dl className="mt-4">
         <Fact icon={<CurrencyDollar size={16} aria-hidden />} label="Você pagou" value={fmt.price(p.entry_price)} />
         <Fact icon={<Tag size={16} aria-hidden />} label="Preço hoje" value={fmt.price(p.last_close)} />
-        <Fact icon={<ShieldWarning size={16} aria-hidden />} label="Limite de perda: vender se cair a" value={fmt.price(p.stop_price)} />
         <Fact
-          icon={<LockKey size={16} aria-hidden />}
-          label="Garantir lucro: vender se cair a"
-          value={p.trail_price === null ? "ativa depois de subir 15%" : fmt.price(p.trail_price)}
+          icon={<TrendDown size={16} aria-hidden />}
+          label="Vender se fechar o dia abaixo de"
+          value={fmt.price(p.sell_below_price)}
         />
-        <Fact icon={<Target size={16} aria-hidden />} label="Preço médio de 90 dias" value={fmt.price(p.target_price)} />
+        {p.stop_price !== null && (
+          <Fact icon={<ShieldWarning size={16} aria-hidden />} label="Limite de perda: vender se cair a" value={fmt.price(p.stop_price)} />
+        )}
       </dl>
 
       {mode === "view" && (

@@ -3,8 +3,9 @@
 Puro (CLAUDE.md §1). O histórico é lido/escrito por `src.loaders.history_store`.
 
     alert = "COMPRAR AGORA"   estágio virou COMPRAR hoje (ontem não era)
+    alert = "VENDER AGORA"    estava em COMPRAR e deixou de estar (fechou abaixo da SMA 200, ou o BTC fechou)
     alert = "NO RADAR"        entrou em PREPARAR hoje (ontem era NEUTRO ou não existia)
-    alert = "SAIU DO RADAR"   estava em PREPARAR/COMPRAR e voltou a NEUTRO
+    alert = "SAIU DO RADAR"   estava em PREPARAR e voltou a NEUTRO
     alert = <NA>              sem mudança relevante
 """
 
@@ -17,6 +18,7 @@ from .anomaly_detector import OUTPUT_SCHEMA, STAGE_BUY, STAGE_NEUTRAL, STAGE_WAT
 
 ALERT_BUY = "COMPRAR AGORA"
 ALERT_WATCH = "NO RADAR"
+ALERT_SELL = "VENDER AGORA"
 ALERT_EXIT = "SAIU DO RADAR"
 
 DAILY_SCHEMA: dict[str, str] = {**OUTPUT_SCHEMA, "prev_stage": "string", "alert": "string"}
@@ -28,7 +30,7 @@ def compare_with_previous(today: pd.DataFrame, previous: pd.DataFrame | None) ->
     """Adiciona `prev_stage` e `alert` ao snapshot de `anomaly_detector.detect`.
 
     `previous`: snapshot do último dia salvo (qualquer schema com `symbol` e `stage`) ou None.
-    Ordenado por alerta de compra, depois estágio, depois zscore_90 crescente.
+    Ordenado por alerta de compra, depois estágio, depois distância ao preço médio de 200 dias (maior primeiro).
     """
     prev = (
         previous[["symbol", "stage"]].rename(columns={"stage": "prev_stage"})
@@ -42,10 +44,11 @@ def compare_with_previous(today: pd.DataFrame, previous: pd.DataFrame | None) ->
     out["alert"] = np.select(
         [
             stage.eq(STAGE_BUY) & prev_stage.ne(STAGE_BUY),
+            stage.ne(STAGE_BUY) & prev_stage.eq(STAGE_BUY),
             stage.eq(STAGE_WATCH) & prev_stage.eq(STAGE_NEUTRAL),
-            stage.eq(STAGE_NEUTRAL) & prev_stage.ne(STAGE_NEUTRAL),
+            stage.eq(STAGE_NEUTRAL) & prev_stage.eq(STAGE_WATCH),
         ],
-        [ALERT_BUY, ALERT_WATCH, ALERT_EXIT],
+        [ALERT_BUY, ALERT_SELL, ALERT_WATCH, ALERT_EXIT],
         default="",
     )
     out = out[list(DAILY_SCHEMA)].astype(DAILY_SCHEMA)
@@ -54,8 +57,9 @@ def compare_with_previous(today: pd.DataFrame, previous: pd.DataFrame | None) ->
     keys = pd.DataFrame(
         {
             "buy_alert": out["alert"].eq(ALERT_BUY).fillna(False).astype(int),
+            "distance": (out["close"] / out["sma_200"]).fillna(-np.inf),
             "stage_rank": out["stage"].map(_STAGE_ORDER).astype(int),
         }
     )
-    order = np.lexsort((out["zscore_90"].fillna(np.inf).to_numpy(), keys["stage_rank"].to_numpy(), -keys["buy_alert"].to_numpy()))
+    order = np.lexsort((-keys["distance"].to_numpy(), keys["stage_rank"].to_numpy(), -keys["buy_alert"].to_numpy()))
     return out.iloc[order].reset_index(drop=True)

@@ -18,3 +18,6 @@ export const coinFullName = (symbol: string): string => {
   const ticker = symbol.split("/")[0] ?? symbol;
   return NAMES[ticker] ?? ticker;
 };
+
+/** Moedas com recomendação de compra. Espelha RECOMMENDED em src/config.py. */
+export const RECOMMENDED_SYMBOLS: ReadonlySet<string> = new Set(["BTC/USDT", "ETH/USDT"]);

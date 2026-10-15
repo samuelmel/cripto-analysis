@@ -1,8 +1,6 @@
 import { ChartLineUp, Coins, Info, Scales, Wallet } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  allByZscore,
-  byStrategy,
   coinName,
   fmt,
   fngLabel,
@@ -11,7 +9,7 @@ import {
   recentCloses,
   todayVerdict,
 } from "../data/analytics";
-import { coinFullName } from "../data/coins";
+import { RECOMMENDED_SYMBOLS, coinFullName } from "../data/coins";
 import { MissingFileError, loadDashboard } from "../data/loadSignals";
 import type { Dashboard as Data } from "../types/signals";
 import { CoinLogo } from "./CoinLabel";
@@ -49,7 +47,7 @@ export function Dashboard() {
     <div className="mx-auto max-w-[1120px] px-4 pt-10 pb-24 sm:px-8">
       <header className="mb-10">
         <h1 className="text-[28px] font-semibold tracking-[-0.01em]">Monitor de criptomoedas</h1>
-        <p className="mt-1 text-muted">O que fazer hoje com as 15 maiores moedas, e com as que você já comprou.</p>
+        <p className="mt-1 text-muted">O que fazer hoje com Bitcoin e Ethereum, o que acontece com as outras 13 maiores moedas, e com o que você já comprou.</p>
       </header>
       {state.status === "loading" && <p className="text-muted">Carregando os dados…</p>}
       {state.status === "missing" && (
@@ -71,25 +69,18 @@ export function Dashboard() {
 }
 
 function Ready({ data, onChanged }: { readonly data: Data; readonly onChanged: () => Promise<void> }) {
-  const { signals, history, trades, positions, closed } = data;
+  const { signals, history, trades, performance, positions, closed } = data;
   const first = signals[0];
   const [selected, setSelected] = useState<string>(positions[0]?.symbol ?? "BTC/USDT");
 
   const verdict = useMemo(() => todayVerdict(signals, positions), [signals, positions]);
-  const signalTrades = useMemo(() => byStrategy(trades, "SINAL"), [trades]);
-  const referenceTrades = useMemo(() => byStrategy(trades, "REFERENCIA"), [trades]);
   const chartHistory = useMemo(() => historyOf(history, selected), [history, selected]);
-  const chartTrades = useMemo(() => signalTrades.filter((t) => t.symbol === selected), [signalTrades, selected]);
+  const chartTrades = useMemo(() => trades.filter((t) => t.symbol === selected), [trades, selected]);
   const chartPositions = useMemo(() => positions.filter((p) => p.symbol === selected), [positions, selected]);
-  const market = useMemo(() => allByZscore(signals), [signals]);
   const coinsByName = useMemo(() => signals.toSorted((a, b) => a.symbol.localeCompare(b.symbol)), [signals]);
   const sparks = useMemo(
     () => new Map(signals.map((s) => [s.symbol, recentCloses(history, s.symbol)] as const)),
     [signals, history],
-  );
-  const since = useMemo(
-    () => history.reduce<Date | null>((m, h) => (m === null || h.timestamp < m ? h.timestamp : m), null),
-    [history],
   );
   const coin = coinName(selected);
 
@@ -116,9 +107,9 @@ function Ready({ data, onChanged }: { readonly data: Data; readonly onChanged: (
         id="moedas"
         title="Todas as moedas"
         icon={<Coins size={ICON} aria-hidden />}
-        lead="Da mais barata em relação ao normal para a mais cara. Clique numa moeda para ver o gráfico e o histórico dela."
+        lead="Só Bitcoin e Ethereum recebem recomendação de compra. As outras são acompanhadas. Clique numa moeda para ver o gráfico e o histórico dela."
       >
-        <MarketTable rows={market} sparks={sparks} selected={selected} onSelect={setSelected} />
+        <MarketTable rows={signals} recommended={RECOMMENDED_SYMBOLS} sparks={sparks} selected={selected} onSelect={setSelected} />
       </Section>
 
       <section aria-labelledby="detalhe" className="mt-16">
@@ -131,15 +122,15 @@ function Ready({ data, onChanged }: { readonly data: Data; readonly onChanged: (
           <Block>
             <PriceChart history={chartHistory} trades={chartTrades} positions={chartPositions} />
           </Block>
-          <h3 className="mt-8 font-medium">Cada vez que o sinal de compra disparou para {coin}</h3>
+          <h3 className="mt-8 font-medium">Cada período em que a regra mandou comprar ou segurar {coin}</h3>
           <div className="mt-3">
-            <TradeList trades={chartTrades} coin={coin} />
+            <TradeList trades={chartTrades} coin={coin} recommended={RECOMMENDED_SYMBOLS.has(selected)} />
           </div>
         </div>
       </section>
 
       <Section id="funciona" title="A regra de compra funciona?" icon={<Scales size={ICON} aria-hidden />}>
-        <BacktestPanel signal={signalTrades} reference={referenceTrades} since={fmt.day(since)} />
+        <BacktestPanel performance={performance} trades={trades} />
       </Section>
 
       <Section id="como" title="Como funciona" icon={<Info size={ICON} aria-hidden />}>
