@@ -23,6 +23,7 @@ export const STAGE_ICON: Record<Stage, Icon | null> = {
   COMPRAR: HandCoins,
   PREPARAR: Eye,
   NEUTRO: null,
+  INDISPONÍVEL: WarningCircle,
 };
 
 export const VERDICT_ICON: Record<Tone, Icon> = {

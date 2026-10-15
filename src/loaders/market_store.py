@@ -26,6 +26,10 @@ def _fng_path(base: Path) -> Path:
     return base / "fng" / "data.parquet"
 
 
+class MixedSourceError(ValueError):
+    """Candles de outra fonte para uma moeda que já tem base de uma fonte diferente."""
+
+
 def _upsert(old: pd.DataFrame | None, new: pd.DataFrame) -> pd.DataFrame:
     merged = new if old is None or old.empty else pd.concat([old, new], ignore_index=True)
     merged = merged.drop_duplicates(["symbol", "timestamp"], keep="last")
@@ -53,6 +57,13 @@ def write_ohlcv(df: pd.DataFrame, base: Path = MARKET_DIR) -> int:
     for symbol, part in df.groupby("symbol", observed=True):
         path = _ohlcv_path(str(symbol), base)
         old = pd.read_parquet(path) if path.is_file() else None
+        if old is not None and "source" in old.columns:
+            stored, incoming = set(old["source"].dropna().unique()), set(part["source"].dropna().unique())
+            if stored and incoming and stored != incoming:
+                raise MixedSourceError(
+                    f"{symbol}: a base tem candles de {sorted(stored)} e chegaram de {sorted(incoming)}; "
+                    "não misturamos fornecedores (apague a base dessa moeda para trocar de fonte)"
+                )
         write_parquet(_upsert(old, part), path, compression="zstd")
     return int(df["symbol"].nunique())
 

@@ -117,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         remove(args.position_id)
         print(f"posição {args.position_id} removida.")
 
-    refresh_positions()  # atualiza as posições no painel com a base local, sem rede
+    refresh_positions(datetime.now(timezone.utc))  # atualiza as posições no painel com a base local, sem rede
     print(show())
     return 0
 

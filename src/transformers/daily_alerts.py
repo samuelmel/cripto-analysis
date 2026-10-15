@@ -6,7 +6,7 @@ Puro (CLAUDE.md §1). O histórico é lido/escrito por `src.loaders.history_stor
     alert = "VENDER AGORA"    estava em COMPRAR e deixou de estar (fechou abaixo da SMA 200, ou o BTC fechou)
     alert = "NO RADAR"        entrou em PREPARAR hoje (ontem era NEUTRO ou não existia)
     alert = "SAIU DO RADAR"   estava em PREPARAR e voltou a NEUTRO
-    alert = <NA>              sem mudança relevante
+    alert = <NA>              sem mudança relevante, ou moeda INDISPONÍVEL (dado velho nunca gera alerta)
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .anomaly_detector import OUTPUT_SCHEMA, STAGE_BUY, STAGE_NEUTRAL, STAGE_WATCH
+from .anomaly_detector import OUTPUT_SCHEMA, STAGE_BUY, STAGE_NEUTRAL, STAGE_UNAVAILABLE, STAGE_WATCH
 
 ALERT_BUY = "COMPRAR AGORA"
 ALERT_WATCH = "NO RADAR"
@@ -23,7 +23,7 @@ ALERT_EXIT = "SAIU DO RADAR"
 
 DAILY_SCHEMA: dict[str, str] = {**OUTPUT_SCHEMA, "prev_stage": "string", "alert": "string"}
 
-_STAGE_ORDER = {STAGE_BUY: 0, STAGE_WATCH: 1, STAGE_NEUTRAL: 2}
+_STAGE_ORDER = {STAGE_BUY: 0, STAGE_WATCH: 1, STAGE_NEUTRAL: 2, STAGE_UNAVAILABLE: 3}
 
 
 def compare_with_previous(today: pd.DataFrame, previous: pd.DataFrame | None) -> pd.DataFrame:
@@ -44,7 +44,7 @@ def compare_with_previous(today: pd.DataFrame, previous: pd.DataFrame | None) ->
     out["alert"] = np.select(
         [
             stage.eq(STAGE_BUY) & prev_stage.ne(STAGE_BUY),
-            stage.ne(STAGE_BUY) & prev_stage.eq(STAGE_BUY),
+            stage.ne(STAGE_BUY) & stage.ne(STAGE_UNAVAILABLE) & prev_stage.eq(STAGE_BUY),
             stage.eq(STAGE_WATCH) & prev_stage.eq(STAGE_NEUTRAL),
             stage.eq(STAGE_NEUTRAL) & prev_stage.eq(STAGE_WATCH),
         ],

@@ -40,6 +40,9 @@ STRATEGY_TREND = "TENDENCIA"
 STRATEGY_HOLD = "COMPRAR_E_SEGURAR"
 STRATEGY_PANIC = "PANICO"
 
+# Perda de exatamente 20% (ex.: 0,50 -> 0,40) vale como STOP: sem a tolerância, 0,4/0,5 - 1 = -0,19999...
+STOP_TOLERANCE = 1e-9
+
 PERIOD_TRAIN = "TREINO"
 PERIOD_TEST = "TESTE"
 
@@ -166,7 +169,7 @@ def simulate(
     conditions = [paths["close"].lt(paths["sma_200"]), ~paths["regime_up"]]
     reasons = [EXIT_TREND, EXIT_REGIME]
     if rules.stop_loss is not None:
-        conditions.insert(0, paths["ret"].le(rules.stop_loss))
+        conditions.insert(0, paths["ret"].le(rules.stop_loss + STOP_TOLERANCE))
         reasons.insert(0, EXIT_STOP)
     paths["reason"] = np.select(conditions, reasons, default="")
 
@@ -226,7 +229,7 @@ def trend_positions(history: pd.DataFrame, rules: ExitRules = ExitRules()) -> pd
         started = up & ~up.groupby(symbol).shift(1, fill_value=False).astype(bool)
         run = started.astype(int).groupby(symbol).cumsum()
         entry_close = h["close"].where(started).groupby(symbol).ffill()
-        hit = (up & (h["close"] / entry_close - 1.0).le(rules.stop_loss)).astype(int)
+        hit = (up & (h["close"] / entry_close - 1.0).le(rules.stop_loss + STOP_TOLERANCE)).astype(int)
         stopped = hit.groupby([symbol, run]).cummax().astype(bool)
         position = up & ~stopped
     return wide(h.assign(position=position.astype(float)), "position")

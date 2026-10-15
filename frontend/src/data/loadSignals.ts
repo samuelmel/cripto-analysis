@@ -47,6 +47,7 @@ const parseSignal = (r: Row): DailySignal => ({
   uptrend: bool(r, "uptrend"),
   panic: bool(r, "panic"),
   stage: oneOf(STAGES, r, "stage"),
+  stage_reason: strOrNull(r, "stage_reason"),
   prev_stage: oneOfOrNull(STAGES, r, "prev_stage"),
   alert: oneOfOrNull(ALERTS, r, "alert"),
 });
@@ -109,6 +110,7 @@ const parsePosition = (r: Row): Position => ({
   stop_price: numOrNull(r, "stop_price"),
   sell_below_price: numOrNull(r, "sell_below_price"),
   above_sma_pct: numOrNull(r, "above_sma_pct"),
+  data_note: strOrNull(r, "data_note"),
 });
 
 const parseClosed = (r: Row): ClosedPosition => ({

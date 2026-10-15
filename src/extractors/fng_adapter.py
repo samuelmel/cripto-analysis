@@ -11,6 +11,8 @@ from .base_extractor import MARKET_SYMBOL, BaseExtractor, ExtractorError
 from .http import get_json
 
 API_URL = "https://api.alternative.me/fng/"
+MIN_INTERVAL = 1.0  # s entre chamadas; a documentação não declara limite, então o espaçamento é conservador
+_REQUIRED = ("timestamp", "value", "value_classification")
 
 
 class FearGreedAdapter(BaseExtractor):
@@ -23,7 +25,7 @@ class FearGreedAdapter(BaseExtractor):
     def fetch(self, start: datetime | None, end: datetime) -> list[dict[str, Any]]:
         """Leituras diárias mais recentes; `start=None` traz o histórico completo (limit=0)."""
         limit = 0 if start is None else max((end - start).days + 2, 1)
-        payload = get_json(API_URL, {"limit": limit, "format": "json"})
+        payload = get_json(API_URL, {"limit": limit, "format": "json"}, min_interval=MIN_INTERVAL)
         if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
             raise ExtractorError(f"{self.source}: resposta inesperada")
         data: list[dict[str, Any]] = payload["data"]
@@ -33,9 +35,12 @@ class FearGreedAdapter(BaseExtractor):
         if not raw:
             return pd.DataFrame()
         df = pd.DataFrame(raw)
+        missing = [c for c in _REQUIRED if c not in df.columns]
+        if missing:
+            raise ExtractorError(f"{self.source}: resposta incompleta, faltam campos {missing}")
         return pd.DataFrame(
             {
-                "timestamp": pd.to_datetime(pd.to_numeric(df["timestamp"]), unit="s", utc=True),
+                "timestamp": pd.to_datetime(pd.to_numeric(df["timestamp"], errors="coerce"), unit="s", utc=True),
                 "symbol": MARKET_SYMBOL,
                 "fng_value": pd.to_numeric(df["value"], errors="coerce"),
                 "fng_classification": df["value_classification"],

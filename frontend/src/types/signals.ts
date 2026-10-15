@@ -8,7 +8,7 @@
  *   Position      position_advisor.POSITION_SCHEMA (positions.parquet)
  */
 
-export const STAGES = ["COMPRAR", "PREPARAR", "NEUTRO"] as const;
+export const STAGES = ["COMPRAR", "PREPARAR", "NEUTRO", "INDISPONÍVEL"] as const;
 export type Stage = (typeof STAGES)[number];
 
 export const ALERTS = ["COMPRAR AGORA", "VENDER AGORA", "NO RADAR", "SAIU DO RADAR"] as const;
@@ -29,7 +29,7 @@ export type Portfolio = (typeof PORTFOLIOS)[number];
 export const TRADE_STATUSES = ["FECHADA", "ABERTA"] as const;
 export type TradeStatus = (typeof TRADE_STATUSES)[number];
 
-export const ACTIONS = ["VENDER", "SEGURAR"] as const;
+export const ACTIONS = ["VENDER", "SEGURAR", "INDISPONÍVEL"] as const;
 export type Action = (typeof ACTIONS)[number];
 
 export interface DailySignal {
@@ -48,6 +48,7 @@ export interface DailySignal {
   readonly uptrend: boolean;
   readonly panic: boolean;
   readonly stage: Stage;
+  readonly stage_reason: string | null;
   readonly prev_stage: Stage | null;
   readonly alert: Alert | null;
 }
@@ -111,6 +112,7 @@ export interface Position {
   readonly stop_price: number | null;
   readonly sell_below_price: number | null;
   readonly above_sma_pct: number | null;
+  readonly data_note: string | null;
 }
 
 /** position_advisor.CLOSED_SCHEMA (closed_positions.parquet) */

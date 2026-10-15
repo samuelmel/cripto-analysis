@@ -180,7 +180,12 @@ export function MarketTable({ rows, sparks, recommended, selected, onSelect }: {
               </span>
             </td>
             <td className={cell}>
-              {!recommended.has(s.symbol) ? (
+              {s.stage === "INDISPONÍVEL" ? (
+                <span className="flex flex-col gap-1">
+                  <Badge tone={stage.tone}>{stage.text}</Badge>
+                  <span className="whitespace-normal text-[13px] text-muted">{s.stage_reason}</span>
+                </span>
+              ) : !recommended.has(s.symbol) ? (
                 <span className="text-muted">Só acompanhada</span>
               ) : s.stage === "NEUTRO" ? (
                 <span className="text-muted">{stage.text}</span>

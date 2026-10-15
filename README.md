@@ -90,7 +90,7 @@ Ciclo 2026-10-14 · 15 ativos · F&G 53
 | Só reanalisa a base local, sem internet | `uv run python -m src.pipeline --offline` |
 | Baixa todo o histórico de novo | `uv run python -m src.pipeline --rebuild` |
 
-Se a Binance falhar, o pipeline aborta e não altera o que já foi publicado.
+Se uma fonte falhar, o pipeline continua: a falha vai para o registro de fontes e a moeda sem dado novo fica **INDISPONÍVEL** na análise (veja [Fontes de dados e qualidade](#fontes-de-dados-e-qualidade)). Só uma base local vazia aborta a execução.
 
 ### 2. Abrir o painel
 
@@ -180,6 +180,37 @@ O `mcp_server.py` expõe a tool `run_crypto_pipeline`. Adicione dentro de `mcpSe
 }
 ```
 
+## Fontes de dados e qualidade
+
+| Fonte | O que traz | Chamada | Persistência |
+|---|---|---|---|
+| Binance | Candles diários de preço e volume (a única fonte de preço) | `GET /api/v3/klines`, uma moeda por vez, até 1000 candles por página; a vela ainda aberta é descartada | `data/market/ohlcv_1d/symbol=…/data.parquet` (upsert por moeda e dia) |
+| CoinGecko | Market cap e volume atuais, uma foto por execução | `GET /coins/markets`, uma chamada para todas; chave Demo opcional no header `x-cg-demo-api-key` (`COINGECKO_API_KEY`) | `data/market/coingecko/data.parquet` |
+| alternative.me | Fear & Greed diário (só alimenta o aviso de pânico) | `GET /fng/` | `data/market/fng/data.parquet` |
+| (registro) | Quando cada fonte foi atualizada, com status e erro | gravado a cada atualização | `data/market/source_log/data.parquet` |
+
+Garantias:
+
+- **Rede:** timeout de 30 s por tentativa, no máximo 5 tentativas com espera de 2, 4, 8 e 16 s, `Retry-After` respeitado em 429/418 (ban longo desiste na hora) e espaçamento mínimo entre chamadas por fonte (Binance 0,2 s, CoinGecko e alternative.me 1 s). O plano Demo do CoinGecko permite 100 chamadas por minuto e 10 mil por mês; o pipeline usa uma por dia.
+- **Resposta incompleta ou fora do formato** (JSON inválido, campos faltando, candle curto) vira `ExtractorError`; nunca vira dado silenciosamente errado.
+- **Fonte secundária** (CoinGecko, Fear & Greed) fora do ar não derruba o pipeline: market cap fica nulo e o aviso de pânico não dispara.
+- **Fonte primária** (Binance) fora do ar para uma moeda: o erro é registrado e a análise segue com a base local; a moeda sem candle recente fica INDISPONÍVEL.
+- **Fornecedores não se misturam:** se chegarem candles de outra fonte para uma moeda que já tem base, a gravação é recusada.
+- **Auditoria dos candles** a cada execução (aparece no relatório): duplicados, fora de ordem, preço nulo/NaN/infinito/<= 0, fontes misturadas e lacunas de dias. Preço inválido e duplicados são descartados antes dos indicadores.
+- **Dado desatualizado nunca gera sinal atual:** o último candle fechado esperado é o de ontem (UTC); com mais de `MAX_STALE_DAYS` de atraso, ou sem 200 dias de histórico, ou com o BTC (filtro de mercado) indisponível, o estágio vira `INDISPONÍVEL` com o motivo em `stage_reason`, sem alertas e sem pânico. Posições dessa moeda também ficam INDISPONÍVEIS, a menos que o STOP já tenha disparado.
+
+### Universo de moedas
+
+Tudo em `src/config.py`: `UNIVERSE` (candidatas), `RECOMMENDED` (BTC e ETH), `MAX_EXTRA_COINS`, `MIN_HISTORY_DAYS`, `MIN_AVG_QUOTE_VOLUME_USD` com `VOLUME_WINDOW_DAYS`, e `EXCLUDED_BASES` com o motivo de cada exclusão (stablecoins, duplicatas de BTC/ETH) mais `LEVERAGED_SUFFIXES` (tokens alavancados, como BTCUP). A seleção é feita por `src/transformers/universe.py`, e o relatório lista quem ficou de fora e por quê. As 15 moedas atuais passam em todos os filtros.
+
+### Testes
+
+```bash
+uv run pytest
+```
+
+Sem chamadas reais de rede (um teste que tentar abrir conexão falha). Cobrem a fronteira da SMA 200, o filtro do BTC, o STOP, posições encerradas, o pipeline `--offline`, API indisponível, timeout, resposta incompleta e dado desatualizado.
+
 ## O que o backtest mostra
 
 O backtest é de **carteira**: peso igual entre as moedas que já têm dados, com taxa de 0,1% sobre cada mudança de posição. A posição decidida no fechamento do dia t vale para o retorno de t+1, e todas as estratégias só começam quando a SMA 200 da moeda existe. A regra foi escolhida no **treino (2018–2022)** e conferida no **teste (2023–2026)**, dados que a escolha não viu.
@@ -238,6 +269,7 @@ O script lê a base local, avalia sete estratégias (comprar e segurar, pânico,
 | O quê | Onde |
 |---|---|
 | Moedas monitoradas (par Binance → id CoinGecko) | `src/config.py` (`UNIVERSE`) |
+| Filtros e exclusões do universo, atraso máximo dos dados | `src/config.py` (`MAX_EXTRA_COINS`, `MIN_HISTORY_DAYS`, `MIN_AVG_QUOTE_VOLUME_USD`, `EXCLUDED_BASES`, `MAX_STALE_DAYS`) |
 | Moedas com recomendação de compra | `src/config.py` (`RECOMMENDED`; no painel, `RECOMMENDED_SYMBOLS` em `frontend/src/data/coins.ts`) |
 | Moeda do filtro de mercado, períodos de treino/teste e taxa | `src/config.py` (`REGIME_SYMBOL`, `TRAIN_PERIOD`, `TEST_PERIOD`, `FEE_PER_SIDE`) |
 | Janela da média, distância do radar e alerta de pânico | `src/transformers/anomaly_detector.py` (`SignalRules`) |
@@ -257,6 +289,8 @@ src/
     coingecko_adapter.py     market cap atual (/coins/markets)
     fng_adapter.py           Fear & Greed Index (alternative.me)
   transformers/            T — regras de negócio puras, sem I/O
+    universe.py              seleção do universo (exclusões, histórico, volume)
+    data_quality.py          auditoria dos candles e disponibilidade (INDISPONÍVEL)
     anomaly_detector.py      SMA 200, tendência, estágio e alerta de pânico de cada dia (vetorizado)
     daily_alerts.py          alertas de virada contra o dia anterior
     trade_simulator.py       operações da tendência e backtest de carteira (treino/teste, taxa)
@@ -266,6 +300,7 @@ src/
     market_store.py          base histórica (data/market)
     history_store.py         snapshot diário (data/signals/history)
     positions_store.py       suas posições (data/positions)
+    source_log.py            registro da atualização de cada fonte
     parquet_loader.py        publicação para o painel
 research/
   strategy_comparison.py   reproduz a tabela de estratégias (treino x teste)
@@ -316,4 +351,5 @@ npm --prefix frontend run build
 | Posição nova não aparece | Página em cache | Recarregue a página |
 | Nenhum alerta no primeiro dia | Não há dia anterior salvo | Normal; aparecem a partir do segundo dia |
 | BTC e ETH em NEUTRO por meses | O BTC está abaixo da média de 200 dias | Esperado: em mercado de baixa a regra manda ficar de fora |
+| Moeda aparece como "Sem dados confiáveis" | Dado desatualizado ou histórico curto; o motivo aparece na tabela | Rode `uv run python -m src.pipeline`; veja `data/market/source_log` se a fonte falhou |
 | `HTTP 451` da Binance | Bloqueio regional da api.binance.com | Rodar de uma região onde a Binance global atende |

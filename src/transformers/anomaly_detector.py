@@ -11,6 +11,8 @@ Estágio (`stage`), só para as moedas em `SignalRules.recommended` (padrão: BT
     COMPRAR    tendência de alta: comprar, ou segurar se já tem. Sai quando a condição deixa de valer
     PREPARAR   radar: fechou até 3% abaixo da SMA 200 e está subindo (perto do cruzamento)
     NEUTRO     fora da tendência, ou moeda só monitorada (sem recomendação)
+    INDISPONÍVEL  dado desatualizado ou insuficiente hoje, com o motivo em `stage_reason`
+                  (aplicado por `data_quality.mark_unavailable`, não por este módulo)
 
 Alerta de pânico (`panic`), apenas informativo e SEM recomendação de compra: a regra antiga
 (zscore_90 < -2.5, RSI < 30 e Fear & Greed < 25) perdeu dinheiro no backtest.
@@ -43,6 +45,7 @@ RSI_PERIOD = 14
 STAGE_BUY = "COMPRAR"
 STAGE_WATCH = "PREPARAR"
 STAGE_NEUTRAL = "NEUTRO"
+STAGE_UNAVAILABLE = "INDISPONÍVEL"  # sem dado confiável hoje (ver data_quality); nunca é gerado por classify_history
 
 HISTORY_SCHEMA: dict[str, str] = {
     "timestamp": "datetime64[ns, UTC]",
@@ -66,6 +69,7 @@ OUTPUT_SCHEMA: dict[str, str] = {
     "market_cap_usd": "float64",
     "total_volume_usd": "float64",
     **{k: v for k, v in HISTORY_SCHEMA.items() if k in _SNAPSHOT_TAIL},
+    "stage_reason": "string",  # motivo do INDISPONÍVEL; nulo nos demais estágios
 }
 
 
@@ -86,7 +90,7 @@ class SignalRules:
 
 def compute_indicators(binance: pd.DataFrame) -> pd.DataFrame:
     """Histórico com sma_90, zscore_90, sma_200 e rsi_14 por ativo. Uma linha por (symbol, dia)."""
-    df = binance.loc[binance["close"].gt(0), ["timestamp", "symbol", "close"]]
+    df = binance.loc[binance["close"].gt(0) & np.isfinite(binance["close"].to_numpy(dtype="float64")), ["timestamp", "symbol", "close"]]
     df = df.assign(
         timestamp=df["timestamp"].dt.floor("D"),
         symbol=df["symbol"].astype("category"),
@@ -203,7 +207,7 @@ def detect(
         coingecko  CoinGeckoMarketAdapter  (symbol = ticker, "BTC"); leitura até 1 dia após o fechamento
         fng        FearGreedAdapter        (symbol "MARKET")
     `history`: resultado já calculado de `classify_history` (evita recalcular).
-    Ativos sem candle no dia são omitidos. Ordenado por símbolo (a ordem de exibição vem de `daily_alerts`).
+    Sem `as_of`, cada moeda entra com o seu último candle (a desatualizada é marcada por `data_quality`); com `as_of`, ativos sem candle no dia são omitidos. Ordenado por símbolo (a ordem de exibição vem de `daily_alerts`).
     """
     hist = classify_history(binance, fng, rules) if history is None else history
     if hist.empty:
@@ -211,21 +215,28 @@ def detect(
 
     if as_of is None:
         day = hist["timestamp"].max()
+        snap = hist.sort_values(["symbol", "timestamp"]).groupby("symbol", sort=False).tail(1)  # último candle de cada moeda
     else:
         day = (as_of if as_of.tzinfo else as_of.tz_localize("UTC")).floor("D")
-    snap = hist[hist["timestamp"].eq(day)]
+        snap = hist[hist["timestamp"].eq(day)]
     if snap.empty:
         return _empty(OUTPUT_SCHEMA)
 
     close_ts = day + pd.Timedelta(days=1)
-    ts = coingecko["timestamp"]
-    market = coingecko[(ts >= close_ts - rules.asof_tolerance) & (ts < close_ts + pd.Timedelta(days=1))]
-    market = (
-        market.sort_values("timestamp")
-        .drop_duplicates("symbol", keep="last")
-        .assign(base=lambda m: m["symbol"].str.upper())[["base", "market_cap_usd", "total_volume_usd"]]
+    if coingecko.empty:  # fonte secundária fora do ar e sem base local: market cap fica nulo
+        market = pd.DataFrame({"base": pd.Series(dtype="string"), "market_cap_usd": pd.Series(dtype="float64"),
+                               "total_volume_usd": pd.Series(dtype="float64")})
+    else:
+        ts = coingecko["timestamp"]
+        market = coingecko[(ts >= close_ts - rules.asof_tolerance) & (ts < close_ts + pd.Timedelta(days=1))]
+        market = (
+            market.sort_values("timestamp")
+            .drop_duplicates("symbol", keep="last")
+            .assign(base=lambda m: m["symbol"].str.upper())[["base", "market_cap_usd", "total_volume_usd"]]
+        )
+    out = snap.assign(base=snap["symbol"].str.split("/", n=1).str[0].str.upper(), stage_reason=pd.Series(pd.NA, index=snap.index, dtype="string")).merge(
+        market.astype({"base": "string"}), on="base", how="left"
     )
-    out = snap.assign(base=snap["symbol"].str.split("/", n=1).str[0].str.upper()).merge(market, on="base", how="left")
 
     out = out[list(OUTPUT_SCHEMA)].astype(OUTPUT_SCHEMA)
     return out.sort_values("symbol", ignore_index=True)

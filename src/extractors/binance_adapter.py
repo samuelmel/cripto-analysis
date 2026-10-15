@@ -11,11 +11,12 @@ from typing import Any, ClassVar
 
 import pandas as pd
 
-from .base_extractor import BaseExtractor
+from .base_extractor import BaseExtractor, ExtractorError
 from .http import get_json
 
 API_URL = "https://api.binance.com/api/v3/klines"
 PAGE_LIMIT = 1000
+MIN_INTERVAL = 0.2  # s entre chamadas; o limite é por peso/IP (429 traz Retry-After, respeitado em http.get_json)
 DEFAULT_LOOKBACK = timedelta(days=250)  # SMA 90 + aquecimento do RSI com folga
 TIMEFRAME_MS = {"1h": 3_600_000, "4h": 14_400_000, "1d": 86_400_000}
 
@@ -56,7 +57,10 @@ class BinanceAdapter(BaseExtractor):
                     API_URL,
                     {"symbol": symbol.replace("/", ""), "interval": self.timeframe,
                      "startTime": since, "endTime": end_ms - 1, "limit": PAGE_LIMIT},
+                    min_interval=MIN_INTERVAL,
                 )
+                if not isinstance(page, list):
+                    raise ExtractorError(f"{self.source}: resposta inesperada para {symbol}")
                 if not page:
                     break
                 rows.extend(k for k in page if int(k[0]) + step <= end_ms)
@@ -67,6 +71,9 @@ class BinanceAdapter(BaseExtractor):
         return raw
 
     def to_frame(self, raw: dict[str, list[list[Any]]]) -> pd.DataFrame:
+        for symbol, rows in raw.items():
+            if any(not isinstance(k, list) or len(k) <= max(_FIELDS) for k in rows):
+                raise ExtractorError(f"{self.source}: candle incompleto para {symbol}")
         frames = [
             pd.DataFrame(rows).loc[:, list(_FIELDS)].rename(columns=_FIELDS).assign(symbol=symbol)
             for symbol, rows in raw.items()

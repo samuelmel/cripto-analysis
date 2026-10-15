@@ -155,7 +155,7 @@ function PositionCard({ p, onChanged }: { readonly p: Position; readonly onChang
     <article className="rounded-md border border-hairline bg-surface p-6" aria-label={`Posição em ${coinName(p.symbol)}`}>
       <div className="flex items-start justify-between gap-4">
         <CoinLabel symbol={p.symbol} detailed size={36} />
-        {sell ? <Badge tone="critical">Vender</Badge> : <Badge tone="good">Segurar</Badge>}
+        {sell ? <Badge tone="critical">Vender</Badge> : p.action === "INDISPONÍVEL" ? <Badge tone="warning">Sem dados</Badge> : <Badge tone="good">Segurar</Badge>}
       </div>
       <p className="mt-1 text-[13px] text-muted">{fmt.num(p.qty, 4)} unidades compradas em {fmt.day(p.entry_ts)}</p>
 
@@ -165,7 +165,9 @@ function PositionCard({ p, onChanged }: { readonly p: Position; readonly onChang
       <p className="mt-2 flex gap-2 text-muted">
         {ReasonIcon !== null && <ReasonIcon size={20} className="mt-0.5 shrink-0 text-critical" aria-hidden />}
         <span>
-          {sell && p.reason !== null
+          {p.action === "INDISPONÍVEL"
+            ? `Sem dados confiáveis hoje: ${p.data_note ?? "motivo desconhecido"}. Não dá para recomendar vender nem segurar.`
+            : sell && p.reason !== null
             ? `${REASON_TEXT[p.reason].replace(/^./, (c) => c.toUpperCase())} (desde ${fmt.day(p.signal_ts)}).`
             : "Nenhuma regra de venda disparou. A moeda segue em tendência de alta: pode continuar com ela."}
         </span>

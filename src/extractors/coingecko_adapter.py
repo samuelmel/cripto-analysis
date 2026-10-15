@@ -6,6 +6,7 @@ Schemas diferentes, por isso dois adaptadores. A chave Demo gratuita, se existir
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from typing import Any, ClassVar
@@ -15,7 +16,11 @@ import pandas as pd
 from .base_extractor import BaseExtractor, ExtractorError
 from .http import get_json
 
+logger = logging.getLogger(__name__)
+
 API_URL = "https://api.coingecko.com/api/v3"
+MIN_INTERVAL = 1.0  # s entre chamadas; plano Demo: 100 chamadas/min e 10 mil/mês (docs.coingecko.com, 2026-10)
+_REQUIRED = ("last_updated", "symbol", "current_price", "market_cap", "total_volume")
 
 
 class _CoinGeckoBase(BaseExtractor):
@@ -47,19 +52,26 @@ class CoinGeckoMarketAdapter(_CoinGeckoBase):
             f"{API_URL}/coins/markets",
             {"vs_currency": "usd", "ids": ",".join(self.coin_ids), "per_page": 250},
             headers,
+            min_interval=MIN_INTERVAL,
         )
-        if not isinstance(payload, list):
-            raise ExtractorError(f"{self.source}: resposta inesperada")
+        if not isinstance(payload, list) or not payload:
+            raise ExtractorError(f"{self.source}: resposta inesperada ou vazia")
         data: list[dict[str, Any]] = payload
+        absent = sorted(set(self.coin_ids) - {str(c.get("id")) for c in data})
+        if absent:
+            logger.warning("%s: moedas ausentes na resposta: %s", self.source, ", ".join(absent))
         return data
 
     def to_frame(self, raw: list[dict[str, Any]]) -> pd.DataFrame:
         if not raw:
             return pd.DataFrame()
         df = pd.DataFrame(raw)
+        missing = [c for c in _REQUIRED if c not in df.columns]
+        if missing:
+            raise ExtractorError(f"{self.source}: resposta incompleta, faltam campos {missing}")
         return pd.DataFrame(
             {
-                "timestamp": pd.to_datetime(df["last_updated"], utc=True),
+                "timestamp": pd.to_datetime(df["last_updated"], utc=True, errors="coerce"),
                 "symbol": df["symbol"].str.upper(),
                 "price_usd": pd.to_numeric(df["current_price"], errors="coerce"),
                 "market_cap_usd": pd.to_numeric(df["market_cap"], errors="coerce"),

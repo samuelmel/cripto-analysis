@@ -136,6 +136,7 @@ export const STAGE_LABEL: Record<Stage, { readonly text: string; readonly tone: 
   COMPRAR: { text: "Comprar ou segurar", tone: "good" },
   PREPARAR: { text: "Ficar de olho", tone: "warning" },
   NEUTRO: { text: "Ficar de fora", tone: "neutral" },
+  INDISPONÍVEL: { text: "Sem dados confiáveis", tone: "warning" },
 };
 
 /** Descreve o momento em que a regra disparou (o preço pode ter mudado depois). */
@@ -172,15 +173,18 @@ export function todayVerdict(signals: readonly DailySignal[], positions: readonl
   const turnedDown = withAlert(signals, "VENDER AGORA");
   const turnedUp = withAlert(signals, "COMPRAR AGORA");
   const panic = signals.filter((s) => s.panic);
+  const unavailable = signals.filter((s) => s.stage === "INDISPONÍVEL");
   const names = (xs: readonly DailySignal[]): string => list(xs.map((s) => coinName(s.symbol)));
 
   const details = [
+    ...positions.filter((p) => p.action === "INDISPONÍVEL").map((p) => `${coinName(p.symbol)}: sem dados confiáveis para avaliar a sua posição (${p.data_note ?? "motivo desconhecido"}).`),
     ...toSell.map((p) => `Venda ${coinName(p.symbol)}: ${p.reason === null ? "a regra de saída disparou" : REASON_TEXT[p.reason]}.`),
     ...turnedUp.map((s) => `${coinName(s.symbol)} entrou em tendência de alta hoje: o preço passou da média de 200 dias.`),
     ...turnedDown.map((s) => `${coinName(s.symbol)} saiu da tendência de alta hoje. Quem tem deve vender.`),
     ...(watch.length > 0
       ? [`${names(watch)} ${watch.length === 1 ? "está" : "estão"} perto de voltar à tendência de alta. Ainda não é hora.`]
       : []),
+    ...unavailable.map((s) => `${coinName(s.symbol)}: sem dados confiáveis hoje (${s.stage_reason ?? "motivo desconhecido"}).`),
     ...(panic.length > 0
       ? [`Mercado em pânico em ${names(panic)}. É só um aviso: no passado, comprar no pânico perdeu dinheiro.`]
       : []),
@@ -193,6 +197,9 @@ export function todayVerdict(signals: readonly DailySignal[], positions: readonl
   }
   if (turnedUp.length > 0) {
     return { tone: "signal", headline: `${names(turnedUp)} ${turnedUp.length === 1 ? "entrou" : "entraram"} em tendência de alta hoje.`, details };
+  }
+  if (buy.length === 0 && unavailable.length > 0) {
+    return { tone: "warning", headline: "Sem dados confiáveis para decidir hoje.", details };
   }
   if (buy.length > 0) {
     const holding = positions.length > 0 ? " As suas posições podem continuar como estão." : "";

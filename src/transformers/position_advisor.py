@@ -6,7 +6,10 @@ da moeda, ou quando o BTC fecha abaixo da dele, ou na perda de 20% sobre o preç
 O STOP é permanente: uma vez atingido, a posição segue como VENDER. As saídas por tendência e por
 mercado valem pelo estado de hoje: se a moeda voltou a fechar acima da SMA 200 (e o BTC também), a
 posição volta a SEGURAR; `signal_ts` é o primeiro dia da sequência atual de fechamentos contra a regra
-(ou o dia da compra, se for mais recente). Puro (CLAUDE.md §1).
+(ou o dia da compra, se for mais recente).
+
+Moeda sem dado confiável hoje (`available`, de `data_quality.availability`) fica INDISPONÍVEL, a menos
+que o STOP já tenha disparado (fato do passado). Puro (CLAUDE.md §1).
 """
 
 from __future__ import annotations
@@ -14,10 +17,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from .trade_simulator import EXIT_REGIME, EXIT_STOP, EXIT_TREND, ExitRules
+from .trade_simulator import EXIT_REGIME, EXIT_STOP, EXIT_TREND, STOP_TOLERANCE, ExitRules
 
 ACTION_SELL = "VENDER"
 ACTION_HOLD = "SEGURAR"
+ACTION_UNAVAILABLE = "INDISPONÍVEL"  # sem dado confiável hoje: nem vender nem segurar com base em dado velho
 
 POSITION_SCHEMA: dict[str, str] = {
     "position_id": "string",
@@ -37,6 +41,7 @@ POSITION_SCHEMA: dict[str, str] = {
     "stop_price": "float64",        # abaixo disso: STOP (nulo se o STOP estiver desligado)
     "sell_below_price": "float64",  # SMA 200 atual: vender se fechar abaixo
     "above_sma_pct": "float64",     # quanto o último fechamento está acima (+) ou abaixo (−) da SMA 200
+    "data_note": "string",          # motivo do INDISPONÍVEL; nulo nos demais casos
 }
 
 
@@ -90,8 +95,16 @@ def _against_rule(history: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def advise(positions: pd.DataFrame, history: pd.DataFrame, rules: ExitRules = ExitRules()) -> pd.DataFrame:
-    """`positions`: position_id, symbol, entry_ts, entry_price, qty (apenas posições abertas)."""
+def advise(
+    positions: pd.DataFrame,
+    history: pd.DataFrame,
+    rules: ExitRules = ExitRules(),
+    available: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """`positions`: position_id, symbol, entry_ts, entry_price, qty (apenas posições abertas).
+
+    `available`: saída de `data_quality.availability` (symbol, available, reason); None = tudo disponível.
+    """
     if positions.empty:
         return pd.DataFrame({c: pd.Series(dtype=t) for c, t in POSITION_SCHEMA.items()})
 
@@ -107,12 +120,21 @@ def advise(positions: pd.DataFrame, history: pd.DataFrame, rules: ExitRules = Ex
     if rules.stop_loss is None:
         stop_ts = pd.Series(pd.NaT, index=base["position_id"], dtype="datetime64[ns, UTC]")
     else:
-        stop_ts = path.loc[ret.le(rules.stop_loss)].groupby("position_id")["timestamp"].min()
+        stop_ts = path.loc[ret.le(rules.stop_loss + STOP_TOLERANCE)].groupby("position_id")["timestamp"].min()
 
     state = _against_rule(history).reindex(base["symbol"].to_numpy()).set_axis(base.index)
     pos = base.join(state)
-    stopped = pos["position_id"].map(stop_ts).notna()
+    stop_at = pd.Series(stop_ts.reindex(pos["position_id"]).to_numpy(), index=pos.index)  # NaT se não houve STOP
+    stopped = stop_at.notna()
     sell = (stopped | pos["active"].fillna(False)).astype(bool)
+    note = (
+        pd.Series(pd.NA, index=pos.index, dtype="string")
+        if available is None
+        else pos["symbol"].map(available.set_index("symbol")["reason"]).astype("string")
+    )
+    ok = pd.Series(True, index=pos.index) if available is None else pos["symbol"].map(available.set_index("symbol")["available"]).fillna(True).astype(bool)
+    blocked = ~ok & ~stopped
+    sell = sell & ~blocked
     since = pos["since"].where(pos["since"] > pos["entry_day"], pos["entry_day"])
 
     current = pos["last_close"] / pos["entry_price"] - 1.0
@@ -132,12 +154,13 @@ def advise(positions: pd.DataFrame, history: pd.DataFrame, rules: ExitRules = Ex
             "max_return_pct": pos["position_id"].map(peak) * 100.0,
             "pnl_usd": pos["qty"] * (pos["last_close"] - pos["entry_price"]),
             "value_usd": pos["qty"] * pos["last_close"],
-            "action": np.where(sell, ACTION_SELL, ACTION_HOLD),
+            "action": np.select([blocked, sell], [ACTION_UNAVAILABLE, ACTION_SELL], ACTION_HOLD),
             "reason": pd.Series(np.where(stopped, EXIT_STOP, pos["reason"]), index=pos.index).where(sell),
-            "signal_ts": pd.Series(np.where(stopped, pos["position_id"].map(stop_ts), since), index=pos.index).where(sell),
+            "signal_ts": pd.Series(np.where(stopped, stop_at, since), index=pos.index).where(sell),
             "stop_price": stop_price,
             "sell_below_price": pos["sma_200"],
             "above_sma_pct": (pos["last_close"] / pos["sma_200"] - 1.0) * 100.0,
+            "data_note": note.where(blocked),
         }
     )
     out = out[list(POSITION_SCHEMA)].astype(POSITION_SCHEMA)
