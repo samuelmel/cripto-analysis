@@ -92,12 +92,14 @@ npm --prefix frontend run dev
 
 Acesse o endereço que aparece na linha `Local:` do terminal, normalmente http://localhost:5173. O painel só funciona enquanto esse comando estiver rodando. Ele mostra:
 
-- **Alertas:** faixa vermelha com o que você deve vender e o que disparou hoje.
-- **Minhas posições:** resultado, P&L, SEGURAR/VENDER, stop, trava de lucro e alvo.
-- **Comprar e preparar (radar).**
-- **Todos os ativos:** as 15 moedas ordenadas pelo Z-Score. Clique numa para ver o gráfico.
-- **Gráfico:** preço desde 2017, média de 90 dias, sinais COMPRAR passados (▲), saídas simuladas (▼) e as suas compras (●), mais a lista de sinais daquela moeda com o resultado.
-- **Backtest:** sinal COMPRAR contra a referência, e o resultado por motivo de saída.
+- **Hoje:** o que fazer, em uma frase, e o humor do mercado (Fear & Greed).
+- **Suas posições:** uma ficha por compra com Segurar/Vender, o motivo em português simples, o resultado e os preços de limite de perda e de garantia de lucro.
+- **Todas as moedas:** da mais barata em relação ao normal para a mais cara, com a distância da média de 90 dias. Clique numa para ver o gráfico.
+- **Gráfico da moeda:** preço e média de 90 dias desde o início dos dados, sinais de compra passados, vendas simuladas com o resultado e as suas compras. Passe o mouse para ler o preço de cada dia.
+- **A regra de compra funciona?:** a resposta direta e a comparação com comprar sem critério.
+- **Como funciona:** as regras de compra e venda explicadas.
+
+As decisões visuais (cores, tipografia, componentes) estão em [frontend/DESIGN.md](frontend/DESIGN.md).
 
 Se aparecer "sem dados ainda", rode o pipeline primeiro.
 
@@ -212,8 +214,9 @@ src/
     positions_store.py       suas posições (data/positions)
     parquet_loader.py        publicação para o painel
 frontend/                  React + TypeScript + Tailwind
-  src/data/                leitura e validação do Parquet + cálculos puros do painel
-  src/components/          TerminalView, PriceChart (lightweight-charts), Sections
+  DESIGN.md                contrato visual: tokens, tipografia, componentes, o que evitar
+  src/data/                leitura e validação do Parquet + cálculos e textos puros do painel
+  src/components/          Dashboard, Sections, PriceChart (lightweight-charts), ui (primitivas)
 mcp_server.py              tool MCP run_crypto_pipeline
 run_daily.cmd              script chamado pelo Agendador de Tarefas
 ```

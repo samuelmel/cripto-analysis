@@ -1,1 +1,64 @@
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
 @import "tailwindcss";
+
+/* Tokens: frontend/DESIGN.md é o contrato. Novo token entra lá primeiro. */
+@theme {
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+
+  --color-ground: #f4f5f2;
+  --color-surface: #fcfcfb;
+  --color-ink: #121417;
+  --color-muted: #55544f;
+  --color-hairline: #e1e0d9;
+  --color-signal: #1c5cab;
+  --color-signal-bg: #e3ecf7;
+
+  --color-good: #006300;
+  --color-good-mark: #0ca30c;
+  --color-good-bg: #e3f1e3;
+  --color-critical: #b42d2d;
+  --color-critical-mark: #d03b3b;
+  --color-critical-bg: #f8e5e4;
+  --color-warning: #7a4f00;
+  --color-warning-mark: #fab219;
+  --color-warning-bg: #fbf0d3;
+
+  --color-series-price: #2a78d6;
+  --color-series-average: #eb6834;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+}
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  background: var(--color-ground);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-signal);
+  outline-offset: 2px;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

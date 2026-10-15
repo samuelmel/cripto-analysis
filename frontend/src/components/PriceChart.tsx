@@ -1,16 +1,39 @@
 import {
   ColorType,
+  CrosshairMode,
+  PriceScaleMode,
   LineSeries,
+  LineStyle,
   createChart,
   createSeriesMarkers,
   type IChartApi,
   type SeriesMarker,
   type UTCTimestamp,
 } from "lightweight-charts";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { distanceFromAverage, fmt } from "../data/analytics";
 import type { HistoryPoint, Position, Trade } from "../types/signals";
 
+/* Cores do DESIGN.md (validadas com validate_palette.js). O canvas não lê CSS vars. */
+const C = {
+  surface: "#fcfcfb",
+  muted: "#55544f",
+  grid: "#ecebe6",
+  axis: "#e1e0d9",
+  price: "#2a78d6",
+  average: "#eb6834",
+  good: "#0ca30c",
+  critical: "#d03b3b",
+  ink: "#121417",
+} as const;
+
 const toTime = (d: Date): UTCTimestamp => Math.floor(d.getTime() / 1000) as UTCTimestamp;
+
+interface Readout {
+  readonly date: Date;
+  readonly close: number;
+  readonly sma: number | null;
+}
 
 interface Props {
   readonly history: readonly HistoryPoint[];
@@ -18,50 +41,99 @@ interface Props {
   readonly positions: readonly Position[];
 }
 
-/** Preço e SMA 90 com as entradas/saídas do sinal histórico e suas compras marcadas. */
+/** Preço e média de 90 dias, com sinais passados, saídas simuladas e suas compras. */
 export function PriceChart({ history, trades, positions }: Props) {
   const container = useRef<HTMLDivElement>(null);
+  const last = history.at(-1);
+  const [readout, setReadout] = useState<Readout | null>(null);
+  const shown: Readout | null = readout ?? (last === undefined ? null : { date: last.timestamp, close: last.close, sma: last.sma_90 });
 
   useEffect(() => {
     const el = container.current;
     if (el === null) return;
+    const byTime = new Map(history.map((h) => [toTime(h.timestamp), h]));
+
     const chart: IChartApi = createChart(el, {
-      height: 380,
-      layout: { background: { type: ColorType.Solid, color: "#000000" }, textColor: "#a3a3a3", fontFamily: "monospace" },
-      grid: { vertLines: { color: "#171717" }, horzLines: { color: "#171717" } },
-      rightPriceScale: { borderColor: "#404040" },
-      timeScale: { borderColor: "#404040" },
+      height: 360,
       autoSize: true,
+      layout: {
+        background: { type: ColorType.Solid, color: C.surface },
+        textColor: C.muted,
+        fontFamily: '"IBM Plex Sans", system-ui, sans-serif',
+        fontSize: 12,
+      },
+      grid: { vertLines: { visible: false }, horzLines: { color: C.grid } },
+      rightPriceScale: { borderColor: C.axis, mode: PriceScaleMode.Logarithmic, scaleMargins: { top: 0.08, bottom: 0.08 } },
+      timeScale: { borderColor: C.axis },
+      crosshair: {
+        mode: CrosshairMode.Magnet,
+        vertLine: { color: C.muted, style: LineStyle.Solid, width: 1, labelBackgroundColor: C.ink },
+        horzLine: { color: C.muted, style: LineStyle.Solid, width: 1, labelBackgroundColor: C.ink },
+      },
+      localization: { locale: "pt-BR" },
     });
 
-    const price = chart.addSeries(LineSeries, { color: "#4ade80", lineWidth: 2, priceLineVisible: false });
+    const price = chart.addSeries(LineSeries, { color: C.price, lineWidth: 2, priceLineVisible: false });
     price.setData(history.map((h) => ({ time: toTime(h.timestamp), value: h.close })));
 
-    const sma = chart.addSeries(LineSeries, { color: "#737373", lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-    sma.setData(history.flatMap((h) => (h.sma_90 === null ? [] : [{ time: toTime(h.timestamp), value: h.sma_90 }])));
+    const average = chart.addSeries(LineSeries, {
+      color: C.average, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+    });
+    average.setData(history.flatMap((h) => (h.sma_90 === null ? [] : [{ time: toTime(h.timestamp), value: h.sma_90 }])));
 
     const markers: SeriesMarker<UTCTimestamp>[] = [
       ...trades.flatMap((t): SeriesMarker<UTCTimestamp>[] => [
-        { time: toTime(t.entry_ts), position: "belowBar", color: "#22c55e", shape: "arrowUp", text: "C" },
+        { time: toTime(t.entry_ts), position: "belowBar", color: C.price, shape: "arrowUp", size: 1 },
         ...(t.exit_ts === null
           ? []
           : [{
               time: toTime(t.exit_ts),
               position: "aboveBar" as const,
-              color: (t.return_pct ?? 0) > 0 ? "#facc15" : "#ef4444",
+              color: (t.return_pct ?? 0) > 0 ? C.good : C.critical,
               shape: "arrowDown" as const,
-              text: t.exit_reason ?? "",
+              text: fmt.pct(t.return_pct, 0),
+              size: 1,
             }]),
       ]),
       ...positions.map((p): SeriesMarker<UTCTimestamp> => ({
-        time: toTime(p.entry_ts), position: "belowBar", color: "#ffffff", shape: "circle", text: "você",
+        time: toTime(p.entry_ts), position: "belowBar", color: C.ink, shape: "circle", text: "sua compra", size: 1,
       })),
     ].toSorted((a, b) => a.time - b.time);
     createSeriesMarkers(price, markers);
+
+    chart.subscribeCrosshairMove((param) => {
+      const h = param.time === undefined ? undefined : byTime.get(param.time as UTCTimestamp);
+      setReadout(h === undefined ? null : { date: h.timestamp, close: h.close, sma: h.sma_90 });
+    });
 
     chart.timeScale().fitContent();
     return () => chart.remove();
   }, [history, trades, positions]);
 
-  return <div ref={container} className="w-full" />;
+  const dist = shown === null ? null : distanceFromAverage(shown.close, shown.sma);
+
+  return (
+    <figure>
+      <figcaption className="mb-3 flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px]">
+        <span className="text-muted">{shown === null ? "—" : fmt.day(shown.date)}</span>
+        <span className="flex items-center gap-2">
+          <span aria-hidden className="inline-block h-0.5 w-4 bg-series-price" />
+          Preço <strong className="num font-medium">{fmt.price(shown?.close ?? null)}</strong>
+        </span>
+        <span className="flex items-center gap-2">
+          <span aria-hidden className="inline-block h-0.5 w-4 bg-series-average" />
+          Média de 90 dias <strong className="num font-medium">{fmt.price(shown?.sma ?? null)}</strong>
+        </span>
+        <span className="text-muted">
+          {dist === null ? "" : `preço ${fmt.pct(dist)} ${dist < 0 ? "abaixo" : "acima"} da média`}
+        </span>
+      </figcaption>
+      <div ref={container} className="w-full" />
+      <p className="mt-3 text-[13px] text-muted">
+        Setas azuis para cima: dias em que o sinal de compra disparou. Setas para baixo: quando a regra de venda teria vendido, com o
+        resultado (verde lucro, vermelho perda). Círculo preto: suas compras. O eixo de preço é proporcional: a mesma
+        distância vertical representa a mesma variação em %. Passe o mouse para ver o preço de cada dia.
+      </p>
+    </figure>
+  );
 }
