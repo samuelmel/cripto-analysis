@@ -14,4 +14,13 @@ export interface DailySignal {
   readonly fng_value: number | null;
   readonly fng_classification: string | null;
   readonly buy_signal: boolean;
+  readonly stage: Stage;
+  readonly prev_stage: Stage | null;
+  readonly alert: Alert | null;
 }
+
+export const STAGES = ["COMPRAR", "PREPARAR", "NEUTRO"] as const;
+export type Stage = (typeof STAGES)[number];
+
+export const ALERTS = ["COMPRAR AGORA", "NO RADAR", "SAIU DO RADAR"] as const;
+export type Alert = (typeof ALERTS)[number];

@@ -9,6 +9,9 @@ Regra de compra (todas obrigatórias, NaN conta como "não atende"):
     rsi_14    < 30        sobrevenda
     fng_value < 25        pânico generalizado (alternative.me: 0–24 = "Extreme Fear")
 
+Estágio (`stage`): COMPRAR se a regra acima dispara; PREPARAR (radar) se zscore_90 < -1.5 e
+rsi_14 < 40, ou seja, escorregando para a zona de compra; NEUTRO nos demais casos.
+
 Tratamento de NaN:
     - candles com close nulo ou <= 0 são descartados antes dos indicadores;
     - indicadores ficam NaN até haver janela completa (90 candles para z-score, 14 para RSI);
@@ -39,7 +42,12 @@ OUTPUT_SCHEMA: dict[str, str] = {
     "fng_value": "Int64",
     "fng_classification": "string",
     "buy_signal": "bool",
+    "stage": "string",
 }
+
+STAGE_BUY = "COMPRAR"
+STAGE_WATCH = "PREPARAR"
+STAGE_NEUTRAL = "NEUTRO"
 
 
 @dataclass(frozen=True)
@@ -47,6 +55,12 @@ class SignalRules:
     zscore_max: float = -2.5
     rsi_max: float = 30.0
     fng_panic_max: int = 25
+    # Radar: ativo escorregando para a zona de compra, mas ainda sem disparar.
+    watch_zscore_max: float = -1.5
+    watch_rsi_max: float = 40.0
+    # O candle do dia D fecha às 00:00 de D+1; CoinGecko e F&G publicados até o fim de D+1 ainda
+    # descrevem o fechamento de D. Em backtest use 0 para não haver look-ahead.
+    lookahead: pd.Timedelta = pd.Timedelta(days=1)
     asof_tolerance: pd.Timedelta = pd.Timedelta(days=1)
 
 
@@ -85,10 +99,11 @@ def _wilder_mean(values: pd.Series, keys: pd.Series) -> pd.Series:
     return grouped.ewm(alpha=1 / RSI_PERIOD, adjust=False, min_periods=RSI_PERIOD).mean().droplevel(0)
 
 
-def _latest_within(df: pd.DataFrame, day: pd.Timestamp, tolerance: pd.Timedelta) -> pd.DataFrame:
-    """Linhas com timestamp em [day - tolerance, day + 1d), última por symbol."""
+def _latest_within(df: pd.DataFrame, day: pd.Timestamp, rules: SignalRules) -> pd.DataFrame:
+    """Linhas com timestamp em [day - asof_tolerance, day + 1d + lookahead), última por symbol."""
     ts = df["timestamp"]
-    recent = df[(ts >= day - tolerance) & (ts < day + pd.Timedelta(days=1))]
+    end = day + pd.Timedelta(days=1) + rules.lookahead
+    recent = df[(ts >= day - rules.asof_tolerance) & (ts < end)]
     return recent.sort_values("timestamp").drop_duplicates("symbol", keep="last")
 
 
@@ -120,7 +135,7 @@ def detect(
     if snap.empty:
         return _empty()
 
-    market = _latest_within(coingecko, day, rules.asof_tolerance)
+    market = _latest_within(coingecko, day, rules)
     market = market.assign(base=market["symbol"].str.upper())[["base", "market_cap_usd", "total_volume_usd"]]
     snap = snap.assign(
         symbol=snap["symbol"].astype("string"),
@@ -129,7 +144,7 @@ def detect(
 
     # Exatamente 1 linha: a leitura mais recente do F&G, ou nulos se não houver (reindex preenche NA).
     sentiment = (
-        _latest_within(fng, day, rules.asof_tolerance)
+        _latest_within(fng, day, rules)
         .tail(1)[["fng_value", "fng_classification"]]
         .reset_index(drop=True)
         .reindex([0])
@@ -137,6 +152,8 @@ def detect(
     out = snap.merge(sentiment, how="cross").astype({"fng_value": "Int64", "fng_classification": "string"})
     panic = out["fng_value"].lt(rules.fng_panic_max).fillna(False).astype(bool)
     out["buy_signal"] = out["zscore_90"].lt(rules.zscore_max) & out["rsi_14"].lt(rules.rsi_max) & panic
+    watch = out["zscore_90"].lt(rules.watch_zscore_max) & out["rsi_14"].lt(rules.watch_rsi_max)
+    out["stage"] = np.select([out["buy_signal"], watch], [STAGE_BUY, STAGE_WATCH], STAGE_NEUTRAL)
 
     out = out[list(OUTPUT_SCHEMA)].astype(OUTPUT_SCHEMA)
     return out.sort_values(["buy_signal", "zscore_90"], ascending=[False, True], ignore_index=True)

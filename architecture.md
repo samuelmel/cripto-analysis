@@ -116,6 +116,14 @@ src/
   loaders/      L — persistência para o frontend
 frontend/       React + TypeScript
 ```
+### Pipeline diário (`src/pipeline.py`, agendado por `run_daily.cmd` às 21:10 BRT)
+1. Extrai 250 dias de candles 1d da Binance (universo em `src/config.py`), market cap atual do CoinGecko e o Fear & Greed.
+2. `anomaly_detector.detect` classifica cada ativo: **COMPRAR** (z-score < -2.5, RSI < 30, F&G < 25), **PREPARAR** (radar: z-score < -1.5 e RSI < 40) ou **NEUTRO**.
+3. `daily_alerts.compare_with_previous` compara com o último dia salvo e gera `COMPRAR AGORA`, `NO RADAR` ou `SAIU DO RADAR`.
+4. Salva `data/signals/history/date=YYYY-MM-DD/signals.parquet` e publica `frontend/public/daily_signals.parquet`.
+
+CoinGecko e F&G são opcionais: se falharem, o pipeline segue (sem F&G nenhum ativo vira COMPRAR). Falha da Binance aborta sem tocar no arquivo publicado.
+
 Formato de saída de todo extrator: chaves `timestamp` (UTC), `source`, `symbol` (`MARKET` para séries globais) + as `value_columns` declaradas pelo adaptador. `BaseExtractor.standardize` garante tipos, unicidade de (timestamp, symbol) e ordenação. Os scripts `extract_*.py` da raiz são a referência de implementação até serem migrados para os adaptadores.
 
 ## Próximos passos

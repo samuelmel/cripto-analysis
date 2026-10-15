@@ -1,7 +1,7 @@
-"""Adaptadores CoinGecko: market cap (série histórica) e tendências (snapshot).
+"""Adaptadores CoinGecko: market cap atual e tendências (ambos snapshots do momento).
 
-As duas consultas têm granularidades diferentes, por isso são dois adaptadores com schemas
-próprios. Ambos exigem a chave Demo gratuita em `COINGECKO_API_KEY` (header x-cg-demo-api-key).
+Schemas diferentes, por isso dois adaptadores. A chave Demo gratuita, se existir em
+`COINGECKO_API_KEY`, vai no header x-cg-demo-api-key.
 """
 
 from __future__ import annotations
@@ -12,7 +12,8 @@ from typing import Any, ClassVar
 
 import pandas as pd
 
-from .base_extractor import BaseExtractor
+from .base_extractor import BaseExtractor, ExtractorError
+from .http import get_json
 
 API_URL = "https://api.coingecko.com/api/v3"
 
@@ -25,7 +26,10 @@ class _CoinGeckoBase(BaseExtractor):
 
 
 class CoinGeckoMarketAdapter(_CoinGeckoBase):
-    """Preço, market cap e volume diário por moeda. Plano Demo: até 365 dias de histórico."""
+    """Preço, market cap e volume 24h atuais por moeda (/coins/markets, uma chamada para todas).
+
+    É um snapshot: start/end são ignorados. A chave Demo é opcional aqui (sem ela, limite menor).
+    """
 
     value_columns: ClassVar[dict[str, str]] = {
         "price_usd": "float64",
@@ -37,13 +41,31 @@ class CoinGeckoMarketAdapter(_CoinGeckoBase):
         super().__init__(api_key)
         self.coin_ids = coin_ids    # ids do CoinGecko (ex.: "bitcoin")
 
-    def fetch(self, start: datetime | None, end: datetime) -> Any:
-        # TODO: GET {API_URL}/coins/{id}/market_chart/range?vs_currency=usd&from=&to= por coin_id.
-        raise NotImplementedError
+    def fetch(self, start: datetime | None, end: datetime) -> list[dict[str, Any]]:
+        headers = {"x-cg-demo-api-key": self.api_key} if self.api_key else None
+        payload = get_json(
+            f"{API_URL}/coins/markets",
+            {"vs_currency": "usd", "ids": ",".join(self.coin_ids), "per_page": 250},
+            headers,
+        )
+        if not isinstance(payload, list):
+            raise ExtractorError(f"{self.source}: resposta inesperada")
+        data: list[dict[str, Any]] = payload
+        return data
 
-    def to_frame(self, raw: Any) -> pd.DataFrame:
-        # TODO: unir prices/market_caps/total_volumes por timestamp (ms); symbol = ticker em maiúsculas.
-        raise NotImplementedError
+    def to_frame(self, raw: list[dict[str, Any]]) -> pd.DataFrame:
+        if not raw:
+            return pd.DataFrame()
+        df = pd.DataFrame(raw)
+        return pd.DataFrame(
+            {
+                "timestamp": pd.to_datetime(df["last_updated"], utc=True),
+                "symbol": df["symbol"].str.upper(),
+                "price_usd": pd.to_numeric(df["current_price"], errors="coerce"),
+                "market_cap_usd": pd.to_numeric(df["market_cap"], errors="coerce"),
+                "total_volume_usd": pd.to_numeric(df["total_volume"], errors="coerce"),
+            }
+        )
 
 
 class CoinGeckoTrendingAdapter(_CoinGeckoBase):
