@@ -1,3 +1,4 @@
+import type React from "react";
 import type { ReactNode } from "react";
 import type { Tone } from "../data/analytics";
 
@@ -19,15 +20,16 @@ const BADGE_TONE: Record<Tone, string> = {
   signal: "bg-signal-bg text-signal",
 };
 
-export function Section({ id, title, lead, children }: {
+export function Section({ id, title, icon, lead, children }: {
   readonly id: string;
   readonly title: string;
+  readonly icon?: ReactNode;
   readonly lead?: ReactNode;
   readonly children: ReactNode;
 }) {
   return (
     <section aria-labelledby={id} className="mt-16 first:mt-0">
-      <h2 id={id} className="text-lg font-semibold">{title}</h2>
+      <h2 id={id} className="flex items-center gap-2 text-lg font-semibold">{icon}{title}</h2>
       {lead !== undefined && <p className="mt-1 max-w-[68ch] text-muted">{lead}</p>}
       <div className="mt-5">{children}</div>
     </section>
@@ -96,3 +98,47 @@ export function Table({ columns, caption, children }: {
 
 export const cell = "whitespace-nowrap px-4 py-3";
 export const numCell = `${cell} num text-right`;
+
+/* ---------- formulários ---------- */
+
+type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
+
+const BUTTON_VARIANT: Record<ButtonVariant, string> = {
+  primary: "bg-signal text-surface hover:bg-signal-hover active:bg-signal-active",
+  secondary: "border border-hairline bg-surface text-ink hover:bg-ground active:bg-hairline",
+  danger: "border border-critical-mark bg-surface text-critical hover:bg-critical-bg",
+  ghost: "text-muted hover:bg-ground hover:text-ink",
+};
+
+export function Button({ variant = "secondary", icon, busy = false, children, ...rest }: {
+  readonly variant?: ButtonVariant;
+  readonly icon?: ReactNode;
+  readonly busy?: boolean;
+  readonly children: ReactNode;
+} & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "children">) {
+  return (
+    <button
+      type="button"
+      {...rest}
+      disabled={busy || rest.disabled === true}
+      aria-busy={busy}
+      className={`inline-flex items-center gap-2 rounded-sm px-3 py-2 text-[14px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${BUTTON_VARIANT[variant]}`}
+    >
+      {icon}
+      {children}
+    </button>
+  );
+}
+
+export function Field({ label, hint, children }: { readonly label: string; readonly hint?: string; readonly children: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="text-[13px] font-medium text-muted">{label}</span>
+      <span className="mt-1 block">{children}</span>
+      {hint !== undefined && <span className="mt-1 block text-[13px] text-muted">{hint}</span>}
+    </label>
+  );
+}
+
+export const inputClass =
+  "w-full rounded-sm border border-hairline bg-surface px-3 py-2 text-[15px] num focus-visible:border-signal aria-[invalid=true]:border-critical-mark";

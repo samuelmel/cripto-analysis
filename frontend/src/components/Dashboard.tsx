@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { ChartLineUp, Coins, Info, Scales, Wallet } from "@phosphor-icons/react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   allByZscore,
   byStrategy,
@@ -7,12 +8,16 @@ import {
   fngLabel,
   fngTone,
   historyOf,
+  recentCloses,
   todayVerdict,
 } from "../data/analytics";
+import { coinFullName } from "../data/coins";
 import { MissingFileError, loadDashboard } from "../data/loadSignals";
 import type { Dashboard as Data } from "../types/signals";
+import { CoinLogo } from "./CoinLabel";
+import { PositionsSection } from "./Positions";
 import { PriceChart } from "./PriceChart";
-import { BacktestPanel, HowItWorks, MarketTable, PositionsTable, TodayPanel, TradeList } from "./Sections";
+import { BacktestPanel, HowItWorks, MarketTable, TodayPanel, TradeList } from "./Sections";
 import { Block, Section } from "./ui";
 
 type State =
@@ -21,24 +26,24 @@ type State =
   | { readonly status: "error"; readonly message: string }
   | { readonly status: "ready"; readonly data: Data };
 
+const ICON = 22;
+
 export function Dashboard() {
   const [state, setState] = useState<State>({ status: "loading" });
 
-  useEffect(() => {
-    let alive = true;
-    loadDashboard()
-      .then((data) => {
-        if (alive) setState({ status: "ready", data });
-      })
-      .catch((err: unknown) => {
-        if (!alive) return;
-        if (err instanceof MissingFileError) setState({ status: "missing" });
-        else setState({ status: "error", message: err instanceof Error ? err.message : String(err) });
-      });
-    return () => {
-      alive = false;
-    };
+  /** Recarrega mantendo a tela atual até os dados novos chegarem (sem piscar). */
+  const reload = useCallback(async (): Promise<void> => {
+    try {
+      setState({ status: "ready", data: await loadDashboard() });
+    } catch (err) {
+      if (err instanceof MissingFileError) setState({ status: "missing" });
+      else setState({ status: "error", message: err instanceof Error ? err.message : String(err) });
+    }
   }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
 
   return (
     <div className="mx-auto max-w-[1120px] px-4 pt-10 pb-24 sm:px-8">
@@ -60,13 +65,13 @@ export function Dashboard() {
           <p className="mt-2 text-muted">{state.message}</p>
         </Block>
       )}
-      {state.status === "ready" && <Ready data={state.data} />}
+      {state.status === "ready" && <Ready data={state.data} onChanged={reload} />}
     </div>
   );
 }
 
-function Ready({ data }: { readonly data: Data }) {
-  const { signals, history, trades, positions } = data;
+function Ready({ data, onChanged }: { readonly data: Data; readonly onChanged: () => Promise<void> }) {
+  const { signals, history, trades, positions, closed } = data;
   const first = signals[0];
   const [selected, setSelected] = useState<string>(positions[0]?.symbol ?? "BTC/USDT");
 
@@ -77,6 +82,11 @@ function Ready({ data }: { readonly data: Data }) {
   const chartTrades = useMemo(() => signalTrades.filter((t) => t.symbol === selected), [signalTrades, selected]);
   const chartPositions = useMemo(() => positions.filter((p) => p.symbol === selected), [positions, selected]);
   const market = useMemo(() => allByZscore(signals), [signals]);
+  const coinsByName = useMemo(() => signals.toSorted((a, b) => a.symbol.localeCompare(b.symbol)), [signals]);
+  const sparks = useMemo(
+    () => new Map(signals.map((s) => [s.symbol, recentCloses(history, s.symbol)] as const)),
+    [signals, history],
+  );
   const since = useMemo(
     () => history.reduce<Date | null>((m, h) => (m === null || h.timestamp < m ? h.timestamp : m), null),
     [history],
@@ -93,33 +103,46 @@ function Ready({ data }: { readonly data: Data }) {
         asOf={fmt.day(first?.timestamp ?? null)}
       />
 
-      <Section id="posicoes" title="Suas posições" lead="Cada compra que você registrou, quanto está rendendo e se é hora de vender.">
-        <PositionsTable positions={positions} />
+      <Section
+        id="posicoes"
+        title="Suas posições"
+        icon={<Wallet size={ICON} aria-hidden />}
+        lead="Registre aqui o que você comprou. O painel acompanha cada compra e avisa quando for hora de vender."
+      >
+        <PositionsSection positions={positions} closed={closed} coins={coinsByName} onChanged={onChanged} />
       </Section>
 
       <Section
         id="moedas"
         title="Todas as moedas"
+        icon={<Coins size={ICON} aria-hidden />}
         lead="Da mais barata em relação ao normal para a mais cara. Clique numa moeda para ver o gráfico e o histórico dela."
       >
-        <MarketTable rows={market} selected={selected} onSelect={setSelected} />
+        <MarketTable rows={market} sparks={sparks} selected={selected} onSelect={setSelected} />
       </Section>
 
-      <Section id="detalhe" title={`${coin} desde ${fmt.day(chartHistory[0]?.timestamp ?? null)}`}>
-        <Block>
-          <PriceChart history={chartHistory} trades={chartTrades} positions={chartPositions} />
-        </Block>
-        <h3 className="mt-8 font-medium">Cada vez que o sinal de compra disparou para {coin}</h3>
-        <div className="mt-3">
-          <TradeList trades={chartTrades} coin={coin} />
+      <section aria-labelledby="detalhe" className="mt-16">
+        <h2 id="detalhe" className="flex items-center gap-3 text-lg font-semibold">
+          <CoinLogo symbol={selected} size={28} />
+          {coinFullName(selected)} ({coin}) desde {fmt.day(chartHistory[0]?.timestamp ?? null)}
+          <ChartLineUp size={ICON} className="text-muted" aria-hidden />
+        </h2>
+        <div className="mt-5">
+          <Block>
+            <PriceChart history={chartHistory} trades={chartTrades} positions={chartPositions} />
+          </Block>
+          <h3 className="mt-8 font-medium">Cada vez que o sinal de compra disparou para {coin}</h3>
+          <div className="mt-3">
+            <TradeList trades={chartTrades} coin={coin} />
+          </div>
         </div>
-      </Section>
+      </section>
 
-      <Section id="funciona" title="A regra de compra funciona?">
+      <Section id="funciona" title="A regra de compra funciona?" icon={<Scales size={ICON} aria-hidden />}>
         <BacktestPanel signal={signalTrades} reference={referenceTrades} since={fmt.day(since)} />
       </Section>
 
-      <Section id="como" title="Como funciona">
+      <Section id="como" title="Como funciona" icon={<Info size={ICON} aria-hidden />}>
         <HowItWorks />
       </Section>
     </main>

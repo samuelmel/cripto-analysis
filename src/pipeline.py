@@ -41,7 +41,7 @@ from .loaders.parquet_loader import write_daily_signals, write_parquet
 from .loaders.positions_store import read_positions
 from .transformers.anomaly_detector import classify_history, detect
 from .transformers.daily_alerts import ALERT_BUY, ALERT_EXIT, ALERT_WATCH, compare_with_previous
-from .transformers.position_advisor import ACTION_SELL, advise
+from .transformers.position_advisor import ACTION_SELL, advise, realized
 from .transformers.trade_simulator import STRATEGY_SIGNAL, backtest
 
 logger = logging.getLogger("pipeline")
@@ -92,15 +92,29 @@ def analyze() -> dict[str, pd.DataFrame]:
     signals = compare_with_previous(today, read_previous(day))
 
     trades = backtest(history)
-    open_positions = read_positions().query("not closed")
-    positions = advise(open_positions, history)
+    positions = _publish_positions(history)
 
     write_snapshot(signals, day)
     write_daily_signals(signals)
     write_parquet(history, PUBLIC_DIR / "history.parquet")
     write_parquet(trades, PUBLIC_DIR / "backtest.parquet")
-    write_parquet(positions, PUBLIC_DIR / "positions.parquet")
     return {"signals": signals, "backtest": trades, "positions": positions}
+
+
+def _publish_positions(history: pd.DataFrame) -> pd.DataFrame:
+    stored = read_positions()
+    positions = advise(stored[~stored["closed"]], history)
+    write_parquet(positions, PUBLIC_DIR / "positions.parquet")
+    write_parquet(realized(stored[stored["closed"]]), PUBLIC_DIR / "closed_positions.parquet")
+    return positions
+
+
+def refresh_positions() -> pd.DataFrame:
+    """Só reavalia e publica as posições (usado após registrar compra/venda). Sem rede, sem backtest."""
+    candles = read_ohlcv(list(UNIVERSE))
+    if candles.empty:
+        raise ExtractorError("base local vazia: rode o pipeline completo antes")
+    return _publish_positions(classify_history(candles, read_fng()))
 
 
 def report(result: dict[str, pd.DataFrame]) -> str:

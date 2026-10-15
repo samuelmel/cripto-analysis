@@ -37,6 +37,29 @@ POSITION_SCHEMA: dict[str, str] = {
 }
 
 
+CLOSED_SCHEMA: dict[str, str] = {
+    "position_id": "string",
+    "symbol": "string",
+    "entry_ts": "datetime64[ns, UTC]",
+    "entry_price": "float64",
+    "qty": "float64",
+    "exit_ts": "datetime64[ns, UTC]",
+    "exit_price": "float64",
+    "return_pct": "float64",
+    "pnl_usd": "float64",
+}
+
+
+def realized(closed: pd.DataFrame) -> pd.DataFrame:
+    """Resultado das posições já vendidas, da venda mais recente para a mais antiga."""
+    out = closed.assign(
+        return_pct=(closed["exit_price"] / closed["entry_price"] - 1.0) * 100.0,
+        pnl_usd=closed["qty"] * (closed["exit_price"] - closed["entry_price"]),
+    )
+    out = out[list(CLOSED_SCHEMA)].astype(CLOSED_SCHEMA)
+    return out.sort_values("exit_ts", ascending=False, ignore_index=True)
+
+
 def advise(positions: pd.DataFrame, history: pd.DataFrame, rules: ExitRules = ExitRules()) -> pd.DataFrame:
     """`positions`: position_id, symbol, entry_ts, entry_price, qty (apenas posições abertas)."""
     if positions.empty:

@@ -86,9 +86,23 @@ export interface Position {
   readonly target_price: number | null;
 }
 
+/** position_advisor.CLOSED_SCHEMA (closed_positions.parquet) */
+export interface ClosedPosition {
+  readonly position_id: string;
+  readonly symbol: string;
+  readonly entry_ts: Date;
+  readonly entry_price: number;
+  readonly qty: number;
+  readonly exit_ts: Date;
+  readonly exit_price: number;
+  readonly return_pct: number;
+  readonly pnl_usd: number;
+}
+
 export interface Dashboard {
   readonly signals: readonly DailySignal[];
   readonly history: readonly HistoryPoint[];
   readonly trades: readonly Trade[];
   readonly positions: readonly Position[];
+  readonly closed: readonly ClosedPosition[];
 }

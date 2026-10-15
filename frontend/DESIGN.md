@@ -8,7 +8,9 @@ colors:
   ink: "#121417"         # 16.9:1 no ground
   muted: "#55544f"       # 6.9:1 no ground
   hairline: "#e1e0d9"
-  signal: "#1c5cab"      # 6.1:1 — seleção, links, foco
+  signal: "#1c5cab"      # 6.1:1 — seleção, links, foco, botão principal
+  signal-hover: "#184f95"
+  signal-active: "#104281"
   series-price: "#2a78d6"
   series-average: "#eb6834"
   good: "#006300"        # texto de ganho / SEGURAR · marca #0ca30c
@@ -60,7 +62,10 @@ Plano. Nenhuma sombra. Blocos se separam por fundo (surface sobre ground) e hair
 - **Etiqueta de status** — texto + fundo tint da cor de status, `sm`, peso 500.
 - **Número de destaque** — rótulo em muted acima, valor em figure.
 - **Tabela** — cabeçalho em muted 13px peso 500, linhas com hairline, linha selecionável com foco visível.
-- **Botão de moeda** — texto, hairline; selecionado = fundo signal, texto surface.
+- **Botão** — principal: fundo signal, texto surface (hover/active escurecem); secundário: hairline; perigo: borda e texto critical; fantasma: só texto. Ícone de 18px à esquerda quando ajuda a reconhecer a ação.
+- **Seletor de moeda** — logo + ticker, hairline; selecionado = borda signal e fundo signal-bg.
+- **Ícones** — Phosphor, peso regular, sem moldura ou quadradinho; cada ícone tem um significado fixo (escudo = limite de perda, cadeado = garantir lucro, alvo = preço médio, fogo = subiu demais, relógio = tempo, olho = ficar de olho, mão com moedas = zona de compra).
+- **Logos das moedas** — SVG oficial (cryptocurrency-icons, CC0) em 20–36px, sempre ao lado do ticker.
 
 ## Do's and Don'ts
 

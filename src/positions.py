@@ -1,4 +1,4 @@
-"""Registro das suas compras. Depois de cada mudança, reanalisa a base local e atualiza o painel.
+"""Registro das suas compras. Depois de cada mudança, reavalia as posições com a base local e atualiza o painel.
 
 Uso (da raiz do projeto):
     uv run python -m src.positions add BTC/USDT 83169 0.01            compra hoje a 83169, qtd 0.01
@@ -19,13 +19,20 @@ import pandas as pd
 
 from .config import UNIVERSE
 from .loaders.positions_store import POSITIONS_SCHEMA, read_positions, write_positions
-from .pipeline import analyze
+from .pipeline import refresh_positions
 
 
 def _parse_day(value: str | None) -> pd.Timestamp:
+    today = pd.Timestamp(datetime.now(timezone.utc)).floor("D")
     if value is None:
-        return pd.Timestamp(datetime.now(timezone.utc)).floor("D")
-    return pd.Timestamp(value, tz="UTC").floor("D")
+        return today
+    try:
+        day = pd.Timestamp(datetime.strptime(value, "%Y-%m-%d"), tz="UTC")
+    except ValueError:
+        raise SystemExit(f"data inválida: {value} (use AAAA-MM-DD)") from None
+    if day > today:
+        raise SystemExit("a data não pode estar no futuro")
+    return day
 
 
 def add(symbol: str, price: float, qty: float, date: str | None) -> str:
@@ -110,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         remove(args.position_id)
         print(f"posição {args.position_id} removida.")
 
-    analyze()  # atualiza o painel com a base local, sem rede
+    refresh_positions()  # atualiza as posições no painel com a base local, sem rede
     print(show())
     return 0
 

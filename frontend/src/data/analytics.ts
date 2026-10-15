@@ -193,3 +193,27 @@ export const fmt = {
 };
 
 export const signTone = (n: number | null): Tone => (n === null || n === 0 ? "neutral" : n > 0 ? "good" : "critical");
+
+/* ---------- apoio a gráficos e formulários ---------- */
+
+/** Fechamentos dos últimos `days` candles de uma moeda, do mais antigo ao mais recente. */
+export const recentCloses = (history: readonly HistoryPoint[], symbol: string, days = 90): readonly number[] =>
+  history.filter((h) => h.symbol === symbol).slice(-days).map((h) => h.close);
+
+/** Data de hoje no fuso local, no formato AAAA-MM-DD (para inputs de data). */
+export function todayIso(now: Date = new Date()): string {
+  const pad = (n: number): string => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/** Converte texto digitado ("1.234,5" ou "1234.5") em número; null se inválido. */
+export function parseAmount(text: string): number | null {
+  const t = text.trim();
+  if (t === "") return null;
+  const normalized = t.includes(",") ? t.replace(/\./g, "").replace(",", ".") : t;
+  const n = Number(normalized);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Número para um campo de texto no padrão brasileiro, sem separador de milhar ("2421,6"). */
+export const toInput = (n: number): string => String(n).replace(".", ",");

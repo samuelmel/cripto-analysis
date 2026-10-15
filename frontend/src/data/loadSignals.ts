@@ -5,6 +5,7 @@ import {
   STAGES,
   STRATEGIES,
   TRADE_STATUSES,
+  type ClosedPosition,
   type Dashboard,
   type DailySignal,
   type HistoryPoint,
@@ -88,18 +89,32 @@ const parsePosition = (r: Row): Position => ({
   target_price: numOrNull(r, "target_price"),
 });
 
-/** Único ponto de I/O do frontend: baixa e valida tudo que o pipeline publicou. */
+const parseClosed = (r: Row): ClosedPosition => ({
+  position_id: str(r, "position_id"),
+  symbol: str(r, "symbol"),
+  entry_ts: date(r, "entry_ts"),
+  entry_price: num(r, "entry_price"),
+  qty: num(r, "qty"),
+  exit_ts: date(r, "exit_ts"),
+  exit_price: num(r, "exit_price"),
+  return_pct: num(r, "return_pct"),
+  pnl_usd: num(r, "pnl_usd"),
+});
+
+/** Leitura: baixa e valida tudo que o pipeline publicou (a escrita fica em api.ts). */
 export async function loadDashboard(base = ""): Promise<Dashboard> {
-  const [signals, history, trades, positions] = await Promise.all([
+  const [signals, history, trades, positions, closed] = await Promise.all([
     fetchRows(`${base}/daily_signals.parquet`),
     fetchRows(`${base}/history.parquet`),
     fetchRows(`${base}/backtest.parquet`),
     fetchRows(`${base}/positions.parquet`),
+    fetchRows(`${base}/closed_positions.parquet`),
   ]);
   return {
     signals: signals.map(parseSignal),
     history: history.map(parseHistory),
     trades: trades.map(parseTrade),
     positions: positions.map(parsePosition),
+    closed: closed.map(parseClosed),
   };
 }

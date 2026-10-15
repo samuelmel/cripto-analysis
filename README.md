@@ -105,6 +105,16 @@ Se aparecer "sem dados ainda", rode o pipeline primeiro.
 
 ### 3. Registrar suas compras e vendas
 
+Pelo painel, em **Suas posições**:
+
+- **Registrar uma compra:** escolha a moeda, confira o preço pago (vem preenchido com o último fechamento), informe a quantidade e a data.
+- **Já vendi:** em cada ficha, informe o preço e a data da venda. Ela passa para "Vendas que você registrou", com o resultado.
+- **Apagar registro:** só para corrigir um registro errado.
+
+O painel grava por uma rota local do `npm run dev`, que chama o mesmo comando do terminal e só aceita pedidos da própria página. O build estático (`npm run build`) não tem essa rota.
+
+Pelo terminal, o equivalente é:
+
 ```bash
 uv run python -m src.positions add BTC/USDT 83000 0.01
 ```

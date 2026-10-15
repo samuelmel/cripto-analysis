@@ -117,6 +117,36 @@ def backtest(
     return out[list(BACKTEST_SCHEMA)].astype(BACKTEST_SCHEMA)
 
 
+def _epoch_days(ts: pd.Series) -> np.ndarray:
+    """Dias desde 1970-01-01 (UTC) como inteiros."""
+    naive = ts.astype("datetime64[ns, UTC]").dt.tz_localize(None).to_numpy(dtype="datetime64[ns]")
+    return naive.astype("datetime64[D]").astype(np.int64)
+
+
+def _window_paths(entries: pd.DataFrame, hist: pd.DataFrame, max_days: int, include_entry_day: bool) -> pd.DataFrame:
+    """Candles de cada operação dentro de (entrada, entrada + max_days], por índice — sem cruzar
+    cada entrada com o histórico inteiro do ativo. `hist` deve vir ordenado por symbol, timestamp."""
+    codes = {s: i for i, s in enumerate(pd.unique(hist["symbol"]))}
+    stride = 10_000_000  # > dias desde 1970 até muito depois de 2100
+    hist_days = _epoch_days(hist["timestamp"])
+    hist_key = hist["symbol"].map(codes).to_numpy(dtype=np.int64) * stride + hist_days
+
+    known = entries["symbol"].isin(codes)
+    ent = entries[known]
+    ent_code = ent["symbol"].map(codes).to_numpy(dtype=np.int64) * stride
+    ent_days = _epoch_days(ent["entry_ts"])
+    start = np.searchsorted(hist_key, ent_code + ent_days, side="left" if include_entry_day else "right")
+    end = np.searchsorted(hist_key, ent_code + ent_days + max_days, side="right")
+    lengths = np.maximum(end - start, 0)
+
+    owner = np.repeat(np.arange(len(ent)), lengths)
+    offsets = np.arange(lengths.sum()) - np.repeat(np.cumsum(lengths) - lengths, lengths)
+    rows = hist.iloc[np.repeat(start, lengths) + offsets].reset_index(drop=True)
+    trade_cols = ent[["trade_id", "entry_ts", "entry_price"]].iloc[owner].reset_index(drop=True)
+    out: pd.DataFrame = pd.concat([trade_cols, rows], axis=1)
+    return out
+
+
 def simulate(
     entries: pd.DataFrame,
     history: pd.DataFrame,
@@ -135,12 +165,11 @@ def simulate(
         return pd.DataFrame({c: pd.Series(dtype=t) for c, t in TRADE_SCHEMA.items()})
 
     cols = ["symbol", "timestamp", "close", "sma_90", "zscore_90", "rsi_14"]
-    paths = entries.merge(history[cols].astype({"symbol": "string"}), on="symbol", how="inner")
-    after = paths["timestamp"].ge(paths["entry_ts"]) if include_entry_day else paths["timestamp"].gt(paths["entry_ts"])
-    paths = paths[after].sort_values(["trade_id", "timestamp"], ignore_index=True)
+    hist = history[cols].astype({"symbol": "string"}).sort_values(["symbol", "timestamp"], ignore_index=True)
+    paths = _window_paths(entries, hist, rules.max_hold_days, include_entry_day)
 
     entry_z = entries.merge(
-        history[["symbol", "timestamp", "zscore_90"]].astype({"symbol": "string"}),
+        hist[["symbol", "timestamp", "zscore_90"]],
         left_on=["symbol", "entry_ts"],
         right_on=["symbol", "timestamp"],
         how="left",
@@ -169,11 +198,14 @@ def simulate(
     paths["reason"] = reason
 
     exits = paths[paths["reason"].ne("")].groupby("trade_id", sort=False).head(1).set_index("trade_id")
-    last = paths.groupby("trade_id", sort=False).tail(1).set_index("trade_id")
+    path_end = paths.groupby("trade_id", sort=False).tail(1).set_index("trade_id")
 
     out = entries.set_index("trade_id")
     closed = out.index.isin(exits.index)
-    final = exits.reindex(out.index).where(pd.Series(closed, index=out.index), last.reindex(out.index), axis=0)
+    final = exits.reindex(out.index).where(pd.Series(closed, index=out.index), path_end.reindex(out.index), axis=0)
+    # Estado atual do mercado (last_*) vem do candle mais recente do ativo, não do fim da janela.
+    latest = hist.groupby("symbol", sort=False).tail(1).set_index("symbol")
+    last = latest.reindex(out["symbol"].astype(str).to_numpy()).set_axis(out.index)
 
     result = pd.DataFrame(
         {
