@@ -31,6 +31,7 @@ import pandas as pd
 
 from .config import FEE_PER_SIDE, FORECAST_SEED, MAX_STALE_DAYS, RECOMMENDED, REGIME_SYMBOL, TEST_PERIOD, TRAIN_PERIOD, UNIVERSE, VALIDATION_PERIOD
 from .extractors import MARKET_SYMBOL, BaseExtractor, BinanceAdapter, CoinGeckoMarketAdapter, ExtractorError, FearGreedAdapter
+from .extractors.binance_adapter import DEFAULT_HOST as BINANCE_DEFAULT_HOST
 from .notifiers import TelegramError, send_messages, settings_from_env
 from .loaders.history_store import read_previous, write_snapshot
 from .loaders.market_store import (
@@ -98,7 +99,7 @@ def _optional(adapter: BaseExtractor, start: datetime | None, now: datetime) -> 
         return adapter.standardize(pd.DataFrame()), str(exc)
 
 
-def update_base(now: datetime, *, rebuild: bool = False) -> pd.DataFrame:
+def update_base(now: datetime, *, rebuild: bool = False, binance_host: str = BINANCE_DEFAULT_HOST) -> pd.DataFrame:
     """Baixa só o que falta de cada ativo (ou tudo, com rebuild) e grava na base local.
 
     Falha de uma fonte não derruba o pipeline: vai para o registro de fontes e a moeda sem dado novo
@@ -113,7 +114,7 @@ def update_base(now: datetime, *, rebuild: bool = False) -> pd.DataFrame:
         candles = pd.DataFrame()
         error: str | None = None
         try:
-            candles = BinanceAdapter([symbol]).extract(start, now)
+            candles = BinanceAdapter([symbol], host=binance_host).extract(start, now)
             if not candles.empty:
                 write_ohlcv(candles)
                 logger.info("%s: +%d candles (%s a %s)", symbol, len(candles),
@@ -308,7 +309,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         failures = pd.DataFrame()
         if not args.offline:
-            log = update_base(now, rebuild=args.rebuild)
+            log = update_base(now, rebuild=args.rebuild, binance_host=os.environ.get("BINANCE_API_HOST", "").strip() or BINANCE_DEFAULT_HOST)
             failures = log[log["status"].eq("erro")]
         stage = "análise"
         result = analyze(pd.Timestamp(now))

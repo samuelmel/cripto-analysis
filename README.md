@@ -299,7 +299,7 @@ O arquivo [.github/workflows/daily.yml](.github/workflows/daily.yml) roda o pipe
 
 **O que o workflow faz, nesta ordem:**
 
-1. Consulta `api.binance.com/api/v3/ping`. Se responder **HTTP 451** (bloqueio regional dos runners), o job falha na hora com uma mensagem clara; qualquer resposta diferente de 200 também falha. Não há contorno automático: se acontecer, a decisão é sua (outro lugar para rodar, ou outra fonte de preço).
+1. Testa `api.binance.com` e, se ela recusar o runner (**HTTP 451**, bloqueio regional) ou não responder 200, testa `data-api.binance.vision`, que serve os mesmos dados públicos de mercado. O primeiro que responder 200 vira a variável `BINANCE_API_HOST` do pipeline. Se nenhum responder, o job falha na hora com uma mensagem clara: a decisão é sua (outro lugar para rodar, ou outra fonte de preço). O pipeline só aceita esses dois hosts.
 2. `actions/checkout` e `actions/setup-python` (as oficiais do GitHub, versão v7), instala o `uv` na mesma versão do projeto e faz `uv sync --locked`.
 3. Roda `uv run python -m src.pipeline --notify`, sem `--offline`. Qualquer falha crítica (rede, análise, envio) deixa o job vermelho.
 
@@ -312,7 +312,7 @@ Segurança: `permissions: contents: read`, `concurrency` sem execuções simult�
 1. Colocar o projeto num repositório do GitHub (eu não faço `push`) e deixar o workflow na branch padrão.
 2. Em **Settings → Secrets and variables → Actions → New repository secret**, criar três segredos com estes nomes exatos: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` e (opcional) `COINGECKO_API_KEY`.
 3. Em **Actions → Pipeline diário → Run workflow**, fazer um teste manual.
-4. Confirmar o envio: o job termina verde, o log do último passo mostra `resumo enviado ao Telegram (1 mensagem(ns))` (o GitHub esconde os segredos no log) e a mensagem chega no celular. Se o primeiro passo ficar vermelho com "HTTP 451", a Binance bloqueou o runner e o pipeline não roda no GitHub sem outra solução.
+4. Confirmar o envio: o job termina verde, o log do último passo mostra `resumo enviado ao Telegram (1 mensagem(ns))` (o GitHub esconde os segredos no log) e a mensagem chega no celular. Se o primeiro passo ficar vermelho, a Binance (os dois hosts) recusou o runner e o pipeline não roda no GitHub sem outra solução.
 5. Se usar o agendamento do Windows (seção abaixo) junto com o GitHub, você recebe duas mensagens por dia; desative um dos dois.
 
 ## Fontes de dados e qualidade
@@ -498,4 +498,4 @@ npm --prefix frontend run build
 | Nenhum alerta no primeiro dia | Não há dia anterior salvo | Normal; aparecem a partir do segundo dia |
 | BTC e ETH em NEUTRO por meses | O BTC está abaixo da média de 200 dias | Esperado: em mercado de baixa a regra manda ficar de fora |
 | Moeda aparece como "Sem dados confiáveis" | Dado desatualizado ou histórico curto; o motivo aparece na tabela | Rode `uv run python -m src.pipeline`; veja `data/market/source_log` se a fonte falhou |
-| `HTTP 451` da Binance | Bloqueio regional da api.binance.com | Rodar de uma região onde a Binance global atende |
+| `HTTP 451` da Binance | Bloqueio regional da api.binance.com | No GitHub Actions o workflow já tenta `data-api.binance.vision`; localmente, `BINANCE_API_HOST=https://data-api.binance.vision` ou rodar de uma região onde a Binance global atende |

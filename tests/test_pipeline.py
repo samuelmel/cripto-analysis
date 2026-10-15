@@ -68,8 +68,11 @@ class FakeBinance:
     source = "binance"
     fail: set[str] = {"ETH/USDT"}
 
-    def __init__(self, symbols: list[str]) -> None:
+    hosts: list[str] = []
+
+    def __init__(self, symbols: list[str], *, host: str = "") -> None:
         self.symbols = symbols
+        FakeBinance.hosts.append(host)
 
     def extract(self, start: datetime | None, end: datetime) -> pd.DataFrame:
         if self.symbols[0] in self.fail:
@@ -129,3 +132,14 @@ def test_candles_from_another_source_are_not_mixed(workdir: Path) -> None:
     with pytest.raises(MixedSourceError, match="não misturamos"):
         write_ohlcv(make_candles({"BTC/USDT": ramp(10, 20, 50)}, _yesterday(), source="outra"))
     assert read_ohlcv(["BTC/USDT"])["source"].unique().tolist() == ["binance"]
+
+
+def test_update_base_passes_the_binance_host_to_the_adapter(workdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    FakeBinance.hosts = []
+    monkeypatch.setattr(pipeline, "BinanceAdapter", FakeBinance)
+    monkeypatch.setattr(pipeline, "FearGreedAdapter", FakeFng)
+    monkeypatch.setattr(pipeline, "CoinGeckoMarketAdapter", FakeCoinGecko)
+
+    pipeline.update_base(datetime.now(tz=_yesterday().tz), binance_host="https://data-api.binance.vision")
+
+    assert set(FakeBinance.hosts) == {"https://data-api.binance.vision"}

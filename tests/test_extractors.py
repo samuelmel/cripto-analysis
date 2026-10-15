@@ -103,3 +103,22 @@ def test_fng_unparseable_timestamp_is_rejected() -> None:
     frame = adapter.to_frame([{"timestamp": "ontem", "value": "40", "value_classification": "Fear"}])
     with pytest.raises(ExtractorError, match="nulas"):
         adapter.standardize(frame)
+
+
+def test_binance_uses_the_configured_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    urls: list[str] = []
+
+    def fake_get(url: str, *args: Any, **kwargs: Any) -> list[Any]:
+        urls.append(url)
+        return [kline(0)]
+
+    monkeypatch.setattr(binance_adapter, "get_json", fake_get)
+    BinanceAdapter(["BTC/USDT"], host="https://data-api.binance.vision").extract(
+        pd.Timestamp(T0, unit="ms", tz="UTC").to_pydatetime(), end_after(1)
+    )
+    assert urls == ["https://data-api.binance.vision/api/v3/klines"]
+
+
+def test_binance_rejects_unknown_host() -> None:
+    with pytest.raises(ValueError, match="host da Binance não suportado"):
+        BinanceAdapter(["BTC/USDT"], host="https://exemplo.invalido")

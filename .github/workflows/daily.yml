@@ -19,19 +19,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Verificar acesso à API da Binance (HTTP 451 = bloqueio regional)
+      - name: Escolher o host da API da Binance que responde a este runner
         run: |
-          status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 20 \
-            https://api.binance.com/api/v3/ping || true)
-          echo "api.binance.com/api/v3/ping respondeu HTTP ${status}"
-          if [ "${status}" = "451" ]; then
-            echo "::error title=Binance bloqueada para este runner (HTTP 451)::A api.binance.com recusa conexões deste data center por bloqueio regional. O pipeline precisa dos preços da Binance e não há contorno automático. Rode o pipeline em outro lugar (por exemplo, um runner self-hosted em região sem bloqueio) ou troque de fonte de preço."
-            exit 1
-          fi
-          if [ "${status}" != "200" ]; then
-            echo "::error title=Binance indisponível (HTTP ${status})::A api.binance.com não respondeu HTTP 200 ao ping (000 = sem resposta). Sem preços novos o pipeline não deve rodar. Tente de novo mais tarde."
-            exit 1
-          fi
+          # api.binance.com recusa data centers de algumas regiões (HTTP 451). data-api.binance.vision serve os
+          # mesmos dados públicos de mercado; usamos o primeiro que devolver candles (HTTP 200).
+          for host in https://api.binance.com https://data-api.binance.vision; do
+            status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 20 \
+              "${host}/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=1" || true)
+            echo "${host} respondeu HTTP ${status}"
+            if [ "${status}" = "200" ]; then
+              echo "BINANCE_API_HOST=${host}" >> "${GITHUB_ENV}"
+              exit 0
+            fi
+          done
+          echo "::error title=Binance inacessível a partir deste runner::Nem api.binance.com nem data-api.binance.vision devolveram HTTP 200 (451 = bloqueio regional; 000 = sem resposta). Sem preços novos o pipeline não deve rodar. Rode em um runner self-hosted em região sem bloqueio ou troque de fonte de preço."
+          exit 1
 
       - uses: actions/checkout@v7
 

@@ -14,7 +14,11 @@ import pandas as pd
 from .base_extractor import BaseExtractor, ExtractorError
 from .http import get_json
 
-API_URL = "https://api.binance.com/api/v3/klines"
+DEFAULT_HOST = "https://api.binance.com"
+ALLOWED_HOSTS = (DEFAULT_HOST, "https://data-api.binance.vision")
+"""api.binance.com é o principal; data-api.binance.vision serve os mesmos dados públicos de mercado e é a
+alternativa quando o primeiro recusa o data center (HTTP 451). Só estes hosts são aceitos."""
+KLINES_PATH = "/api/v3/klines"
 PAGE_LIMIT = 1000
 MIN_INTERVAL = 0.2  # s entre chamadas; o limite é por peso/IP (429 traz Retry-After, respeitado em http.get_json)
 DEFAULT_LOOKBACK = timedelta(days=250)  # SMA 90 + aquecimento do RSI com folga
@@ -36,9 +40,12 @@ class BinanceAdapter(BaseExtractor):
         "trades": "Int64",
     }
 
-    def __init__(self, symbols: list[str], timeframe: str = "1d") -> None:
+    def __init__(self, symbols: list[str], timeframe: str = "1d", *, host: str = DEFAULT_HOST) -> None:
         if timeframe not in TIMEFRAME_MS:
             raise ValueError(f"timeframe não suportado: {timeframe}")
+        if host not in ALLOWED_HOSTS:
+            raise ValueError(f"host da Binance não suportado: {host} (aceitos: {', '.join(ALLOWED_HOSTS)})")
+        self.host = host
         self.symbols = symbols      # formato "BTC/USDT"
         self.timeframe = timeframe
 
@@ -54,7 +61,7 @@ class BinanceAdapter(BaseExtractor):
             since = start_ms
             while since < end_ms:
                 page: list[list[Any]] = get_json(
-                    API_URL,
+                    self.host + KLINES_PATH,
                     {"symbol": symbol.replace("/", ""), "interval": self.timeframe,
                      "startTime": since, "endTime": end_ms - 1, "limit": PAGE_LIMIT},
                     min_interval=MIN_INTERVAL,
