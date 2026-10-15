@@ -5,4 +5,6 @@ venv/
 /data/
 logs/
 *.tmp
-frontend/public/daily_signals.parquet
+frontend/public/*.parquet
+.env
+.env.*

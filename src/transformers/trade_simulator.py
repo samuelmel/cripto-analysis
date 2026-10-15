@@ -1,0 +1,199 @@
+"""Regras de saída e simulação de operações (backtest e posições reais usam o mesmo código).
+
+Puro e vetorizado: cada operação vira um "caminho" (os candles depois da entrada) e as regras de
+saída são avaliadas em todas as linhas de uma vez; a saída é a primeira linha que dispara.
+
+Regras de saída, em ordem de prioridade no mesmo dia:
+    STOP            perda >= 20% sobre a entrada: corta antes de cair mais
+    PROTEGER LUCRO  já subiu >= 15% e recuou 10% a partir do pico: trava o lucro
+    ALVO            entrou abaixo da SMA de 90 dias e o preço voltou a ela (zscore_90 >= 0) com
+                    lucro: reversão completa (não se aplica a quem comprou acima da média)
+    SOBRECOMPRADO   RSI >= 70 com lucro: euforia, realiza
+    TEMPO           180 dias sem resolver
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import numpy as np
+import pandas as pd
+
+from .anomaly_detector import STAGE_BUY
+
+EXIT_STOP = "STOP"
+EXIT_TRAIL = "PROTEGER LUCRO"
+EXIT_TARGET = "ALVO"
+EXIT_OVERBOUGHT = "SOBRECOMPRADO"
+EXIT_TIME = "TEMPO"
+
+STATUS_CLOSED = "FECHADA"
+STATUS_OPEN = "ABERTA"
+
+TRADE_SCHEMA: dict[str, str] = {
+    "trade_id": "string",
+    "symbol": "string",
+    "entry_ts": "datetime64[ns, UTC]",
+    "entry_price": "float64",
+    "status": "string",
+    "exit_ts": "datetime64[ns, UTC]",
+    "exit_price": "float64",
+    "exit_reason": "string",
+    "return_pct": "float64",
+    "max_return_pct": "float64",
+    "min_return_pct": "float64",
+    "days_held": "Int64",
+    "last_ts": "datetime64[ns, UTC]",
+    "last_close": "float64",
+    "sma_90": "float64",
+    "zscore_90": "float64",
+    "rsi_14": "float64",
+}
+
+
+@dataclass(frozen=True)
+class ExitRules:
+    stop_loss: float = -0.20
+    trail_activation: float = 0.15
+    trail_drawdown: float = 0.10
+    target_zscore: float = 0.0
+    overbought_rsi: float = 70.0
+    max_hold_days: int = 180
+
+
+@dataclass(frozen=True)
+class EntryRules:
+    # Dias de COMPRAR separados por até `cooldown` pertencem ao mesmo episódio: uma entrada só.
+    cooldown: pd.Timedelta = pd.Timedelta(days=14)
+
+
+def signal_entries(history: pd.DataFrame, rules: EntryRules = EntryRules()) -> pd.DataFrame:
+    """Uma entrada por episódio de COMPRAR: primeiro dia do episódio, ao preço de fechamento."""
+    buys = history.loc[history["stage"].eq(STAGE_BUY), ["symbol", "timestamp", "close"]]
+    buys = buys.sort_values(["symbol", "timestamp"])
+    gap = buys.groupby("symbol", observed=True)["timestamp"].diff()
+    first = buys[gap.isna() | gap.gt(rules.cooldown)]
+    return pd.DataFrame(
+        {
+            "trade_id": first["symbol"].astype(str) + "@" + first["timestamp"].dt.strftime("%Y-%m-%d"),
+            "symbol": first["symbol"].astype("string"),
+            "entry_ts": first["timestamp"],
+            "entry_price": first["close"],
+        }
+    ).reset_index(drop=True)
+
+
+def periodic_entries(history: pd.DataFrame, every_days: int = 7) -> pd.DataFrame:
+    """Referência "sem sinal": entra a cada `every_days` dias em todo ativo com indicadores válidos.
+
+    Se o sinal não bater essa referência com as mesmas regras de saída, ele não tem vantagem.
+    """
+    valid = history[history["zscore_90"].notna()]
+    picked = valid[valid["timestamp"].dt.dayofyear.mod(every_days).eq(0)]
+    return pd.DataFrame(
+        {
+            "trade_id": "REF:" + picked["symbol"].astype(str) + "@" + picked["timestamp"].dt.strftime("%Y-%m-%d"),
+            "symbol": picked["symbol"].astype("string"),
+            "entry_ts": picked["timestamp"],
+            "entry_price": picked["close"],
+        }
+    ).reset_index(drop=True)
+
+
+STRATEGY_SIGNAL = "SINAL"
+STRATEGY_REFERENCE = "REFERENCIA"
+BACKTEST_SCHEMA: dict[str, str] = {"strategy": "string", **TRADE_SCHEMA}
+
+
+def backtest(
+    history: pd.DataFrame,
+    entry_rules: EntryRules = EntryRules(),
+    exit_rules: ExitRules = ExitRules(),
+) -> pd.DataFrame:
+    """Operações do sinal de COMPRAR e da referência semanal, com as mesmas regras de saída."""
+    signal = simulate(signal_entries(history, entry_rules), history, exit_rules).assign(strategy=STRATEGY_SIGNAL)
+    reference = simulate(periodic_entries(history), history, exit_rules).assign(strategy=STRATEGY_REFERENCE)
+    out = pd.concat([signal, reference], ignore_index=True)
+    return out[list(BACKTEST_SCHEMA)].astype(BACKTEST_SCHEMA)
+
+
+def simulate(
+    entries: pd.DataFrame,
+    history: pd.DataFrame,
+    rules: ExitRules = ExitRules(),
+    *,
+    include_entry_day: bool = False,
+) -> pd.DataFrame:
+    """Aplica as regras de saída a cada entrada (trade_id, symbol, entry_ts, entry_price).
+
+    `history`: candles com indicadores (symbol, timestamp, close, sma_90, zscore_90, rsi_14).
+    `include_entry_day`: True para posições reais (compra no meio do dia: o fechamento do próprio
+    dia já conta); False no backtest (entra no fechamento do dia do sinal).
+    Operação sem saída até o último candle fica ABERTA, com o estado atual em last_*.
+    """
+    if entries.empty:
+        return pd.DataFrame({c: pd.Series(dtype=t) for c, t in TRADE_SCHEMA.items()})
+
+    cols = ["symbol", "timestamp", "close", "sma_90", "zscore_90", "rsi_14"]
+    paths = entries.merge(history[cols].astype({"symbol": "string"}), on="symbol", how="inner")
+    after = paths["timestamp"].ge(paths["entry_ts"]) if include_entry_day else paths["timestamp"].gt(paths["entry_ts"])
+    paths = paths[after].sort_values(["trade_id", "timestamp"], ignore_index=True)
+
+    entry_z = entries.merge(
+        history[["symbol", "timestamp", "zscore_90"]].astype({"symbol": "string"}),
+        left_on=["symbol", "entry_ts"],
+        right_on=["symbol", "timestamp"],
+        how="left",
+    ).set_index("trade_id")["zscore_90"]
+    paths["entry_z"] = paths["trade_id"].map(entry_z)
+
+    trade = paths.groupby("trade_id", sort=False)
+    paths["ret"] = paths["close"] / paths["entry_price"] - 1.0
+    paths["peak"] = trade["ret"].cummax()
+    paths["trough"] = trade["ret"].cummin()
+    paths["days"] = (paths["timestamp"] - paths["entry_ts"]).dt.days
+
+    in_profit = paths["ret"].gt(0)
+    reason = np.select(
+        [
+            paths["ret"].le(rules.stop_loss),
+            paths["peak"].ge(rules.trail_activation)
+            & (1.0 + paths["ret"]).le((1.0 + paths["peak"]) * (1.0 - rules.trail_drawdown)),
+            paths["entry_z"].lt(rules.target_zscore) & paths["zscore_90"].ge(rules.target_zscore) & in_profit,
+            paths["rsi_14"].ge(rules.overbought_rsi) & in_profit,
+            paths["days"].ge(rules.max_hold_days),
+        ],
+        [EXIT_STOP, EXIT_TRAIL, EXIT_TARGET, EXIT_OVERBOUGHT, EXIT_TIME],
+        default="",
+    )
+    paths["reason"] = reason
+
+    exits = paths[paths["reason"].ne("")].groupby("trade_id", sort=False).head(1).set_index("trade_id")
+    last = paths.groupby("trade_id", sort=False).tail(1).set_index("trade_id")
+
+    out = entries.set_index("trade_id")
+    closed = out.index.isin(exits.index)
+    final = exits.reindex(out.index).where(pd.Series(closed, index=out.index), last.reindex(out.index), axis=0)
+
+    result = pd.DataFrame(
+        {
+            "trade_id": out.index.astype("string"),
+            "symbol": out["symbol"],
+            "entry_ts": out["entry_ts"],
+            "entry_price": out["entry_price"],
+            "status": np.where(closed, STATUS_CLOSED, STATUS_OPEN),
+            "exit_ts": final["timestamp"].where(closed),
+            "exit_price": final["close"].where(closed),
+            "exit_reason": final["reason"].where(closed),
+            "return_pct": final["ret"] * 100.0,
+            "max_return_pct": final["peak"] * 100.0,
+            "min_return_pct": final["trough"] * 100.0,
+            "days_held": final["days"],
+            "last_ts": last["timestamp"].reindex(out.index),
+            "last_close": last["close"].reindex(out.index),
+            "sma_90": last["sma_90"].reindex(out.index),
+            "zscore_90": last["zscore_90"].reindex(out.index),
+            "rsi_14": last["rsi_14"].reindex(out.index),
+        }
+    )
+    return result[list(TRADE_SCHEMA)].astype(TRADE_SCHEMA).reset_index(drop=True)
