@@ -1,0 +1,53 @@
+name: Pipeline diário
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 00:10 UTC = 21:10 em Fortaleza (UTC−3, sem horário de verão): logo depois do fechamento do candle diário
+    # da Binance (00:00 UTC). O sinal só muda uma vez por dia, então não há ganho em rodar com mais frequência.
+    - cron: "10 0 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: crypto-analyzer-diario
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Verificar acesso à API da Binance (HTTP 451 = bloqueio regional)
+        run: |
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 20 \
+            https://api.binance.com/api/v3/ping || true)
+          echo "api.binance.com/api/v3/ping respondeu HTTP ${status}"
+          if [ "${status}" = "451" ]; then
+            echo "::error title=Binance bloqueada para este runner (HTTP 451)::A api.binance.com recusa conexões deste data center por bloqueio regional. O pipeline precisa dos preços da Binance e não há contorno automático. Rode o pipeline em outro lugar (por exemplo, um runner self-hosted em região sem bloqueio) ou troque de fonte de preço."
+            exit 1
+          fi
+          if [ "${status}" != "200" ]; then
+            echo "::error title=Binance indisponível (HTTP ${status})::A api.binance.com não respondeu HTTP 200 ao ping (000 = sem resposta). Sem preços novos o pipeline não deve rodar. Tente de novo mais tarde."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Instalar o uv
+        run: python -m pip install "uv==0.13.0"
+
+      - name: Instalar as dependências (versões travadas)
+        run: uv sync --locked
+
+      - name: Rodar o pipeline e enviar o resumo ao Telegram
+        env:
+          COINGECKO_API_KEY: ${{ secrets.COINGECKO_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: uv run python -m src.pipeline --notify

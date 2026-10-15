@@ -21,14 +21,16 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
 
-from .config import FEE_PER_SIDE, FORECAST_SEED, RECOMMENDED, TEST_PERIOD, TRAIN_PERIOD, UNIVERSE, VALIDATION_PERIOD
+from .config import FEE_PER_SIDE, FORECAST_SEED, MAX_STALE_DAYS, RECOMMENDED, REGIME_SYMBOL, TEST_PERIOD, TRAIN_PERIOD, UNIVERSE, VALIDATION_PERIOD
 from .extractors import MARKET_SYMBOL, BaseExtractor, BinanceAdapter, CoinGeckoMarketAdapter, ExtractorError, FearGreedAdapter
+from .notifiers import TelegramError, send_messages, settings_from_env
 from .loaders.history_store import read_previous, write_snapshot
 from .loaders.market_store import (
     MixedSourceError,
@@ -45,6 +47,7 @@ from .loaders.positions_store import read_positions
 from .loaders.source_log import write_source_log
 from .transformers.anomaly_detector import classify_history, detect
 from .transformers.forecast import forecast_table
+from .transformers.notification import format_error, format_report, redact, validate_messages
 from .transformers.data_quality import audit_candles, availability, clean_candles, mark_unavailable
 from .transformers.daily_alerts import ALERT_BUY, ALERT_EXIT, ALERT_SELL, ALERT_WATCH, compare_with_previous
 from .transformers.position_advisor import ACTION_SELL, ACTION_UNAVAILABLE, advise, realized
@@ -239,26 +242,87 @@ def report(result: dict[str, pd.DataFrame], source_errors: pd.DataFrame | None =
     return "\n".join(lines)
 
 
+SECRET_ENV = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "COINGECKO_API_KEY")
+
+
+def _secrets() -> list[str]:
+    return [v for name in SECRET_ENV if (v := os.environ.get(name, "").strip())]
+
+
+def _notify(result: dict[str, pd.DataFrame], failures: pd.DataFrame, now: datetime, *, dry_run: bool) -> int:
+    """Resumo do dia no Telegram (ou, com dry_run, só gerado, validado e impresso). 0 = ok, 1 = mensagem inválida,
+    2 = sem credenciais ou envio falhou (o job deve ficar vermelho)."""
+    texts = format_report(
+        result["signals"], result["forecast"], now=pd.Timestamp(now), recommended=RECOMMENDED,
+        regime_symbol=REGIME_SYMBOL, max_stale_days=MAX_STALE_DAYS, source_errors=failures,
+    )
+    problems = validate_messages(texts, _secrets())
+    if problems:
+        logger.error("mensagem do Telegram inválida: %s", "; ".join(problems))
+        return 1
+    if dry_run:
+        for i, text in enumerate(texts, start=1):
+            print(f"--- mensagem {i}/{len(texts)} ({len(text)} caracteres) ---")
+            print(text)
+        print("--- dry-run: mensagem válida, nada foi enviado ---")
+        return 0
+    settings = settings_from_env(os.environ)
+    if settings is None:
+        logger.error("--notify exige as variáveis TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID")
+        return 2
+    try:
+        send_messages(settings, texts)
+    except TelegramError as exc:
+        logger.error("notificação falhou: %s", exc)
+        return 2
+    logger.info("resumo enviado ao Telegram (%d mensagem(ns))", len(texts))
+    return 0
+
+
+def _alert_failure(stage: str, exc: BaseException, now: datetime) -> None:
+    """Alerta curto de erro no Telegram, se estiver configurado. Nunca levanta: o erro original é o que importa."""
+    settings = settings_from_env(os.environ)
+    if settings is None:
+        return
+    try:
+        send_messages(settings, format_error(stage, f"{type(exc).__name__}: {exc}", now=pd.Timestamp(now), secrets=_secrets()))
+    except TelegramError as sending:
+        logger.error("alerta de erro não enviado: %s", sending)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Pipeline diário do crypto-analyzer")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--offline", action="store_true", help="só reanalisa a base local")
     mode.add_argument("--rebuild", action="store_true", help="baixa todo o histórico de novo")
+    parser.add_argument("--notify", action="store_true", help="envia o resumo pelo Telegram")
+    parser.add_argument("--dry-run", action="store_true", help="gera e valida a mensagem do Telegram sem enviar")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     now = datetime.now(timezone.utc)
+    stage = "coleta"
     try:
         failures = pd.DataFrame()
         if not args.offline:
             log = update_base(now, rebuild=args.rebuild)
             failures = log[log["status"].eq("erro")]
+        stage = "análise"
         result = analyze(pd.Timestamp(now))
     except ExtractorError as exc:
         logger.error("pipeline falhou: %s", exc)
+        if args.notify and not args.dry_run:
+            _alert_failure(stage, exc, now)
+        return 1
+    except Exception as exc:  # erro inesperado: avisa no Telegram e deixa o traceback no log
+        logger.exception("pipeline falhou de forma inesperada")
+        if args.notify and not args.dry_run:
+            _alert_failure(stage, exc, now)
         return 1
     print(report(result, failures))
+    if args.notify or args.dry_run:
+        return _notify(result, failures, now, dry_run=args.dry_run)
     return 0
 
 

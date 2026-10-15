@@ -88,6 +88,8 @@ Ciclo 2026-10-14 · 15 ativos · F&G 53
 |---|---|
 | Normal: atualiza a base e analisa | `uv run python -m src.pipeline` |
 | Só reanalisa a base local, sem internet | `uv run python -m src.pipeline --offline` |
+| Envia o resumo pelo Telegram | `uv run python -m src.pipeline --notify` |
+| Gera e valida a mensagem sem token e sem rede | `uv run python -m src.pipeline --dry-run` |
 | Baixa todo o histórico de novo | `uv run python -m src.pipeline --rebuild` |
 
 Se uma fonte falhar, o pipeline continua: a falha vai para o registro de fontes e a moeda sem dado novo fica **INDISPONÍVEL** na análise (veja [Fontes de dados e qualidade](#fontes-de-dados-e-qualidade)). Só uma base local vazia aborta a execução.
@@ -249,6 +251,66 @@ Resultado no teste (retornos logarítmicos, em pontos percentuais; cobertura nom
 
 **Limitações.** Viés de sobrevivência (BTC e ETH são as sobreviventes mais fortes). Poucas janelas independentes no horizonte de 30 dias: 46 por ativo no teste, com erro-padrão da cobertura de cerca de 6 pontos percentuais, então diferenças pequenas não são conclusivas. Uma única história de mercado (dois ciclos). Não inclui impostos, taxas nem execução. O passado não garante o futuro, e nada disso é recomendação de investimento.
 
+## Notificação no Telegram
+
+O resumo do dia vai para o seu celular. Só envia mensagem: não há ordens, nem acesso a exchange, nem chave de corretora.
+
+```bash
+uv run python -m src.pipeline --notify      # roda o pipeline e envia o resumo
+uv run python -m src.pipeline --dry-run     # gera e valida a mensagem, imprime, não envia nada e não pede token
+```
+
+| Variável | Para quê |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | token do seu bot (BotFather). Segredo: nunca vai em código, log, mensagem ou erro. |
+| `TELEGRAM_CHAT_ID` | número do chat que recebe as mensagens |
+| `COINGECKO_API_KEY` | opcional (chave Demo gratuita do CoinGecko) |
+
+**O que a mensagem traz** (cerca de 1.300 caracteres, cabe numa tela): data e hora (Fortaleza e UTC) e se os dados estão em dia; para BTC e ETH, o preço, o fechamento diário usado, a SMA 200 e a distância, o filtro do BTC, o sinal (COMPRAR, PREPARAR, NEUTRO, VENDER ou INDISPONÍVEL), a condição que sustenta o sinal e a que o invalidaria, e a previsão de 1, 7 e 30 dias com a faixa e a limitação ("sem vantagem demonstrada sobre o preço de hoje"). O aviso de pânico vem numa seção separada e diz que não é recomendação de compra. As outras 13 moedas só aparecem se algo relevante mudou, com a frase "monitorar não é autorizar compra". Os únicos níveis citados são os da própria regra (a SMA 200 atual); a mensagem não inventa ponto de entrada nem dá aconselhamento personalizado.
+
+**Quando algo dá errado.** Dados parciais ou atrasados: a mensagem abre com `DADOS PARCIAIS`, lista a falha e marca cada sinal como `NÃO CONFIÁVEL`; moeda sem dado confiável aparece como `INDISPONÍVEL`, sem sinal e sem previsão. Se o pipeline falhar e o Telegram estiver configurado, chega um alerta curto de erro (sem segredos). Se o envio falhar, o pipeline termina com código 2, e o job do GitHub fica vermelho. Mensagens acima de 4096 caracteres são divididas em parágrafo ou linha; o envio tem timeout de 15 s, até 3 tentativas com espera de 2 e 4 s, respeita o `retry_after` do Telegram e não repete quando o token ou o chat estão errados.
+
+### Criar o bot e descobrir o chat_id (você faz uma vez)
+
+1. No Telegram, abra uma conversa com **@BotFather** (confira o selo azul de verificado) e envie `/newbot`. Escolha um nome e um usuário que termine em `bot`. O BotFather responde com o **token**, no formato `123456789:AA...`. Guarde-o: quem tem o token controla o bot.
+2. Abra a conversa com o seu bot novo e envie qualquer mensagem (por exemplo, `oi`). Um bot não pode escrever primeiro.
+3. Descubra o chat_id: no navegador, abra `https://api.telegram.org/bot<SEU_TOKEN>/getUpdates` (troque `<SEU_TOKEN>` pelo token) e procure `"chat":{"id":123456789`. Esse número é o `TELEGRAM_CHAT_ID`. Essa URL contém o token: não compartilhe a tela nem o link.
+4. Teste no seu computador, no PowerShell, na pasta do projeto:
+
+```powershell
+$env:TELEGRAM_BOT_TOKEN = "cole-o-token"
+$env:TELEGRAM_CHAT_ID = "cole-o-chat-id"
+uv run python -m src.pipeline --offline --notify
+```
+
+Se a mensagem chegar no celular, está pronto. Fechar o PowerShell apaga as variáveis.
+
+## Automação com GitHub Actions
+
+O arquivo [.github/workflows/daily.yml](.github/workflows/daily.yml) roda o pipeline online todo dia e envia o resumo. Ele só funciona se o projeto estiver num repositório do GitHub (o workflow precisa estar na branch padrão).
+
+**Horário.** O `cron` do GitHub usa UTC por padrão (a documentação atual também aceita uma chave `timezone`, mas não é necessária aqui). O gatilho é `10 0 * * *`: **00:10 UTC = 21:10 em Fortaleza** (UTC−3 o ano todo, sem horário de verão), logo depois do fechamento do candle diário da Binance (00:00 UTC). Usei UTC porque o evento que importa, o fechamento do candle, é em UTC. Para outro fuso, converta: horário local + 3 h = UTC em Fortaleza. O GitHub pode atrasar ou até descartar execuções agendadas em horário de pico (o começo de cada hora conta como pico, por isso 00:10 e não 00:00), e em repositório público desativa o agendamento depois de 60 dias sem atividade (reative em Actions).
+
+**Por que uma vez por dia.** O sinal usa o fechamento diário: a vela do dia em andamento é descartada. Rodar a cada 5 horas devolve o mesmo sinal e só gera mensagens repetidas. Não há ganho.
+
+**O que o workflow faz, nesta ordem:**
+
+1. Consulta `api.binance.com/api/v3/ping`. Se responder **HTTP 451** (bloqueio regional dos runners), o job falha na hora com uma mensagem clara; qualquer resposta diferente de 200 também falha. Não há contorno automático: se acontecer, a decisão é sua (outro lugar para rodar, ou outra fonte de preço).
+2. `actions/checkout` e `actions/setup-python` (as oficiais do GitHub, versão v7), instala o `uv` na mesma versão do projeto e faz `uv sync --locked`.
+3. Roda `uv run python -m src.pipeline --notify`, sem `--offline`. Qualquer falha crítica (rede, análise, envio) deixa o job vermelho.
+
+Segurança: `permissions: contents: read`, `concurrency` sem execuções simultâneas, e os segredos entram só como `secrets` do GitHub, só no passo do pipeline.
+
+**Sobre o estado.** O runner começa sem a pasta `data/`: a cada execução o pipeline baixa o histórico inteiro de novo (cerca de 40 s na primeira carga) e recalcula tudo. O sinal de "ontem", usado nos alertas de virada, é recalculado a partir do histórico, sem estado guardado. **As suas posições (`data/positions`) não existem no runner**: a mensagem diária cobre os sinais de BTC e ETH, não as suas compras. Para ver o status das suas posições, use o painel no seu computador.
+
+### O que você precisa fazer manualmente
+
+1. Colocar o projeto num repositório do GitHub (eu não faço `push`) e deixar o workflow na branch padrão.
+2. Em **Settings → Secrets and variables → Actions → New repository secret**, criar três segredos com estes nomes exatos: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` e (opcional) `COINGECKO_API_KEY`.
+3. Em **Actions → Pipeline diário → Run workflow**, fazer um teste manual.
+4. Confirmar o envio: o job termina verde, o log do último passo mostra `resumo enviado ao Telegram (1 mensagem(ns))` (o GitHub esconde os segredos no log) e a mensagem chega no celular. Se o primeiro passo ficar vermelho com "HTTP 451", a Binance bloqueou o runner e o pipeline não roda no GitHub sem outra solução.
+5. Se usar o agendamento do Windows (seção abaixo) junto com o GitHub, você recebe duas mensagens por dia; desative um dos dois.
+
 ## Fontes de dados e qualidade
 
 | Fonte | O que traz | Chamada | Persistência |
@@ -364,6 +426,7 @@ src/
     daily_alerts.py          alertas de virada contra o dia anterior
     trade_simulator.py       operações da tendência e backtest de carteira (treino/teste, taxa)
     panic_backtest.py        a regra antiga do pânico, congelada só para comparação
+    notification.py          mensagem do Telegram (pura): relatório, divisão em 4096, validação
     forecast.py              previsão P10/P50/P90 de BTC e ETH contra o baseline
     position_advisor.py      SEGURAR / VENDER das suas posições
   loaders/                 L — Parquet com escrita atômica
@@ -371,6 +434,8 @@ src/
     history_store.py         snapshot diário (data/signals/history)
     positions_store.py       suas posições (data/positions)
     source_log.py            registro da atualização de cada fonte
+  notifiers/               envio (rede) de notificações
+    telegram.py              sendMessage com timeout, retry e sem vazar o token
     parquet_loader.py        publicação para o painel
 research/
   strategy_comparison.py   reproduz a tabela de estratégias (treino x teste)
@@ -380,6 +445,8 @@ frontend/                  React + TypeScript + Tailwind
   DESIGN.md                contrato visual: tokens, tipografia, componentes, o que evitar
   src/data/                leitura e validação do Parquet + cálculos e textos puros do painel
   src/components/          Dashboard, Sections, PriceChart (lightweight-charts), ui (primitivas)
+tests/                     pytest, sem chamadas de rede
+.github/workflows/         pipeline diário no GitHub Actions
 mcp_server.py              tool MCP run_crypto_pipeline
 run_daily.cmd              script chamado pelo Agendador de Tarefas
 ```

@@ -8,6 +8,7 @@ Valem para todo código novo ou alterado. Código que viola uma regra não entra
 - I/O existe apenas na borda:
   - `src/extractors/` — somente em `fetch` (rede). `to_frame` e `standardize` são puros.
   - `src/loaders/` — escrita de arquivos.
+  - `src/notifiers/` — somente o envio (rede) de notificações, como Telegram. A formatação da mensagem é função pura em `src/transformers/` (dados entram, lista de textos sai); tokens e chat ids vêm do entrypoint, nunca do código, e nunca aparecem em log, mensagem ou exceção.
   - Entrypoints (`src/pipeline.py`, `mcp_server.py`, CLIs) — orquestram e injetam parâmetros.
 - `src/transformers/` não importa `aiohttp`, `ccxt`, `os`, `pathlib` nem funções de leitura/escrita de `pandas`/`pyarrow`.
 - A data de referência ("hoje") é parâmetro, sempre injetado pelo entrypoint.
