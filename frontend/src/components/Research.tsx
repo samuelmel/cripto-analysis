@@ -9,9 +9,9 @@ const PERIOD_TEXT: Readonly<Record<LabPeriod, string>> = {
   VALIDACAO: "Validação (2021 e 2022)",
   TREINO: "Treino (2018 a 2020)",
 };
-const UNIVERSE_TEXT: Readonly<Record<Portfolio, string>> = { PRINCIPAIS: "Bitcoin e Ethereum", TODAS: "As 15 moedas" };
+const UNIVERSE_TEXT: Readonly<Record<Portfolio, string>> = { PRINCIPAIS: "Bitcoin e Ethereum", TODAS: "Todas as moedas analisadas" };
 
-function Choice<T extends string>({ label, value, options, onChange }: {
+export function Choice<T extends string>({ label, value, options, onChange }: {
   readonly label: string;
   readonly value: T;
   readonly options: Readonly<Record<T, string>>;

@@ -1,4 +1,8 @@
-"""Configuração do projeto: universo de moedas, recomendação, qualidade de dados e backtest."""
+"""Configuração do projeto: universo de moedas, seleção, orçamento, qualidade de dados e backtest.
+
+Único lugar de parâmetros (CLAUDE.md §1): os módulos de regra recebem estes valores por dataclasses de regras
+(`UniverseRules`, `SelectionRules`, `AllocationRules`), com estes defaults; o entrypoint pode sobrescrever.
+"""
 
 from __future__ import annotations
 
@@ -18,13 +22,36 @@ UNIVERSE: dict[str, str] = {  # candidatas: par spot na Binance -> id no CoinGec
     "BCH/USDT": "bitcoin-cash",
     "ATOM/USDT": "cosmos",
     "XLM/USDT": "stellar",
+    # Ampliação do universo (seleção dinâmica): pares spot USDT com liquidez relevante. As listadas há pouco
+    # (ex.: SUI, TON) entram na base, mas só passam a ser analisadas quando tiverem MIN_HISTORY_DAYS candles.
+    "NEAR/USDT": "near",
+    "UNI/USDT": "uniswap",
+    "ICP/USDT": "internet-computer",
+    "FIL/USDT": "filecoin",
+    "ETC/USDT": "ethereum-classic",
+    "HBAR/USDT": "hedera-hashgraph",
+    "AAVE/USDT": "aave",
+    "ALGO/USDT": "algorand",
+    "VET/USDT": "vechain",
+    "INJ/USDT": "injective-protocol",
+    "APT/USDT": "aptos",
+    "ARB/USDT": "arbitrum",
+    "OP/USDT": "optimism",
+    "SUI/USDT": "sui",
+    "TON/USDT": "the-open-network",
+    "SHIB/USDT": "shiba-inu",
+    "PEPE/USDT": "pepe",
 }
 
 RECOMMENDED: tuple[str, ...] = ("BTC/USDT", "ETH/USDT")
-"""Moedas que recebem recomendação de compra. As demais do UNIVERSE são só monitoradas."""
+"""Moedas-núcleo da regra principal SMA 200 (referência preservada): recebem o estágio COMPRAR/PREPARAR, o
+backtest de operações e a previsão, e nunca saem do universo. A recomendação de APORTE não se limita a elas:
+vem da camada de seleção (`transformers/selection.py`), que avalia todas as moedas elegíveis do universo."""
 
-MAX_EXTRA_COINS = 13
-"""Quantas moedas além das RECOMMENDED entram na análise (as primeiras de UNIVERSE, na ordem)."""
+MAX_UNIVERSE_SIZE = 32
+"""Universo máximo analisado (núcleo incluído): as primeiras elegíveis de UNIVERSE, na ordem."""
+MAX_EXTRA_COINS = MAX_UNIVERSE_SIZE - len(RECOMMENDED)
+"""Quantas moedas além das RECOMMENDED entram na análise (derivado de MAX_UNIVERSE_SIZE)."""
 
 MIN_HISTORY_DAYS = 365
 """Menos candles diários que isso e a moeda fica fora (a SMA 200 precisa de 200; sobra um ano de teste)."""
@@ -66,3 +93,114 @@ FORECAST_SEED = 20261015
 
 FEE_PER_SIDE = 0.001
 """Taxa de 0,1% sobre cada mudança de posição (entrar ou sair)."""
+
+# ---------------------------------------------------------------------------------------------
+# Seleção de oportunidades (transformers/selection.py). Pesos e limiares definidos a priori, antes de olhar o
+# período de teste; o estudo `research/selection_study.py` só mede a sensibilidade em treino e validação.
+# ---------------------------------------------------------------------------------------------
+
+MAX_CANDIDATES = 3
+"""Quantas moedas, no máximo, aparecem como candidatas a compra (e no Telegram)."""
+
+BUY_BLOCKLIST: dict[str, str] = {}
+"""Exclusão manual só da COMPRA: a moeda continua analisada e no painel, mas nunca vira candidata.
+Ex.: {"DOGE/USDT": "não quero memecoins"}. Para tirar da análise inteira, use EXCLUDED_BASES ou tire de UNIVERSE
+(inclusão manual = acrescentar o par em UNIVERSE)."""
+
+MIN_BUY_VOLUME_USD = 20_000_000.0
+"""Volume médio diário (USDT, 30 dias) mínimo para ser candidata a compra. Mais exigente que o filtro do universo
+(MIN_AVG_QUOTE_VOLUME_USD), que só decide o que é analisado."""
+
+MIN_SCORE_HISTORY_DAYS = 250
+"""Candles mínimos para pontuar uma moeda: 200 da SMA 200 + 50 dias para medir a persistência da tendência."""
+
+MAX_GAP_DAYS_365 = 3
+"""Mais dias faltando que isso nos últimos 365 (integridade do histórico) impede a recomendação."""
+
+SCORE_WEIGHTS: dict[str, float] = {
+    "momentum": 0.35,   # retorno de 30 e 90 dias ajustado pela volatilidade (um componente só, não três)
+    "stability": 0.20,  # persistência: % dos últimos 50 dias acima da SMA 200
+    "risk": 0.25,       # volatilidade de 90 dias e pior queda de 180 dias (menor = melhor)
+    "liquidity": 0.20,  # volume médio de 30 dias
+}
+"""Pesos do score (somam 1). Cada componente é o percentil da moeda entre as analisadas no dia (0 a 100), então
+nenhum indicador domina pela escala. Força relativa contra as outras moedas é o próprio percentil do momento;
+contra o BTC é mostrada, mas não somada de novo (seria contar o mesmo retorno duas vezes)."""
+
+SCORE_STRONG = 65.0
+"""Score mínimo para 'boa oportunidade relativa' (com todos os filtros e sem alerta de risco)."""
+SCORE_MODERATE = 50.0
+"""Score mínimo para 'oportunidade moderada'. Abaixo disso: aguardar."""
+
+MIN_CONDITIONS = 3
+"""Condições independentes favoráveis (das estratégias habilitadas) exigidas para recomendar uma entrada."""
+
+ENABLED_SETUPS: tuple[str, ...] = ("sma200", "ema_cross", "donchian", "momentum")
+"""Estratégias que contam como condição favorável. Disponíveis também: "volume_breakout" e "pullback"
+(queda dentro da alta), desligadas porque perderam para a tendência no laboratório (`research/strategy_lab.py`)."""
+
+SETUP_PARAMS: dict[str, dict[str, float]] = {
+    "ema_cross": {"fast": 20, "slow": 50},
+    "donchian": {"n": 55},
+    "momentum": {"days": 90},
+    "volume_breakout": {"n": 55, "k": 1.5},
+    "pullback": {"enter_z": -1.0},
+}
+
+MAX_VOLATILITY = 1.50
+"""Volatilidade anualizada de 90 dias acima disso (150% ao ano) = risco excessivo: evitar entrada."""
+HIGH_VOLATILITY = 0.90
+"""Acima disso (90% ao ano) a moeda leva o alerta de volatilidade elevada e não passa de 'moderada'."""
+MAX_DRAWDOWN_180D = 0.60
+"""Pior queda de 180 dias maior que 60% = risco excessivo: evitar entrada."""
+MAX_STRETCH = 1.5
+"""Distância acima da SMA 50 maior que 1,5 vez a oscilação típica de 50 dias = movimento estendido: aguardar."""
+MAX_RSI_ENTRY = 80.0
+"""RSI de 14 dias acima disso = sobrecomprado: aguardar (nunca é, sozinho, motivo para comprar)."""
+
+REGIME_FILTER = "bloquear"
+"""Filtro de regime (BTC abaixo da SMA 200): "bloquear" = nenhuma compra nova em nenhuma moeda (padrão, igual à
+regra principal); "reduzir" = metade do orçamento-alvo; "desligado" = só sinaliza. Validação: selection_study."""
+
+# ---------------------------------------------------------------------------------------------
+# Orçamento e alocação (transformers/allocation.py)
+# ---------------------------------------------------------------------------------------------
+
+BUDGET_BRL = 100.0
+"""Orçamento TOTAL para novas posições na análise (não é por moeda nem aporte obrigatório). Sem integração com
+saldo real: cada execução é uma simulação para este valor. Já aportou? Rode com --budget <saldo restante>."""
+
+MAX_POSITIONS = 3
+"""Posições novas simultâneas na mesma análise."""
+MAX_ALLOCATION_PCT = 0.40
+"""Limite por moeda: no máximo 40% do orçamento."""
+TARGET_VOL_PER_POSITION = 0.30
+"""Dimensionamento por volatilidade: fração-alvo do orçamento = 30% / volatilidade anual da moeda (BTC com 50% ao
+ano -> 60%, limitado a MAX_ALLOCATION_PCT; altcoin com 100% ao ano -> 30%). Moeda mais arriscada recebe menos."""
+CONVICTION: dict[str, float] = {"BOA_RELATIVA": 1.0, "MODERADA": 0.5}
+"""Multiplicador da fração-alvo por classificação. Aguardar e evitar = 0."""
+REGIME_REDUCE_FACTOR = 0.5
+"""Fator do orçamento-alvo com REGIME_FILTER = "reduzir" e BTC abaixo da SMA 200."""
+
+ROUND_TO_BRL = 5.0
+"""Aportes arredondados PARA BAIXO em múltiplos de R$ 5 (a soma nunca passa do orçamento)."""
+MIN_ORDER_BRL = 10.0
+"""Ordem mínima da corretora em reais (confira a sua; pares em USDT da Binance pedem cerca de 5 USDT). Aporte
+abaixo disso é zerado e o motivo aparece na recomendação."""
+FIXED_COST_BRL = 0.0
+"""Custo fixo por ordem (tarifa, transferência). Com valor > 0, aporte em que ele passa de MAX_COST_PCT é zerado."""
+MAX_COST_PCT = 0.02
+"""Custo total estimado (fixo + taxa + spread + slippage) acima de 2% do aporte = economicamente inviável."""
+
+SPREAD_TIERS: tuple[tuple[float, float], ...] = ((500_000_000.0, 0.0002), (50_000_000.0, 0.0005), (0.0, 0.0015))
+"""Spread estimado por faixa de volume médio diário (USDT): (volume mínimo, meia-largura do spread). É uma
+hipótese conservadora (não há livro de ofertas nas fontes integradas), não uma medida."""
+SLIPPAGE = 0.0005
+"""Slippage estimado por lado (0,05%) para ordens pequenas a mercado."""
+
+SELECTION_REBALANCE_DAYS = 7
+"""Backtest da seleção: a carteira simulada segue a recomendação a cada 7 dias (rodar todo dia trocaria de
+moeda por ruído e pagaria mais custo)."""
+REBALANCE_BAND = 0.05
+"""Backtest: moeda que continua na carteira só é reajustada se o peso-alvo mudar mais de 5 pontos percentuais
+(entradas e saídas sempre são executadas). Evita pagar custo por ajustes pequenos."""

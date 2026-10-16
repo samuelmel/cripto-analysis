@@ -231,7 +231,7 @@ export function TradeList({ trades, coin, recommended }: {
   readonly recommended: boolean;
 }) {
   if (!recommended) {
-    return <p className="text-muted">A regra só recomenda comprar Bitcoin e Ethereum. {coin} é apenas acompanhada, então não há operações simuladas.</p>;
+    return <p className="text-muted">A regra da média de 200 dias só dá sinal de compra para Bitcoin e Ethereum, então não há operações simuladas dela para {coin}. A avaliação de {coin} para aporte está na aba Seleção.</p>;
   }
   if (trades.length === 0) {
     return <p className="text-muted">A regra nunca mandou comprar {coin} desde o início dos dados.</p>;
@@ -363,10 +363,11 @@ export function BacktestPanel({ performance, trades }: {
         Por isso o pânico virou só um aviso.
       </p>
 
-      <h3 className="mt-8 font-medium">E com as 15 moedas?</h3>
+      <h3 className="mt-8 font-medium">E com todas as moedas analisadas?</h3>
       <p className="mt-1 max-w-[72ch] text-muted">
         Aplicada a todas as moedas, a regra continua reduzindo a queda, mas rende bem menos do que comprar e segurar no
-        teste. Por isso o painel só recomenda Bitcoin e Ethereum.
+        teste. Por isso o sinal de compra desta regra vale só para Bitcoin e Ethereum; as outras moedas passam pela seleção
+        (aba Seleção), que tem o próprio backtest.
       </p>
       <div className="mt-3 space-y-4">
         <PerformanceTable rows={performance} universe="TODAS" period="TREINO" />
@@ -432,7 +433,8 @@ export function HowItWorks() {
           da média de 200 dias e subindo, perto de cruzá-la.
         </p>
         <p className="mt-3 text-muted">
-          As outras 13 moedas aparecem na tabela, mas sem recomendação: o teste mostrou que a regra não compensa nelas.
+          Nas outras moedas esta regra não dá sinal de compra (o teste mostrou que ela não compensa nelas); elas são
+          avaliadas pela seleção, que exige também momento, liquidez e risco dentro dos limites.
           O <strong className="font-medium text-ink">pânico</strong> (queda forte com medo no mercado) aparece só como aviso.
           Comprar nele perdeu dinheiro.
         </p>

@@ -15,6 +15,7 @@ from src.extractors import ExtractorError
 from src.loaders.market_store import MixedSourceError, read_ohlcv, write_ohlcv
 from src.loaders.source_log import read_source_log
 from src.transformers.anomaly_detector import STAGE_BUY, STAGE_UNAVAILABLE
+from src.transformers.recommendation import validate_recommendation
 from tests.helpers import make_candles, ramp
 
 PUBLISHED = ("daily_signals", "history", "backtest", "performance", "forecast", "sources", "positions", "closed_positions")
@@ -143,3 +144,34 @@ def test_update_base_passes_the_binance_host_to_the_adapter(workdir: Path, monke
     pipeline.update_base(datetime.now(tz=_yesterday().tz), binance_host="https://data-api.binance.vision")
 
     assert set(FakeBinance.hosts) == {"https://data-api.binance.vision"}
+
+
+def test_pipeline_publishes_a_consistent_recommendation_within_the_budget(workdir: Path) -> None:
+    write_ohlcv(_base())
+    assert pipeline.main(["--offline", "--budget", "55"]) == 0
+    public = workdir / "frontend" / "public"
+    signals = pd.read_parquet(public / "daily_signals.parquet")
+    rec = pd.read_parquet(public / "recommendation.parquet")
+    perf = pd.read_parquet(public / "selection_backtest.parquet")
+    assert len(rec) == 1 and rec["budget_brl"].iloc[0] == 55.0
+    assert signals["allocation_brl"].sum() <= 55.0
+    assert rec["total_brl"].iloc[0] == signals["allocation_brl"].sum()
+    assert signals["run_ts"].eq(rec["run_ts"].iloc[0]).all()
+    assert {"opportunity", "score", "reasons", "risks", "blockers"} <= set(signals.columns)
+    assert not perf.empty and "SELECAO" in set(perf["strategy"])
+    assert validate_recommendation(signals, rec) == []
+
+
+def test_stale_base_never_recommends_a_buy(workdir: Path) -> None:
+    write_ohlcv(_base())
+    result = pipeline.analyze(pd.Timestamp.now(tz="UTC") + pd.Timedelta(days=10))
+    assert result["signals"]["allocation_brl"].sum() == 0
+    assert not result["signals"]["selected"].any()
+    assert result["recommendation"]["total_brl"].iloc[0] == 0
+    assert result["recommendation"]["data_status"].iloc[0] in ("PARCIAL", "INDISPONIVEL")
+
+
+def test_negative_budget_is_rejected(workdir: Path) -> None:
+    write_ohlcv(_base())
+    with pytest.raises(SystemExit):
+        pipeline.main(["--offline", "--budget", "-10"])

@@ -3,14 +3,14 @@
 Puro (CLAUDE.md §1): sem rede, disco, relógio nem variáveis de ambiente; "agora" e os segredos a esconder são
 parâmetros. O envio é de `src.notifiers`.
 
-Conteúdo: data/hora e atualidade dos dados; para BTC e ETH, preço, fechamento diário usado, SMA 200, distância,
-filtro do BTC, sinal, a condição que sustenta e a que invalidaria, e a previsão de 1, 7 e 30 dias com a faixa e a
-limitação; o aviso de pânico em seção separada; as outras moedas só quando algo relevante mudou, sempre dizendo
-que monitorar não é autorizar compra. Não há ponto de entrada inventado: os únicos níveis citados são os da
-própria regra (a SMA 200 atual). Sem aconselhamento personalizado.
+Conteúdo (curto, para ler em um minuto): data/hora e atualidade dos dados, orçamento da simulação, estado do
+mercado, só as moedas selecionadas (até MAX_CANDIDATES) com aporte, classificação, motivo e principal risco, o
+resumo do aporte (total, saldo não alocado, decisão), alertas essenciais (virada da regra SMA 200 de BTC/ETH,
+pânico) e a evidência do backtest. Tudo vem da recomendação calculada pelo pipeline (`recommendation.py`): o
+formatador não calcula aporte nem escolhe moeda. Os indicadores detalhados ficam no painel.
 
-Dados parciais: a mensagem abre com as limitações e marca os sinais como NÃO CONFIÁVEIS; moeda sem dado
-confiável aparece como INDISPONÍVEL, com o motivo, e sem previsão.
+Sem oportunidade: a frase fixa NO_OPPORTUNITY e os motivos mais frequentes. Dados parciais: a mensagem lista as
+limitações; moeda sem dado confiável nunca é recomendada (é bloqueada antes, em `selection.assess`).
 """
 
 from __future__ import annotations
@@ -21,19 +21,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import timedelta, timezone
 
+import numpy as np
 import pandas as pd
 
 TELEGRAM_LIMIT = 4096
 FORTALEZA = timezone(timedelta(hours=-3))  # UTC−3 o ano todo (sem horário de verão)
 
-STAGE_BUY = "COMPRAR"
-STAGE_WATCH = "PREPARAR"
-STAGE_UNAVAILABLE = "INDISPONÍVEL"
-SIGNAL_SELL = "VENDER"
-ALERT_SELL = "VENDER AGORA"
-
 _SECONDARY_SOURCES = {"coingecko", "alternative_me"}
-_ICON = {STAGE_BUY: "🟢", STAGE_WATCH: "🟡", "NEUTRO": "⚪", SIGNAL_SELL: "🔴", STAGE_UNAVAILABLE: "⚫"}
 _OTHER_ALERTS = {
     "COMPRAR AGORA": "entrou em tendência de alta",
     "VENDER AGORA": "saiu da tendência de alta",
@@ -41,19 +35,10 @@ _OTHER_ALERTS = {
     "SAIU DO RADAR": "saiu do radar",
 }
 _BAD_TOKEN = re.compile(r"\b(nan|inf|None)\b|<NA>|NaT")
-DISCLAIMER = "Estatística sobre o passado, não recomendação de investimento."
 
 
 def _num(x: float, digits: int = 2) -> str:
     return f"{x:,.{digits}f}".replace(",", "X").replace(".", ",").replace("X", ".")
-
-
-def _usd(x: float) -> str:
-    return f"US$ {_num(x, 2 if abs(x) < 1000 else 0)}"
-
-
-def _pct(x: float, digits: int = 1) -> str:
-    return f"{'+' if x > 0 else '−' if x < 0 else ''}{_num(abs(x), digits)}%"
 
 
 def _day(ts: pd.Timestamp) -> str:
@@ -124,200 +109,196 @@ def validate_messages(texts: Sequence[str], secrets: Sequence[str] = (), limit: 
 # Relatório do dia
 # ---------------------------------------------------------------------------------------------
 
-@dataclass(frozen=True)
-class Coin:
-    """Uma linha de `daily_signals` com tipos explícitos (a entrada do formatador, sem Series do pandas)."""
-
-    symbol: str
-    timestamp: pd.Timestamp
-    close: float
-    sma_200: float | None
-    stage: str
-    stage_reason: str | None
-    alert: str | None
-    panic: bool
-    regime_up: bool
-
-    @property
-    def name(self) -> str:
-        return self.symbol.split("/")[0]
-
-    @property
-    def signal(self) -> str:
-        if self.stage == STAGE_UNAVAILABLE:
-            return STAGE_UNAVAILABLE
-        return SIGNAL_SELL if self.alert == ALERT_SELL else self.stage
-
-
-def _opt_float(value: object) -> float | None:
-    return float(value) if isinstance(value, int | float) and not math.isnan(value) else None
+OPPORTUNITY_TEXT = {"BOA_RELATIVA": "boa oportunidade relativa", "MODERADA": "oportunidade moderada"}
+REGIME_TEXT = {
+    "FAVORAVEL": "favorável — o Bitcoin está acima da média de 200 dias (tendência de longo prazo em alta)",
+    "NEUTRO": "neutro — o Bitcoin está acima da média de 200 dias, mas a média de 50 dias ainda está abaixo dela",
+    "DEFENSIVO": "defensivo — o Bitcoin está abaixo da média de 200 dias; a regra de risco não abre compras novas",
+    "INDISPONIVEL": "sem dados confiáveis do Bitcoin (filtro de mercado)",
+}
+_REASON_TEXT = {
+    "tendência de alta": "tendência de alta (acima da média de 200 dias)",
+    "momento positivo": "momento positivo (subiu em 30 e 90 dias)",
+    "tendência persistente": "tendência firme",
+}
+NO_OPPORTUNITY = (
+    "Hoje não encontrei oportunidades suficientemente boas dentro dos critérios configurados. "
+    "Aporte sugerido: R$ 0 de {budget}. O orçamento permanece sem alocação."
+)
+IMPORTANT = (
+    "Importante: são estimativas quantitativas, não garantias de valorização. Score = nota relativa de 0 a 100 "
+    "contra as outras moedas analisadas, não probabilidade de lucro. O orçamento é uma simulação para o valor "
+    "informado: o sistema não acessa o seu saldo."
+)
 
 
 def _opt_str(value: object) -> str | None:
     return value if isinstance(value, str) else None  # pd.NA e None viram None
 
 
-def _coins(signals: pd.DataFrame) -> dict[str, Coin]:
-    coins: dict[str, Coin] = {}
-    for r in signals.to_dict("records"):
-        symbol = str(r["symbol"])
-        coins[symbol] = Coin(
-            symbol=symbol,
-            timestamp=pd.Timestamp(r["timestamp"]),
-            close=float(r["close"]),
-            sma_200=_opt_float(r["sma_200"]),
-            stage=str(r["stage"]),
-            stage_reason=_opt_str(r["stage_reason"]),
-            alert=_opt_str(r["alert"]),
-            panic=bool(r["panic"]),
-            regime_up=bool(r["regime_up"]),
+def _brl(x: float) -> str:
+    return f"R$ {_num(x, 0 if math.isclose(x, round(x)) else 2)}"
+
+
+def _strings(value: object) -> list[str]:
+    """Coluna de lista do Parquet (list, tupla ou array do numpy) como lista de str."""
+    if isinstance(value, np.ndarray):
+        return [str(v) for v in value.tolist()]
+    if isinstance(value, list | tuple):
+        return [str(v) for v in value]
+    return []
+
+
+@dataclass(frozen=True)
+class Pick:
+    """Uma moeda selecionada, com tipos explícitos (a entrada do formatador, sem Series do pandas)."""
+
+    symbol: str
+    opportunity: str
+    score: float
+    allocation_brl: float
+    allocation_note: str | None
+    reasons: tuple[str, ...]
+    risks: tuple[str, ...]
+
+    @property
+    def name(self) -> str:
+        return self.symbol.split("/")[0]
+
+
+def _picks(signals: pd.DataFrame) -> list[Pick]:
+    chosen = signals[signals["selected"].fillna(False).astype(bool)].sort_values("candidate_rank")
+    return [
+        Pick(
+            symbol=str(r["symbol"]),
+            opportunity=str(r["opportunity"]),
+            score=float(r["score"]),
+            allocation_brl=float(r["allocation_brl"]),
+            allocation_note=_opt_str(r["allocation_note"]),
+            reasons=tuple(_strings(r["reasons"])),
+            risks=tuple(_strings(r["risks"])),
         )
-    return coins
+        for r in chosen.to_dict("records")
+    ]
 
 
-def _reasons(c: Coin, sma: float, regime: Coin | None) -> list[str]:
-    """Condição que sustenta o sinal e a que o invalidaria (ou o mudaria), só com os níveis da regra."""
-    own = regime is None or c.symbol == regime.symbol
-    r_name = "BTC" if regime is None else regime.name
-    r_sma = None if regime is None else regime.sma_200
-    both = "" if own or r_sma is None else f" e o {r_name} fechar acima de {_usd(r_sma)}"
-    if c.signal == STAGE_BUY:
-        also = "" if own or r_sma is None else f" ou o {r_name} fechar abaixo de {_usd(r_sma)}"
-        return [
-            f"Sustenta: fechou acima da SMA 200{'' if own else f' e o {r_name} também'}.",
-            f"Invalida: fechar abaixo de {_usd(sma)} (SMA 200 atual){also}.",
-        ]
-    if c.signal == STAGE_WATCH:
-        return [
-            "Sustenta: está até 3% abaixo da SMA 200 e subindo.",
-            f"Vira COMPRAR: fechar acima de {_usd(sma)}{both}. Sai do radar se cair mais de 3% abaixo.",
-        ]
-    below = c.close < sma
-    why = "fechou abaixo da SMA 200" if below else f"o {r_name} fechou abaixo da SMA 200 dele"
-    if c.signal == SIGNAL_SELL:
-        return [f"Sustenta: saiu da tendência de alta hoje ({why}).", f"Volta a COMPRAR: fechar acima de {_usd(sma)}{both}."]
-    return [f"Sustenta: {why if below else f'o {r_name} está abaixo da SMA 200 dele'}.", f"Vira COMPRAR: fechar acima de {_usd(sma)}{both}."]
+def _motive(reasons: Sequence[str]) -> str:
+    labels = [_REASON_TEXT.get(t.split(":")[0], t.split(":")[0]) for t in reasons if "condições favoráveis" not in t]
+    if not labels:
+        return "passou em todos os filtros obrigatórios."
+    items = labels[:3]
+    joined = items[0] if len(items) == 1 else ", ".join(items[:-1]) + " e " + items[-1]
+    return joined[0].upper() + joined[1:] + "."
 
 
-def _forecast_lines(symbol: str, forecast: pd.DataFrame) -> list[str]:
-    rows = sorted(
-        (r for r in forecast.to_dict("records") if r["symbol"] == symbol and r["role"] == "MODELO"),
-        key=lambda r: int(r["horizon_days"]),
-    )
-    if not rows:
-        return ["Previsão: indisponível."]
-    bands = [f"{int(r['horizon_days'])}d {_pct(float(r['p10_pct']), 0)} a {_pct(float(r['p90_pct']), 0)}" for r in rows]
-    lines = ["Previsão (estimativa, faixa P10–P90): " + " · ".join(bands)]
-    winners = [f"{int(r['horizon_days'])}d" for r in rows if bool(r["beats_baseline"])]
-    if not winners:
-        lines.append("Sem vantagem demonstrada sobre o preço de hoje: use como faixa de incerteza, não como palpite.")
-    else:
-        lines.append(f"Vantagem demonstrada sobre o preço de hoje só em: {', '.join(winners)}.")
-    off = [f"{int(r['horizon_days'])}d {_num(float(r['coverage']) * 100, 0)}%" for r in rows if not bool(r["coverage_ok"])]
-    if off:
-        lines.append(f"Faixa pouco calibrada no teste (cobertura medida, nominal 80%): {', '.join(off)}.")
-    return lines
+def _main_blockers(signals: pd.DataFrame, limit: int = 3) -> list[str]:
+    """Os bloqueios mais frequentes entre as moedas analisadas (o motivo de não haver compra)."""
+    counts: dict[str, int] = {}
+    for value in signals["blockers"].tolist():
+        for b in _strings(value):
+            key = b.split(":")[0]
+            counts[key] = counts.get(key, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
+    return [f"{k} ({v} de {len(signals)} moedas)" for k, v in ranked]
 
 
 def format_report(
     signals: pd.DataFrame,
-    forecast: pd.DataFrame,
+    recommendation: pd.DataFrame,
     *,
     now: pd.Timestamp,
     recommended: Sequence[str],
-    regime_symbol: str,
-    max_stale_days: int,
-    source_errors: pd.DataFrame | None = None,
 ) -> list[str]:
-    """Mensagens do dia (já divididas em até 4096 caracteres)."""
+    """Mensagens do dia (já divididas em até 4096 caracteres), só com números calculados pelo pipeline.
+
+    `signals`: daily_signals da execução (recommendation.SIGNALS_SCHEMA). `recommendation`: a linha do resumo
+    (RECOMMENDATION_SCHEMA). `recommended`: moedas da regra SMA 200, para os alertas de virada.
+    """
+    rec = recommendation.iloc[0]
+    budget = float(rec["budget_brl"])
     local = now.tz_convert(FORTALEZA)
-    expected = now.floor("D") - pd.Timedelta(days=1)  # último candle fechado esperado
-    coins = _coins(signals)
-    core = [coins[s] for s in recommended if s in coins]
-    regime = coins.get(regime_symbol)
-    errors = source_errors if source_errors is not None else pd.DataFrame(columns=["source", "scope", "detail"])
+    expected = now.floor("D") - pd.Timedelta(days=1)
+    data_day = pd.Timestamp(rec["data_day"])
+    lag = int((expected - data_day).days) if pd.notna(data_day) else None
 
-    lag = {c.symbol: int((expected - c.timestamp).days) for c in core}
-    binance_failed = [str(e.scope) for e in errors.itertuples() if str(e.source) == "binance"]
-    secondary = sorted({str(e.source) for e in errors.itertuples() if str(e.source) in _SECONDARY_SOURCES})
-    unavailable = [c.symbol for c in core if c.signal == STAGE_UNAVAILABLE]
-    partial = bool(
-        set(binance_failed) & set(recommended) or unavailable or any(v > 0 for v in lag.values()) or len(core) < len(recommended)
-    )
+    head = ["📊 CRIPTO — ANÁLISE DO DIA", f"{local:%d/%m/%Y %H:%M} (Fortaleza) · {now:%d/%m %H:%M} UTC"]
+    if lag is None:
+        head.append("Dados: sem candles.")
+    else:
+        state = "em dia" if lag <= 0 else f"ATRASADO {lag} dia(s)"
+        head.append(f"Dados: fechamento diário de {_day(data_day)} (UTC), {state}.")
+    head.append(f"Orçamento disponível na simulação: {_brl(budget)}")
+    head.append(f"Mercado: {REGIME_TEXT.get(str(rec['regime']), str(rec['regime']))}.")
+    out = ["\n".join(head)]
 
-    header = [f"📊 Monitor cripto — {local:%d/%m/%Y %H:%M} (Fortaleza) · {now:%d/%m %H:%M} UTC"]
-    out: list[str] = []
-    if core:
-        worst = max(lag.values())
-        state = "em dia" if worst <= 0 else f"ATRASADO {worst} dia(s)"
-        header.append(f"Dados: candle diário fechado de {_day(max(c.timestamp for c in core))} (UTC), {state}.")
-    fng = signals["fng_value"].dropna()
-    if not fng.empty:
-        header.append(f"Humor do mercado (Fear & Greed): {int(fng.iloc[0])} de 100.")
-
-    out.append("\n".join(header))
-    limits: list[str] = []
-    if partial:
-        limits.append("⚠️ DADOS PARCIAIS: os sinais abaixo NÃO são confiáveis até a coleta voltar ao normal.")
-    if binance_failed:
-        names = ", ".join(m.split("/")[0] for m in binance_failed)
-        limits.append(f"Falha na coleta de preços ({names}); moedas sem preço novo ficam INDISPONÍVEIS.")
-    if secondary:
-        limits.append(
-            f"Fonte secundária fora do ar ({', '.join(secondary)}): sem market cap e/ou humor do mercado; "
-            "os sinais por preço seguem valendo."
-        )
-    if len(core) < len(recommended):
-        missing = ", ".join(s.split("/")[0] for s in recommended if s not in coins)
-        limits.append(f"Sem dados de {missing}.")
+    limits = _strings(rec["data_notes"])
+    if lag is not None and lag > 0:
+        limits.insert(0, "os candles estão atrasados: nenhuma moeda sem candle de ontem pode ser recomendada")
     if limits:
-        out.append("\n".join(limits))
+        out.append("⚠️ Limitações desta análise\n" + "\n".join(f"- {t}" for t in limits))
 
-    for c in core:
-        signal = c.signal
-        head = f"{_ICON.get(signal, '⚪')} {c.name} — {signal}"
-        if signal == STAGE_UNAVAILABLE or c.sma_200 is None:
-            out.append(f"{head}\nMotivo: {c.stage_reason or 'dado insuficiente'}.\nSem sinal e sem previsão para esta moeda hoje.")
-            continue
-        if partial:
-            head += " (NÃO CONFIÁVEL: dados parciais)"
-        dist = (c.close / c.sma_200 - 1.0) * 100.0
-        if regime is None:
-            filt = "n/d"
-        else:
-            filt = f"{regime.name} {'acima' if regime.regime_up else 'abaixo'} da SMA 200 dele ({'ok' if regime.regime_up else 'bloqueia compra'})"
-        out.append(
-            "\n".join(
-                [
-                    head,
-                    f"Preço {_usd(c.close)} (fechamento diário de {_day(c.timestamp)})",
-                    f"SMA 200: {_usd(c.sma_200)} · preço {_num(abs(dist), 1)}% {'acima' if dist >= 0 else 'abaixo'} da média",
-                    f"Filtro do BTC: {filt}",
-                    *_reasons(c, c.sma_200, regime),
-                    *_forecast_lines(c.symbol, forecast),
-                ]
-            )
-        )
+    picks = _picks(signals)
+    total = float(rec["total_brl"])
+    if not picks or total <= 0:
+        why = _main_blockers(signals)
+        lines = [NO_OPPORTUNITY.format(budget=_brl(budget))]
+        if picks:  # havia candidatas, mas nenhum aporte executável
+            lines.append("Havia candidatas, mas os valores ficariam impraticáveis:")
+            lines += [f"- {p.name}: {p.allocation_note or 'sem aporte executável'}" for p in picks]
+        elif why:
+            lines.append("Principais motivos: " + "; ".join(why) + ".")
+        out.append("\n".join(lines))
+    else:
+        block = ["Melhores oportunidades"]
+        for i, p in enumerate(picks, start=1):
+            block.append("")
+            block.append(f"{i}. {p.name} — Aporte sugerido: {_brl(p.allocation_brl)}")
+            block.append(f"Classificação: {OPPORTUNITY_TEXT.get(p.opportunity, p.opportunity)} (score {_num(p.score, 0)} de 100)")
+            block.append(f"Motivo: {_motive(p.reasons)}")
+            block.append("Atenção: " + (p.risks[0] if p.risks else "sem alerta de risco além da oscilação normal de cripto") + ".")
+            if p.allocation_brl <= 0 and p.allocation_note:
+                block.append(f"Sem aporte: {p.allocation_note}.")
+        out.append("\n".join(block))
+        summary = [
+            "Resumo do aporte",
+            f"Total sugerido: {_brl(total)} de {_brl(budget)}.",
+            f"Saldo não alocado: {_brl(float(rec['unallocated_brl']))}.",
+            f"Decisão: considerar um aporte de {_brl(total)}, ou aguardar, conforme as condições e os limites do modelo.",
+        ]
+        summary += _strings(rec["notes"])
+        out.append("\n".join(summary))
 
-    panic = [c.name for c in coins.values() if c.panic]
-    out.append(
-        "⚠️ Aviso de pânico (não é recomendação de compra)\n"
-        + (f"Pânico em: {', '.join(panic)}. Queda forte com medo no mercado; comprar no pânico perdeu dinheiro nos testes."
-           if panic else "Nenhuma moeda em pânico.")
-    )
+    alerts: list[str] = []
+    for r in signals[signals["symbol"].isin(list(recommended))].to_dict("records"):
+        alert = _opt_str(r["alert"])
+        if alert in _OTHER_ALERTS:
+            alerts.append(f"{str(r['symbol']).split('/')[0]} {_OTHER_ALERTS[alert]} hoje (regra principal SMA 200).")
+    panic = [str(s).split("/")[0] for s in signals.loc[signals["panic"].fillna(False).astype(bool), "symbol"]]
+    if panic:
+        alerts.append(f"Pânico em {', '.join(panic)}: queda forte com medo no mercado. É só aviso; comprar no pânico perdeu dinheiro nos testes.")
+    if alerts:
+        out.append("Alertas\n" + "\n".join(f"- {a}" for a in alerts))
 
-    others = [
-        f"{c.name}: {_OTHER_ALERTS[c.alert]}"
-        for c in coins.values()
-        if c.symbol not in recommended and c.alert in _OTHER_ALERTS and c.stage != STAGE_UNAVAILABLE
-    ]
-    if others:
-        out.append(
-            "Outras moedas (só acompanhadas)\n" + "\n".join(others)
-            + "\nMonitorar não é autorizar compra: a regra só recomenda BTC e ETH."
-        )
-    out.append(DISCLAIMER)
+    out.append(f"Validação histórica: {rec['evidence']}")
+    out.append(IMPORTANT + " Detalhes de cada moeda e do backtest no painel.")
     return split_message("\n\n".join(out))
+
+
+def data_notes(available: pd.DataFrame, source_errors: pd.DataFrame | None) -> list[str]:
+    """Limitações dos dados da execução, em frases curtas (para o resumo e o Telegram)."""
+    notes: list[str] = []
+    errors = source_errors if source_errors is not None else pd.DataFrame(columns=["source", "scope", "detail"])
+    failed = [str(e.scope).split("/")[0] for e in errors.itertuples() if str(e.source) == "binance"]
+    if failed:
+        notes.append(f"falha na coleta de preços ({', '.join(failed)}): essas moedas não podem ser recomendadas hoje")
+    secondary = sorted({str(e.source) for e in errors.itertuples() if str(e.source) in _SECONDARY_SOURCES})
+    if secondary:
+        notes.append(f"fonte secundária fora do ar ({', '.join(secondary)}): sem market cap e/ou humor do mercado; a análise usa só preço e volume")
+    bad = available[~available["available"].astype(bool)]
+    if not bad.empty:
+        names = ", ".join(str(s).split("/")[0] for s in bad["symbol"])
+        notes.append(f"{len(bad)} moeda(s) sem dado confiável hoje ({names}): ficam fora das recomendações")
+    return notes
 
 
 def format_error(stage: str, detail: str, *, now: pd.Timestamp, secrets: Sequence[str] = ()) -> list[str]:

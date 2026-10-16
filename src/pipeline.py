@@ -9,7 +9,9 @@ Base local (data/market/): candles diários desde a listagem de cada par na Bina
 Fear & Greed completo (desde 2018). A primeira execução faz o download completo.
 
 Publica em frontend/public/:
-    daily_signals.parquet   snapshot do dia com estágio e alertas
+    daily_signals.parquet   snapshot do dia: estágio SMA 200, alertas, score, classificação e aporte de cada moeda
+    recommendation.parquet  resumo da recomendação: orçamento, mercado, total sugerido, saldo, evidência, dados
+    selection_backtest.parquet  a seleção contra referências simples, com custos, em treino, validação e teste
     history.parquet         histórico de preço, indicadores e estágio (gráficos)
     backtest.parquet        cada operação histórica da regra de tendência (BTC e ETH)
     performance.parquet     carteira: tendência x comprar e segurar x pânico, em treino e teste
@@ -29,7 +31,19 @@ from pathlib import Path
 
 import pandas as pd
 
-from .config import FEE_PER_SIDE, FORECAST_SEED, MAX_STALE_DAYS, RECOMMENDED, REGIME_SYMBOL, TEST_PERIOD, TRAIN_PERIOD, UNIVERSE, VALIDATION_PERIOD
+from .config import (
+    BUDGET_BRL,
+    FEE_PER_SIDE,
+    FORECAST_SEED,
+    RECOMMENDED,
+    REGIME_FILTER,
+    REGIME_SYMBOL,
+    SELECTION_REBALANCE_DAYS,
+    TEST_PERIOD,
+    TRAIN_PERIOD,
+    UNIVERSE,
+    VALIDATION_PERIOD,
+)
 from .extractors import MARKET_SYMBOL, BaseExtractor, BinanceAdapter, CoinGeckoMarketAdapter, ExtractorError, FearGreedAdapter
 from .extractors.binance_adapter import DEFAULT_HOST as BINANCE_DEFAULT_HOST
 from .notifiers import TelegramError, send_messages, settings_from_env
@@ -49,7 +63,12 @@ from .loaders.positions_store import read_positions
 from .loaders.source_log import read_source_log, write_source_log
 from .transformers.anomaly_detector import classify_history, detect
 from .transformers.forecast import forecast_table
-from .transformers.notification import format_error, format_report, redact, validate_messages
+from .transformers.allocation import allocate
+from .transformers.notification import data_notes, format_error, format_report, redact, validate_messages
+from .transformers.recommendation import build_recommendation, validate_recommendation
+from .transformers.selection import REGIME_UNAVAILABLE, assess, compute_features, features_on, regime_series
+from .transformers.selection_backtest import evaluate_selection, evidence
+from .transformers.strategies import market_from_candles
 from .transformers.data_quality import audit_candles, availability, clean_candles, mark_unavailable
 from .transformers.daily_alerts import ALERT_BUY, ALERT_EXIT, ALERT_SELL, ALERT_WATCH, compare_with_previous
 from .transformers.position_advisor import ACTION_SELL, ACTION_UNAVAILABLE, advise, realized
@@ -74,6 +93,13 @@ TEST = (pd.Timestamp(TEST_PERIOD[0], tz="UTC"), pd.Timestamp(TEST_PERIOD[1], tz=
 PERIODS: dict[str, tuple[pd.Timestamp, pd.Timestamp]] = {
     PERIOD_TRAIN: (pd.Timestamp(TRAIN_PERIOD[0], tz="UTC"), pd.Timestamp(TRAIN_PERIOD[1], tz="UTC")),
     PERIOD_TEST: (pd.Timestamp(TEST_PERIOD[0], tz="UTC"), pd.Timestamp(TEST_PERIOD[1], tz="UTC")),
+}
+# Seleção: os mesmos três períodos do laboratório. Os pesos e limiares foram fixados antes (config.py); o teste
+# só mede.
+SELECTION_PERIODS: dict[str, tuple[pd.Timestamp, pd.Timestamp]] = {
+    "TREINO": (pd.Timestamp(TRAIN_PERIOD[0], tz="UTC"), VALIDATION[0] - pd.Timedelta(days=1)),
+    "VALIDACAO": VALIDATION,
+    "TESTE": TEST,
 }
 
 
@@ -138,8 +164,11 @@ def update_base(now: datetime, *, rebuild: bool = False, binance_host: str = BIN
     return log
 
 
-def analyze(today: pd.Timestamp) -> dict[str, pd.DataFrame]:
-    """Análise completa sobre a base local. Não acessa a rede. `today` é a data de referência (injetada)."""
+def analyze(
+    today: pd.Timestamp, *, budget: float = BUDGET_BRL, source_errors: pd.DataFrame | None = None
+) -> dict[str, pd.DataFrame]:
+    """Análise completa sobre a base local. Não acessa a rede. `today` é a data e hora da análise (injetada);
+    `budget` é o orçamento total da simulação; `source_errors` são as falhas de coleta desta execução."""
     raw = read_ohlcv(list(UNIVERSE))
     if raw.empty:
         raise ExtractorError("base local vazia: rode sem --offline para baixar o histórico")
@@ -159,6 +188,25 @@ def analyze(today: pd.Timestamp) -> dict[str, pd.DataFrame]:
     previous = history[history["timestamp"].eq(day - pd.Timedelta(days=1))]
     signals = compare_with_previous(snapshot, previous if not previous.empty else read_previous(day))
 
+    # Seleção e aporte: calculados uma vez aqui; painel e Telegram só leem o resultado.
+    features = compute_features(market_from_candles(candles))
+    regimes = regime_series(features)
+    unavailable = {str(r.symbol): str(r.reason) for r in available.itertuples() if not bool(r.available)}
+    regime = REGIME_UNAVAILABLE if REGIME_SYMBOL in unavailable else str(regimes.get(day, REGIME_UNAVAILABLE))
+    assessed = assess(features_on(features, day), regime, unavailable=unavailable)
+    allocation, summary = allocate(assessed, budget, regime)
+    selection_perf, _ = evaluate_selection(features, regimes, SELECTION_PERIODS, budget, SELECTION_REBALANCE_DAYS)
+    signals, recommendation = build_recommendation(
+        signals, assessed, allocation, summary,
+        run_ts=pd.Timestamp(today), regime=regime, regime_filter=REGIME_FILTER, regime_symbol=REGIME_SYMBOL,
+        excluded=[f"{s.split('/')[0]}: {why}" for s, why in selection.dropped.items()],
+        evidence=evidence(selection_perf, "TESTE"),
+        data_notes=data_notes(available, source_errors),
+    )
+    problems = validate_recommendation(signals, recommendation)
+    if problems:
+        raise ValueError("recomendação inconsistente, nada publicado: " + "; ".join(problems))
+
     trades = backtest(history, RECOMMENDED)
     performance = performance_summary(
         history, {"PRINCIPAIS": RECOMMENDED, "TODAS": selection.kept}, PERIODS, FEE_PER_SIDE
@@ -169,16 +217,19 @@ def analyze(today: pd.Timestamp) -> dict[str, pd.DataFrame]:
     forecast = forecast_table(wide(history, "close"), usable, VALIDATION, TEST, FORECAST_SEED)
 
     write_snapshot(signals, day)
-    write_daily_signals(signals)
     write_parquet(history, PUBLIC_DIR / "history.parquet")
     write_parquet(trades, PUBLIC_DIR / "backtest.parquet")
     write_parquet(performance, PUBLIC_DIR / "performance.parquet")
     write_parquet(forecast, PUBLIC_DIR / "forecast.parquet")
+    write_parquet(selection_perf, PUBLIC_DIR / "selection_backtest.parquet")
     write_parquet(read_source_log(), PUBLIC_DIR / "sources.parquet")
+    write_parquet(recommendation, PUBLIC_DIR / "recommendation.parquet")
+    write_daily_signals(signals)  # por último: o estado final da execução (CLAUDE.md §3)
     dropped = pd.DataFrame({"symbol": list(selection.dropped), "reason": list(selection.dropped.values())})
     return {
         "signals": signals, "backtest": trades, "performance": performance, "positions": positions, "forecast": forecast,
-        "availability": available, "issues": issues, "dropped": dropped,
+        "availability": available, "issues": issues, "dropped": dropped, "recommendation": recommendation,
+        "selection_backtest": selection_perf,
     }
 
 
@@ -233,6 +284,14 @@ def report(result: dict[str, pd.DataFrame], source_errors: pd.DataFrame | None =
             f"  carteira BTC+ETH {r['period'].lower()} · {r['strategy']}: {r['total_return_pct']:+.1f}% "
             f"({r['annual_return_pct']:+.1f}%/ano) · pior queda {r['max_drawdown_pct']:.1f}%"
         )
+    rec = result["recommendation"].iloc[0]
+    lines.append(
+        f"  seleção: mercado {rec['regime']} · {int(rec['n_candidates'])} candidata(s) · aporte sugerido "
+        f"R$ {rec['total_brl']:.2f} de R$ {rec['budget_brl']:.2f} (não alocado R$ {rec['unallocated_brl']:.2f})"
+    )
+    for _, c in signals[signals["selected"]].sort_values("candidate_rank").iterrows():
+        lines.append(f"    {c['symbol']}: {c['opportunity']} · score {c['score']:.0f} · R$ {c['allocation_brl']:.2f}")
+    lines.append(f"  {rec['evidence']}")
     model = result["forecast"][result["forecast"]["role"].eq("MODELO")]
     if not model.empty:
         lines.append(f"  previsão 1/7/30 dias: {int(model['beats_baseline'].sum())} de {len(model)} superam o baseline no teste")
@@ -252,13 +311,10 @@ def _secrets() -> list[str]:
     return [v for name in SECRET_ENV if (v := os.environ.get(name, "").strip())]
 
 
-def _notify(result: dict[str, pd.DataFrame], failures: pd.DataFrame, now: datetime, *, dry_run: bool) -> int:
+def _notify(result: dict[str, pd.DataFrame], now: datetime, *, dry_run: bool) -> int:
     """Resumo do dia no Telegram (ou, com dry_run, só gerado, validado e impresso). 0 = ok, 1 = mensagem inválida,
     2 = sem credenciais ou envio falhou (o job deve ficar vermelho)."""
-    texts = format_report(
-        result["signals"], result["forecast"], now=pd.Timestamp(now), recommended=RECOMMENDED,
-        regime_symbol=REGIME_SYMBOL, max_stale_days=MAX_STALE_DAYS, source_errors=failures,
-    )
+    texts = format_report(result["signals"], result["recommendation"], now=pd.Timestamp(now), recommended=RECOMMENDED)
     problems = validate_messages(texts, _secrets())
     if problems:
         logger.error("mensagem do Telegram inválida: %s", "; ".join(problems))
@@ -300,7 +356,13 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--rebuild", action="store_true", help="baixa todo o histórico de novo")
     parser.add_argument("--notify", action="store_true", help="envia o resumo pelo Telegram")
     parser.add_argument("--dry-run", action="store_true", help="gera e valida a mensagem do Telegram sem enviar")
+    parser.add_argument(
+        "--budget", type=float, default=BUDGET_BRL,
+        help=f"orçamento total da simulação em reais (padrão {BUDGET_BRL:.0f}); informe o saldo que ainda resta",
+    )
     args = parser.parse_args(argv)
+    if not (args.budget >= 0 and args.budget < float("inf")):
+        parser.error("--budget precisa ser um valor >= 0")
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s")
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
@@ -312,7 +374,7 @@ def main(argv: list[str] | None = None) -> int:
             log = update_base(now, rebuild=args.rebuild, binance_host=os.environ.get("BINANCE_API_HOST", "").strip() or BINANCE_DEFAULT_HOST)
             failures = log[log["status"].eq("erro")]
         stage = "análise"
-        result = analyze(pd.Timestamp(now))
+        result = analyze(pd.Timestamp(now), budget=args.budget, source_errors=failures)
     except ExtractorError as exc:
         logger.error("pipeline falhou: %s", exc)
         if args.notify and not args.dry_run:
@@ -325,7 +387,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(report(result, failures))
     if args.notify or args.dry_run:
-        return _notify(result, failures, now, dry_run=args.dry_run)
+        return _notify(result, now, dry_run=args.dry_run)
     return 0
 
 

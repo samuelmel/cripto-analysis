@@ -97,7 +97,7 @@ def main() -> int:
         "treino 2018–2022": tuple(pd.Timestamp(d, tz="UTC") for d in TRAIN_PERIOD),
         "teste 2023–2026": tuple(pd.Timestamp(d, tz="UTC") for d in TEST_PERIOD),
     }
-    universes = {"15 moedas": list(px.columns), "só BTC e ETH": [s for s in RECOMMENDED if s in px.columns]}
+    universes = {f"{len(px.columns)} moedas": list(px.columns), "só BTC e ETH": [s for s in RECOMMENDED if s in px.columns]}
 
     pd.set_option("display.width", 200)
     for universe, cols in universes.items():

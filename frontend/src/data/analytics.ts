@@ -221,8 +221,8 @@ export function todayVerdict(signals: readonly DailySignal[], positions: readonl
     const holding = positions.length > 0 ? " As suas posições podem continuar como estão." : "";
     return {
       tone: "good",
-      headline: `${names(buy)} ${buy.length === 1 ? "está" : "estão"} em tendência de alta.`,
-      details: [`Quem ainda não tem pode comprar; quem já tem deve segurar.${holding}`, ...details],
+      headline: `${names(buy)} ${buy.length === 1 ? "está" : "estão"} em tendência de alta pela regra da média de 200 dias.`,
+      details: [`Quem já tem pode segurar.${holding} Quanto aportar vem da recomendação de aporte, acima.`, ...details],
     };
   }
   if (watch.length > 0) {
@@ -231,7 +231,7 @@ export function todayVerdict(signals: readonly DailySignal[], positions: readonl
   return {
     tone: "neutral",
     headline: "Fique de fora por enquanto.",
-    details: ["Bitcoin e Ethereum não estão em tendência de alta. A regra só manda comprar quando estiverem.", ...details],
+    details: ["Bitcoin e Ethereum não estão em tendência de alta pela regra da média de 200 dias.", ...details],
   };
 }
 

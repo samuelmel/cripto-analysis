@@ -1,7 +1,9 @@
 /**
  * Linhas dos arquivos publicados pelo pipeline em public/.
  * Espelham os schemas Python — mudou lá, muda aqui no mesmo commit:
- *   DailySignal   daily_alerts.DAILY_SCHEMA        (daily_signals.parquet)
+ *   DailySignal   recommendation.SIGNALS_SCHEMA    (daily_signals.parquet: sinal SMA 200 + seleção + aporte)
+ *   Recommendation recommendation.RECOMMENDATION_SCHEMA (recommendation.parquet, uma linha)
+ *   SelectionPerf selection_backtest.SELECTION_PERF_SCHEMA (selection_backtest.parquet)
  *   HistoryPoint  anomaly_detector.HISTORY_SCHEMA  (history.parquet)
  *   Trade         trade_simulator.TRADE_SCHEMA     (backtest.parquet)
  *   Performance   trade_simulator.PERFORMANCE_SCHEMA (performance.parquet)
@@ -35,6 +37,18 @@ export type TradeStatus = (typeof TRADE_STATUSES)[number];
 export const ACTIONS = ["VENDER", "SEGURAR", "INDISPONÍVEL"] as const;
 export type Action = (typeof ACTIONS)[number];
 
+export const OPPORTUNITIES = ["BOA_RELATIVA", "MODERADA", "AGUARDAR", "EVITAR"] as const;
+export type Opportunity = (typeof OPPORTUNITIES)[number];
+
+export const REGIMES = ["FAVORAVEL", "NEUTRO", "DEFENSIVO", "INDISPONIVEL"] as const;
+export type Regime = (typeof REGIMES)[number];
+
+export const DECISIONS = ["NAO_INVESTIR", "APORTE_PEQUENO", "APORTE_PARCIAL", "APORTE_AMPLO"] as const;
+export type Decision = (typeof DECISIONS)[number];
+
+export const DATA_STATUSES = ["OK", "PARCIAL", "INDISPONIVEL"] as const;
+export type DataStatus = (typeof DATA_STATUSES)[number];
+
 export interface DailySignal {
   readonly timestamp: Date;
   readonly symbol: string;
@@ -54,6 +68,91 @@ export interface DailySignal {
   readonly stage_reason: string | null;
   readonly prev_stage: Stage | null;
   readonly alert: Alert | null;
+  // seleção (selection.SELECTION_SCHEMA)
+  readonly history_days: number | null;
+  readonly gap_days_365: number | null;
+  readonly avg_volume_30d_usd: number | null;
+  readonly ret_7d_pct: number | null;
+  readonly ret_30d_pct: number | null;
+  readonly ret_90d_pct: number | null;
+  readonly rel_btc_90d_pct: number | null;
+  readonly rel_eth_90d_pct: number | null;
+  readonly vol_90d_pct: number | null;
+  readonly drawdown_now_pct: number | null;
+  readonly drawdown_days: number | null;
+  readonly max_drawdown_180d_pct: number | null;
+  readonly sma_50: number | null;
+  readonly stretch_50: number | null;
+  readonly stability_50d_pct: number | null;
+  readonly conditions_met: number;
+  readonly conditions_total: number;
+  readonly conditions: readonly string[];
+  readonly score: number | null;
+  readonly score_momentum: number | null;
+  readonly score_stability: number | null;
+  readonly score_risk: number | null;
+  readonly score_liquidity: number | null;
+  readonly est_cost_pct: number | null;
+  readonly opportunity: Opportunity;
+  readonly candidate_rank: number | null;
+  readonly selected: boolean;
+  readonly reasons: readonly string[];
+  readonly risks: readonly string[];
+  readonly blockers: readonly string[];
+  // aporte (allocation.ALLOCATION_SCHEMA)
+  readonly target_fraction: number;
+  readonly theoretical_brl: number;
+  readonly allocation_brl: number;
+  readonly allocation_note: string | null;
+  readonly run_ts: Date;
+}
+
+/** Uma linha de recommendation.parquet: o resumo da recomendação da mesma execução de daily_signals. */
+export interface Recommendation {
+  readonly run_ts: Date;
+  readonly data_day: Date | null;
+  readonly budget_brl: number;
+  readonly budget_mode: string;
+  readonly regime: Regime;
+  readonly regime_filter: string;
+  readonly regime_close: number | null;
+  readonly regime_sma_200: number | null;
+  readonly total_brl: number;
+  readonly unallocated_brl: number;
+  readonly theoretical_total_brl: number;
+  readonly capped_by_budget: boolean;
+  readonly decision: Decision;
+  readonly n_analyzed: number;
+  readonly n_candidates: number;
+  readonly n_selected: number;
+  readonly n_funded: number;
+  readonly notes: readonly string[];
+  readonly excluded: readonly string[];
+  readonly evidence: string;
+  readonly data_status: DataStatus;
+  readonly data_notes: readonly string[];
+}
+
+export const SELECTION_STRATEGIES = [
+  "SELECAO", "SELECAO_PESO_IGUAL", "MOMENTO_SIMPLES", "TENDENCIA_SMA200", "COMPRAR_E_SEGURAR", "BTC",
+] as const;
+export type SelectionStrategy = (typeof SELECTION_STRATEGIES)[number];
+
+/** Uma linha de selection_backtest.parquet: uma estratégia num período (treino, validação ou teste). */
+export interface SelectionPerf {
+  readonly strategy: SelectionStrategy;
+  readonly period: LabPeriod;
+  readonly start: Date | null;
+  readonly end: Date | null;
+  readonly total_return_pct: number | null;
+  readonly annual_return_pct: number | null;
+  readonly max_drawdown_pct: number | null;
+  readonly sharpe: number | null;
+  readonly invested_pct: number | null;
+  readonly turnover_per_year: number | null;
+  readonly n_trades: number | null;
+  readonly cost_pct: number | null;
+  readonly rebalance_days: number | null;
 }
 
 export interface HistoryPoint {
@@ -217,6 +316,8 @@ export interface ClosedPosition {
 
 export interface Dashboard {
   readonly signals: readonly DailySignal[];
+  readonly recommendation: Recommendation;
+  readonly selectionPerf: readonly SelectionPerf[];
   readonly history: readonly HistoryPoint[];
   readonly trades: readonly Trade[];
   readonly performance: readonly Performance[];
