@@ -1,6 +1,11 @@
 import {
   ACTIONS,
   ALERTS,
+  DATA_STATUSES,
+  DECISIONS,
+  OPPORTUNITIES,
+  REGIMES,
+  SELECTION_STRATEGIES,
   EXIT_REASONS,
   FORECAST_ROLES,
   LAB_PERIODS,
@@ -18,6 +23,8 @@ import {
   type LabResult,
   type Performance,
   type Position,
+  type Recommendation,
+  type SelectionPerf,
   type SourceEvent,
   type Trade,
 } from "../types/signals";
@@ -32,9 +39,12 @@ import {
   oneOf,
   oneOfOrNull,
   str,
+  strList,
   strOrNull,
   type Row,
 } from "./parquet";
+
+import { runProblems } from "./selection";
 
 export { MissingFileError } from "./parquet";
 
@@ -57,7 +67,88 @@ const parseSignal = (r: Row): DailySignal => ({
   stage_reason: strOrNull(r, "stage_reason"),
   prev_stage: oneOfOrNull(STAGES, r, "prev_stage"),
   alert: oneOfOrNull(ALERTS, r, "alert"),
+  history_days: numOrNull(r, "history_days"),
+  gap_days_365: numOrNull(r, "gap_days_365"),
+  avg_volume_30d_usd: numOrNull(r, "avg_volume_30d_usd"),
+  ret_7d_pct: numOrNull(r, "ret_7d_pct"),
+  ret_30d_pct: numOrNull(r, "ret_30d_pct"),
+  ret_90d_pct: numOrNull(r, "ret_90d_pct"),
+  rel_btc_90d_pct: numOrNull(r, "rel_btc_90d_pct"),
+  rel_eth_90d_pct: numOrNull(r, "rel_eth_90d_pct"),
+  vol_90d_pct: numOrNull(r, "vol_90d_pct"),
+  drawdown_now_pct: numOrNull(r, "drawdown_now_pct"),
+  drawdown_days: numOrNull(r, "drawdown_days"),
+  max_drawdown_180d_pct: numOrNull(r, "max_drawdown_180d_pct"),
+  sma_50: numOrNull(r, "sma_50"),
+  stretch_50: numOrNull(r, "stretch_50"),
+  stability_50d_pct: numOrNull(r, "stability_50d_pct"),
+  conditions_met: num(r, "conditions_met"),
+  conditions_total: num(r, "conditions_total"),
+  conditions: strList(r, "conditions"),
+  score: numOrNull(r, "score"),
+  score_momentum: numOrNull(r, "score_momentum"),
+  score_stability: numOrNull(r, "score_stability"),
+  score_risk: numOrNull(r, "score_risk"),
+  score_liquidity: numOrNull(r, "score_liquidity"),
+  est_cost_pct: numOrNull(r, "est_cost_pct"),
+  opportunity: oneOf(OPPORTUNITIES, r, "opportunity"),
+  candidate_rank: numOrNull(r, "candidate_rank"),
+  selected: bool(r, "selected"),
+  reasons: strList(r, "reasons"),
+  risks: strList(r, "risks"),
+  blockers: strList(r, "blockers"),
+  target_fraction: num(r, "target_fraction"),
+  theoretical_brl: num(r, "theoretical_brl"),
+  allocation_brl: num(r, "allocation_brl"),
+  allocation_note: strOrNull(r, "allocation_note"),
+  run_ts: date(r, "run_ts"),
 });
+
+const parseRecommendation = (r: Row): Recommendation => ({
+  run_ts: date(r, "run_ts"),
+  data_day: dateOrNull(r, "data_day"),
+  budget_brl: num(r, "budget_brl"),
+  budget_mode: str(r, "budget_mode"),
+  regime: oneOf(REGIMES, r, "regime"),
+  regime_filter: str(r, "regime_filter"),
+  regime_close: numOrNull(r, "regime_close"),
+  regime_sma_200: numOrNull(r, "regime_sma_200"),
+  total_brl: num(r, "total_brl"),
+  unallocated_brl: num(r, "unallocated_brl"),
+  theoretical_total_brl: num(r, "theoretical_total_brl"),
+  capped_by_budget: bool(r, "capped_by_budget"),
+  decision: oneOf(DECISIONS, r, "decision"),
+  n_analyzed: num(r, "n_analyzed"),
+  n_candidates: num(r, "n_candidates"),
+  n_selected: num(r, "n_selected"),
+  n_funded: num(r, "n_funded"),
+  notes: strList(r, "notes"),
+  excluded: strList(r, "excluded"),
+  evidence: str(r, "evidence"),
+  data_status: oneOf(DATA_STATUSES, r, "data_status"),
+  data_notes: strList(r, "data_notes"),
+});
+
+const parseSelectionPerf = (r: Row): SelectionPerf => ({
+  strategy: oneOf(SELECTION_STRATEGIES, r, "strategy"),
+  period: oneOf(LAB_PERIODS, r, "period"),
+  start: dateOrNull(r, "start"),
+  end: dateOrNull(r, "end"),
+  total_return_pct: numOrNull(r, "total_return_pct"),
+  annual_return_pct: numOrNull(r, "annual_return_pct"),
+  max_drawdown_pct: numOrNull(r, "max_drawdown_pct"),
+  sharpe: numOrNull(r, "sharpe"),
+  invested_pct: numOrNull(r, "invested_pct"),
+  turnover_per_year: numOrNull(r, "turnover_per_year"),
+  n_trades: numOrNull(r, "n_trades"),
+  cost_pct: numOrNull(r, "cost_pct"),
+  rebalance_days: numOrNull(r, "rebalance_days"),
+});
+
+/** A recomendação tem de ser da mesma execução de daily_signals e respeitar o orçamento; senão o painel não a mostra. */
+export class InconsistentRunError extends Error {
+  override name = "InconsistentRunError";
+}
 
 const parseHistory = (r: Row): HistoryPoint => ({
   timestamp: date(r, "timestamp"),
@@ -216,8 +307,10 @@ async function optionalRows(url: string): Promise<readonly Row[]> {
 
 /** Leitura: baixa e valida tudo que o pipeline publicou (a escrita fica em api.ts). */
 export async function loadDashboard(base = ""): Promise<Dashboard> {
-  const [signals, history, trades, performance, forecast, sources, lab, positions, closed] = await Promise.all([
+  const [signals, recs, selectionPerf, history, trades, performance, forecast, sources, lab, positions, closed] = await Promise.all([
     fetchRows(`${base}/daily_signals.parquet`),
+    fetchRows(`${base}/recommendation.parquet`),
+    optionalRows(`${base}/selection_backtest.parquet`),
     fetchRows(`${base}/history.parquet`),
     fetchRows(`${base}/backtest.parquet`),
     fetchRows(`${base}/performance.parquet`),
@@ -227,8 +320,16 @@ export async function loadDashboard(base = ""): Promise<Dashboard> {
     fetchRows(`${base}/positions.parquet`),
     fetchRows(`${base}/closed_positions.parquet`),
   ]);
+  const parsed = signals.map(parseSignal);
+  const first = recs[0];
+  if (recs.length !== 1 || first === undefined) throw new InconsistentRunError("recommendation.parquet deveria ter uma linha");
+  const recommendation = parseRecommendation(first);
+  const problems = runProblems(parsed, recommendation);
+  if (problems.length > 0) throw new InconsistentRunError(`recomendação inconsistente: ${problems.join("; ")}`);
   return {
-    signals: signals.map(parseSignal),
+    signals: parsed,
+    recommendation,
+    selectionPerf: selectionPerf.map(parseSelectionPerf),
     history: history.map(parseHistory),
     trades: trades.map(parseTrade),
     performance: performance.map(parsePerformance),

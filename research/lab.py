@@ -15,53 +15,25 @@ fechamento de t são conhecidas no próprio fechamento de t.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
+from src.transformers.strategies import (  # noqa: F401  (reexportados: o laboratório e os testes usam lab.X)
+    RSI_PERIOD,
+    VOLUME_WINDOW,
+    Market,
+    donchian_breakout,
+    latch,
+    market_from_candles,
+    rsi,
+    volume_breakout,
+)
 from src.transformers.trade_simulator import PortfolioRun, run_portfolio
 
-RSI_PERIOD = 14
-VOLUME_WINDOW = 20
-
-
-@dataclass(frozen=True)
-class Market:
-    """Preços e volume em formato largo: índice = dia, colunas = moedas."""
-
-    close: pd.DataFrame
-    high: pd.DataFrame
-    low: pd.DataFrame
-    volume: pd.DataFrame  # em USDT (quote_volume)
-
-
-def market_from_candles(candles: pd.DataFrame) -> Market:
-    """Candles padronizados (symbol, timestamp, high, low, close, quote_volume) -> Market."""
-
-    def pivot(column: str) -> pd.DataFrame:
-        return candles.pivot(index="timestamp", columns="symbol", values=column).sort_index()
-
-    return Market(pivot("close"), pivot("high"), pivot("low"), pivot("quote_volume"))
-
-
-def latch(entry: pd.DataFrame, exit_: pd.DataFrame) -> pd.DataFrame:
-    """Posição 0/1 que liga na entrada e desliga na saída (a saída vence se as duas ocorrerem no mesmo dia)."""
-    state = pd.DataFrame(np.nan, index=entry.index, columns=entry.columns)
-    state = state.mask(entry, 1.0).mask(exit_, 0.0)
-    return state.ffill().fillna(0.0)
-
-
 # ---------------------------------------------------------------------------------------------
-# Sinais
+# Sinais (os compartilhados com a seleção moram em src/transformers/strategies.py)
 # ---------------------------------------------------------------------------------------------
-
-def donchian_breakout(m: Market, n: int) -> pd.DataFrame:
-    """Compra ao fechar acima da máxima dos `n` dias anteriores; sai ao fechar abaixo da mínima dos `n // 2` anteriores."""
-    upper = m.high.rolling(n).max().shift(1)
-    lower = m.low.rolling(n // 2).min().shift(1)
-    return latch(m.close.gt(upper), m.close.lt(lower))
-
 
 def bollinger_reversion(m: Market, n: int, k: float) -> pd.DataFrame:
     """Compra ao fechar abaixo da banda inferior (média de `n` dias − k desvios); sai ao voltar à média."""
@@ -70,27 +42,10 @@ def bollinger_reversion(m: Market, n: int, k: float) -> pd.DataFrame:
     return latch(m.close.lt(lower), m.close.ge(mid))
 
 
-def rsi(close: pd.DataFrame, period: int = RSI_PERIOD) -> pd.DataFrame:
-    """RSI de Wilder (EMA com alpha = 1/period), por moeda."""
-    delta = close.diff()
-    gain = delta.clip(lower=0.0).ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
-    loss = (-delta).clip(lower=0.0).ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
-    out = 100.0 - 100.0 / (1.0 + gain / loss.replace(0.0, np.nan))
-    return out.mask(loss.eq(0.0) & gain.notna(), 100.0)
-
-
 def rsi_oversold(m: Market, buy_below: float, sell_above: float) -> pd.DataFrame:
     """Compra com RSI abaixo de `buy_below`; sai com RSI acima de `sell_above`."""
     r = rsi(m.close)
     return latch(r.lt(buy_below), r.gt(sell_above))
-
-
-def volume_breakout(m: Market, n: int, k: float) -> pd.DataFrame:
-    """Rompimento da máxima de `n` dias com volume acima de `k` vezes a média de 20 dias; sai como a Donchian."""
-    breakout = m.close.gt(m.high.rolling(n).max().shift(1))
-    heavy = m.volume.gt(k * m.volume.rolling(VOLUME_WINDOW).mean().shift(1))
-    lower = m.low.rolling(n // 2).min().shift(1)
-    return latch(breakout & heavy, m.close.lt(lower))
 
 
 Signal = Callable[..., pd.DataFrame]

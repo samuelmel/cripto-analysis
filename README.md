@@ -1,9 +1,10 @@
 # crypto-analyzer
 
-Monitor diário de criptomoedas que segue a **tendência** de Bitcoin e Ethereum. O projeto faz quatro coisas:
+Monitor diário de criptomoedas que avalia um universo de até 32 moedas, diz quais merecem ser consideradas para compra e **quanto de um orçamento configurado (padrão R$ 100)** seria razoável aportar em cada uma, preservando a regra de **tendência** (SMA 200) de Bitcoin e Ethereum como referência. O projeto faz cinco coisas:
 
 - **Base histórica:** guarda todos os candles diários desde 2017 e o Fear & Greed desde 2018.
 - **Atualização diária:** todo dia baixa só o que falta e diz, para cada moeda, se está em tendência de alta.
+- **Seleção e aporte:** classifica as moedas elegíveis, explica por quê, e sugere de R$ 0 até o orçamento, nunca acima dele (veja [Seleção de oportunidades e aporte](#seleção-de-oportunidades-e-aporte)).
 - **Posições:** acompanha as moedas que você comprou e diz quando vender.
 - **Backtest:** simula a regra em todo o histórico, em carteira, e compara com simplesmente comprar e segurar.
 
@@ -13,7 +14,7 @@ Monitor diário de criptomoedas que segue a **tendência** de Bitcoin e Ethereum
 
 ### Regra de compra e venda
 
-Vale para **BTC e ETH** (configurável em `src/config.py`, `RECOMMENDED`). As outras 13 moedas continuam monitoradas, mas sem recomendação.
+Vale para **BTC e ETH** (configurável em `src/config.py`, `RECOMMENDED`) e continua sendo a regra principal de referência e de venda. As demais moedas não recebem o estágio COMPRAR desta regra; elas são avaliadas pela [camada de seleção](#seleção-de-oportunidades-e-aporte), que também pode escolher BTC e ETH.
 
 | Situação | Regra | O que fazer |
 |---|---|---|
@@ -44,6 +45,71 @@ O painel mostra, para cada posição, SEGURAR ou VENDER com o motivo e a data em
 
 **Sobre o STOP:** no backtest de carteira do BTC+ETH o resultado é idêntico com e sem ele (a SMA 200 sempre dispara antes ou no mesmo dia), e nas 15 moedas melhora um pouco (treino +383% contra +354%; teste +52% contra +50%). Como não piora, ficou como proteção extra para posições compradas bem acima da média. `ExitRules(stop_loss=None)` o desliga.
 
+## Seleção de oportunidades e aporte
+
+Calculada uma vez por execução no pipeline (`src/transformers/selection.py` e `allocation.py`) e publicada em `daily_signals.parquet` (uma linha por moeda) e `recommendation.parquet` (resumo), com o mesmo `run_ts`. O painel e o Telegram só leem esse resultado; não há cálculo de aporte no frontend nem no formatador da mensagem. Antes de publicar, `recommendation.validate_recommendation` confere que a soma dos aportes não passa do orçamento, que só moedas selecionadas e com dado confiável recebem valor e que os dois arquivos são da mesma execução; o painel repete a conferência ao ler.
+
+### Universo
+
+`UNIVERSE` em `src/config.py` tem 32 pares spot USDT (as 15 anteriores e mais 17). Entram na análise até `MAX_UNIVERSE_SIZE` moedas que passam nos filtros de `universe.py`: nada de stablecoins, duplicatas (WBTC, stETH), tokens alavancados, moedas com menos de `MIN_HISTORY_DAYS` (365) candles ou com volume médio abaixo de `MIN_AVG_QUOTE_VOLUME_USD`. Moeda listada há pouco (por exemplo SUI ou TON, conforme a base) fica fora e aparece em "fora da análise" com o motivo; o histórico nunca é presumido. Estar no universo **não autoriza compra**: para ser candidata a moeda ainda passa pelos filtros abaixo. Inclusão manual = acrescentar o par em `UNIVERSE`; exclusão total = `EXCLUDED_BASES`; exclusão só da compra = `BUY_BLOCKLIST`.
+
+### Indicadores (um por tipo de informação)
+
+| Critério | Indicador | Uso |
+|---|---|---|
+| Tendência | preço contra SMA 200 (e SMA 50) | filtro obrigatório e condição favorável |
+| Momento | retorno de 30 e 90 dias ÷ volatilidade (7 dias só é exibido: ruído) | componente do score |
+| Força relativa | percentil do momento entre as moedas do dia; diferença de 90 dias contra BTC e ETH | o percentil já é a força relativa; a diferença contra o BTC é mostrada, não somada de novo |
+| Volatilidade | desvio dos retornos log de 90 dias, anualizado | componente de risco, filtro (> 150% ao ano), alerta (> 90%) e dimensionamento |
+| Queda | pior queda em 180 dias, distância e dias desde o topo | componente de risco, filtro (> 60%) e alerta |
+| Liquidez | volume médio de 30 dias (USDT); spread estimado por faixa de volume | componente do score, filtro (`MIN_BUY_VOLUME_USD`) e custo |
+| Estabilidade | % dos últimos 50 dias acima da SMA 200; número de condições favoráveis | componente do score; mínimo de `MIN_CONDITIONS` condições |
+| Valorização excessiva | distância acima da SMA 50 em unidades da oscilação de 50 dias; RSI 14 | preço esticado (> 1,5) ou RSI > 80 = aguardar |
+| Qualidade dos dados | candle de ontem, histórico ≥ 250 dias, dias faltando no último ano | filtro obrigatório |
+| Custos | taxa 0,1% + spread estimado + slippage 0,05%, ida e volta | aporte inviável vira zero; custo exibido |
+
+Estratégias usadas como **condições favoráveis** (`ENABLED_SETUPS`, reaproveitando os sinais do laboratório em `src/transformers/strategies.py`): SMA 200, cruzamento de EMAs 20/50, rompimento de Donchian 55 e momento de 90 dias. Rompimento com volume e recuo dentro da alta (reversão à média com filtro de tendência) estão implementados mas desligados: perderam para a tendência no [laboratório](#laboratório-de-estratégias).
+
+### Score e classificação
+
+Score (0 a 100) = 0,35 × momento + 0,20 × persistência + 0,25 × risco + 0,20 × liquidez (`SCORE_WEIGHTS`), cada componente como percentil da moeda entre as pontuáveis do dia. Por quê: percentil põe tudo na mesma escala (nenhum indicador domina pelo tamanho dos números) e é robusto a valores extremos; um componente por tipo de informação evita contar o mesmo movimento várias vezes (retorno de 30 e 90 dias formam um só componente). O momento tem o maior peso porque é o fator mais documentado em cripto, mas abaixo da soma de risco e liquidez, que protegem contra comprar o que só subiu. Os pesos foram fixados por esse argumento, **antes** de qualquer teste, e não foram otimizados; `research/selection_study.py` mede a sensibilidade só em treino e validação. O score é relativo e **não é probabilidade de lucro**.
+
+| Classificação | Quando |
+|---|---|
+| **Evitar entrada** | algum filtro obrigatório falhou: dado indisponível, histórico curto ou com lacunas, liquidez baixa, volatilidade ou queda excessiva, tendência de baixa, bloqueio manual |
+| **Aguardar** | filtros ok, mas a entrada não se justifica: mercado defensivo, momento de 90 dias ≤ 0, menos de 3 condições, preço esticado, RSI > 80 ou score < 50 |
+| **Oportunidade moderada** | passou em tudo, mas tem alerta de risco ou score entre 50 e 65 |
+| **Boa oportunidade relativa** | score ≥ 65 e nenhum alerta de risco |
+
+Nenhum indicador isolado (RSI baixo, alta recente, queda brusca, volume) leva a uma compra: é preciso passar por todos os filtros ao mesmo tempo. Cada moeda traz os motivos a favor, os riscos e o que impede a compra. As `MAX_CANDIDATES` (3) melhores são selecionadas.
+
+**Filtro de regime (BTC).** `REGIME_FILTER = "bloquear"` (padrão): com o BTC abaixo da SMA 200, nenhuma compra nova em nenhuma moeda, por mais alto que seja o score. Alternativas: `"reduzir"` (metade dos alvos, classificação no máximo moderada) e `"desligado"` (só alerta). O padrão foi mantido igual à regra principal porque é o filtro de segurança já validado; `selection_study.py` compara as três variantes por período. Mudar o padrão só se o estudo, em treino e validação, mostrar vantagem consistente; o resultado do teste não deve decidir.
+
+### Quanto aportar
+
+1. Só as selecionadas recebem valor, até `MAX_POSITIONS` (3).
+2. Fração-alvo = mín(`MAX_ALLOCATION_PCT` 40%, `TARGET_VOL_PER_POSITION` 30% ÷ volatilidade anual da moeda) × convicção (boa = 1; moderada = 0,5). Moeda que oscila o dobro recebe a metade; nada de martingale nem de aumentar aporte depois de perda.
+3. Alocação teórica = orçamento × fração. Se a soma passa do orçamento, todas são reduzidas na mesma proporção e o resumo informa a exposição-alvo teórica; a sugestão prática nunca passa do orçamento.
+4. Arredondamento **para baixo** em múltiplos de R$ 5 (`ROUND_TO_BRL`); abaixo de `MIN_ORDER_BRL` (R$ 10, confira na sua corretora) vira zero; custo estimado acima de 2% do aporte (`MAX_COST_PCT`, inclui `FIXED_COST_BRL`) vira zero. O motivo de cada zero aparece no painel e no Telegram.
+
+Exemplos com R$ 100: uma moeda boa com volatilidade de 75% ao ano → 40% → R$ 40; uma moderada com 95% → 31,6% × 0,5 → R$ 15; três boas com 30% → alvo teórico R$ 120, reduzido para R$ 30 cada (R$ 90, sobra R$ 10 pelo arredondamento); nenhuma candidata → R$ 0. Os valores são **estimativas de dimensionamento do modelo, não garantia de retorno**.
+
+**Orçamento.** `BUDGET_BRL = 100` é o total para novas posições na análise, não por moeda nem aporte obrigatório. Não há integração com saldo real: cada execução é uma **simulação** para o valor informado, e o sistema não presume que os R$ 100 voltam a estar disponíveis. Se você já aportou, rode com o saldo que resta: `uv run python -m src.pipeline --budget 55`.
+
+### Validação
+
+`selection_backtest.py` refaz a seleção e o aporte do pipeline (mesmas funções, mesmo orçamento, arredondamento e ordem mínima) a cada 7 dias e compara, com custos, com: seleção com valor igual por moeda, momento simples (as 3 que mais subiram em 90 dias), regra SMA 200 em todas as moedas, comprar e segurar todas e só BTC, em treino (2018–2020), validação (2021–2022) e teste (2023 em diante). Vai para `selection_backtest.parquet`, para a aba **Seleção** do painel e para a frase de evidência do Telegram. O estudo completo:
+
+```bash
+uv run python research/selection_study.py
+```
+
+acrescenta DCA fixo, referência aleatória (mesmo número de moedas, mesma exposição e mesmo giro, moedas sorteadas entre as elegíveis, 100 sementes fixas), as variantes do filtro de regime, resultado ano a ano (walk-forward), desempenho por regime de volatilidade do BTC (limiares medidos no treino), sensibilidade de pesos e limiares (só treino e validação), redundância entre componentes (Spearman) e viabilidade das quantias pequenas com R$ 100. Grava em `data/research/selection_study.parquet` sem tocar nos resultados anteriores (`strategy_lab.parquet`, tabelas abaixo).
+
+**Resultados com dados reais: pendentes.** Esta mudança foi desenvolvida num ambiente sem acesso às APIs de mercado (Binance, CoinGecko e alternative.me bloqueadas pela rede), então o estudo só foi executado sobre preços sintéticos, para conferir o código; esses números não dizem nada sobre o mercado e não estão aqui. Rode o pipeline e o estudo com a base real antes de usar as sugestões. A regra de leitura é: se a seleção não superar, **no teste**, comprar e segurar e o momento simples em retorno por risco depois dos custos, a vantagem não está demonstrada, e o painel e o Telegram dizem isso automaticamente (campo `evidence`).
+
+Limitações: viés de sobrevivência (moedas que quebraram, como LUNA e FTT, não estão no universo, o que favorece comprar altcoins); spread e slippage são hipóteses (`SPREAD_TIERS`, `SLIPPAGE`), não medidas; execução no fechamento; uma única história de mercado; sem impostos. Não há execução de ordens: nenhuma chave de corretora, nenhuma API que movimente dinheiro.
+
 ## Requisitos
 
 - [uv](https://docs.astral.sh/uv/), que gerencia Python 3.12 e as dependências
@@ -72,7 +138,7 @@ Da raiz do projeto:
 uv run python -m src.pipeline
 ```
 
-A primeira execução baixa todo o histórico, em cerca de 40 segundos para as 15 moedas. As seguintes baixam só os dias que faltam. Exemplo de saída:
+A primeira execução baixa todo o histórico, em cerca de 40 segundos para 15 moedas (o universo atual tem 32: conte com o dobro). As seguintes baixam só os dias que faltam. Exemplo de saída:
 
 ```
 Ciclo 2026-10-14 · 15 ativos · F&G 53
@@ -270,9 +336,9 @@ uv run python -m src.pipeline --dry-run     # gera e valida a mensagem, imprime,
 | `TELEGRAM_CHAT_ID` | número do chat que recebe as mensagens |
 | `COINGECKO_API_KEY` | opcional (chave Demo gratuita do CoinGecko) |
 
-**O que a mensagem traz** (cerca de 1.300 caracteres, cabe numa tela): data e hora (Fortaleza e UTC) e se os dados estão em dia; para BTC e ETH, o preço, o fechamento diário usado, a SMA 200 e a distância, o filtro do BTC, o sinal (COMPRAR, PREPARAR, NEUTRO, VENDER ou INDISPONÍVEL), a condição que sustenta o sinal e a que o invalidaria, e a previsão de 1, 7 e 30 dias com a faixa e a limitação ("sem vantagem demonstrada sobre o preço de hoje"). O aviso de pânico vem numa seção separada e diz que não é recomendação de compra. As outras 13 moedas só aparecem se algo relevante mudou, com a frase "monitorar não é autorizar compra". Os únicos níveis citados são os da própria regra (a SMA 200 atual); a mensagem não inventa ponto de entrada nem dá aconselhamento personalizado.
+**O que a mensagem traz** (curta, para ler em um minuto): data e hora da análise (Fortaleza e UTC) e se os dados estão em dia, o orçamento da simulação, o estado do mercado (favorável, neutro ou defensivo, com uma frase de explicação), só as moedas selecionadas (no máximo `MAX_CANDIDATES`), cada uma com aporte sugerido, classificação e score, motivo e principal risco, o resumo do aporte (total, saldo não alocado, decisão e avisos como "exposição-alvo teórica acima do orçamento"), alertas essenciais (virada da regra SMA 200 de BTC ou ETH e pânico) e a evidência do backtest. Sem oportunidade, a mensagem é a frase fixa "Hoje não encontrei oportunidades suficientemente boas dentro dos critérios configurados. Aporte sugerido: R$ 0 de R$ 100. O orçamento permanece sem alocação." mais os motivos mais frequentes. Todos os números vêm de `recommendation.parquet`/`daily_signals.parquet` da mesma execução; os indicadores detalhados ficam no painel.
 
-**Quando algo dá errado.** Dados parciais ou atrasados: a mensagem abre com `DADOS PARCIAIS`, lista a falha e marca cada sinal como `NÃO CONFIÁVEL`; moeda sem dado confiável aparece como `INDISPONÍVEL`, sem sinal e sem previsão. Se o pipeline falhar e o Telegram estiver configurado, chega um alerta curto de erro (sem segredos). Se o envio falhar, o pipeline termina com código 2, e o job do GitHub fica vermelho. Mensagens acima de 4096 caracteres são divididas em parágrafo ou linha; o envio tem timeout de 15 s, até 3 tentativas com espera de 2 e 4 s, respeita o `retry_after` do Telegram e não repete quando o token ou o chat estão errados.
+**Quando algo dá errado.** Dados parciais ou atrasados: a mensagem traz "Limitações desta análise" com a falha; moeda sem dado confiável nunca é recomendada, e sem dado do BTC nenhuma compra é sugerida. Se o pipeline falhar e o Telegram estiver configurado, chega um alerta curto de erro (sem segredos). Se o envio falhar, o pipeline termina com código 2, e o job do GitHub fica vermelho. Mensagens acima de 4096 caracteres são divididas em parágrafo ou linha; o envio tem timeout de 15 s, até 3 tentativas com espera de 2 e 4 s, respeita o `retry_after` do Telegram e não repete quando o token ou o chat estão errados.
 
 ### Criar o bot e descobrir o chat_id (você faz uma vez)
 
@@ -336,7 +402,7 @@ Garantias:
 
 ### Universo de moedas
 
-Tudo em `src/config.py`: `UNIVERSE` (candidatas), `RECOMMENDED` (BTC e ETH), `MAX_EXTRA_COINS`, `MIN_HISTORY_DAYS`, `MIN_AVG_QUOTE_VOLUME_USD` com `VOLUME_WINDOW_DAYS`, e `EXCLUDED_BASES` com o motivo de cada exclusão (stablecoins, duplicatas de BTC/ETH) mais `LEVERAGED_SUFFIXES` (tokens alavancados, como BTCUP). A seleção é feita por `src/transformers/universe.py`, e o relatório lista quem ficou de fora e por quê. As 15 moedas atuais passam em todos os filtros.
+Tudo em `src/config.py`: `UNIVERSE` (candidatas), `RECOMMENDED` (BTC e ETH), `MAX_EXTRA_COINS`, `MIN_HISTORY_DAYS`, `MIN_AVG_QUOTE_VOLUME_USD` com `VOLUME_WINDOW_DAYS`, e `EXCLUDED_BASES` com o motivo de cada exclusão (stablecoins, duplicatas de BTC/ETH) mais `LEVERAGED_SUFFIXES` (tokens alavancados, como BTCUP). A seleção é feita por `src/transformers/universe.py`, e o relatório lista quem ficou de fora e por quê. As moedas listadas há menos de um ano ficam de fora até completarem o histórico.
 
 ### Testes
 
@@ -363,7 +429,7 @@ Resultado com dados até 2026-10-14:
 | Comprar e segurar | teste | +235,0% | 37,6% | -59,9% | 0,9 | 100% |
 | Regra antiga (pânico) | teste | +22,0% | 5,4% | -22,8% | 0,4 | 18% |
 
-**As 15 moedas** (tendência = fechamento acima da SMA 200 da própria moeda, sem filtro do BTC)
+**As 15 moedas** (universo anterior à ampliação, resultado preservado; tendência = fechamento acima da SMA 200 da própria moeda, sem filtro do BTC)
 
 | Estratégia | Período | Retorno total | Pior queda |
 |---|---|---|---|
@@ -378,7 +444,7 @@ O que isso quer dizer:
 
 - **O pânico perdeu dinheiro.** Comprar no pânico rendeu -49,5% no treino com BTC+ETH, contra +67,4% de comprar e segurar. Por isso virou só um aviso.
 - **A tendência rendeu mais no treino e menos no teste, com metade da queda.** No teste o BTC+ETH comprado e segurado rendeu um pouco mais (+235% contra +209,5%), mas passou por uma queda de -59,9% contra -29,3% da regra. A vantagem da regra está em ser mais fácil de suportar, não em render mais.
-- **Nas 15 moedas a regra não compensa no teste** (+53,5% contra +164,9%), por isso a recomendação é só para BTC e ETH.
+- **Nas 15 moedas a regra não compensa no teste** (+53,5% contra +164,9%), por isso o sinal de compra da regra SMA 200 vale só para BTC e ETH (as outras moedas passam pela seleção, com backtest próprio).
 - **A regra erra muito e acerta pouco:** das 61 operações simuladas em BTC e ETH, 26% terminaram no lucro, com resultado médio de +25%. As perdas são pequenas (a regra sai cedo) e alguns ganhos são enormes (+318% no BTC em 2020–2021). Quem não aguenta ver várias pequenas perdas seguidas dificilmente segue a regra.
 
 O painel mostra a comparação do pipeline do dia (`performance.parquet`). Ela usa a regra do painel (tendência + BTC em alta + STOP) também para as 15 moedas, então os números de "as 15 moedas" do painel diferem um pouco dos da tabela acima (treino +383%, teste +52% no painel): é o filtro do BTC e o STOP de -20%.
@@ -405,7 +471,9 @@ O script lê a base local, avalia sete estratégias (comprar e segurar, pânico,
 |---|---|
 | Moedas monitoradas (par Binance → id CoinGecko) | `src/config.py` (`UNIVERSE`) |
 | Filtros e exclusões do universo, atraso máximo dos dados | `src/config.py` (`MAX_EXTRA_COINS`, `MIN_HISTORY_DAYS`, `MIN_AVG_QUOTE_VOLUME_USD`, `EXCLUDED_BASES`, `MAX_STALE_DAYS`) |
-| Moedas com recomendação de compra | `src/config.py` (`RECOMMENDED`; no painel, `RECOMMENDED_SYMBOLS` em `frontend/src/data/coins.ts`) |
+| Moedas da regra principal SMA 200 | `src/config.py` (`RECOMMENDED`; no painel, `RECOMMENDED_SYMBOLS` em `frontend/src/data/coins.ts`) |
+| Seleção: candidatas, liquidez, pesos, limiares, estratégias, filtro de regime | `src/config.py` (`MAX_CANDIDATES`, `BUY_BLOCKLIST`, `MIN_BUY_VOLUME_USD`, `MIN_SCORE_HISTORY_DAYS`, `SCORE_WEIGHTS`, `SCORE_STRONG`, `SCORE_MODERATE`, `MIN_CONDITIONS`, `ENABLED_SETUPS`, `SETUP_PARAMS`, `MAX_VOLATILITY`, `MAX_DRAWDOWN_180D`, `MAX_STRETCH`, `REGIME_FILTER`) |
+| Orçamento e aporte | `src/config.py` (`BUDGET_BRL`, `MAX_POSITIONS`, `MAX_ALLOCATION_PCT`, `TARGET_VOL_PER_POSITION`, `CONVICTION`, `ROUND_TO_BRL`, `MIN_ORDER_BRL`, `FIXED_COST_BRL`, `MAX_COST_PCT`, `SPREAD_TIERS`, `SLIPPAGE`); por execução, `--budget` |
 | Moeda do filtro de mercado, períodos de treino/teste e taxa | `src/config.py` (`REGIME_SYMBOL`, `TRAIN_PERIOD`, `TEST_PERIOD`, `FEE_PER_SIDE`) |
 | Janela da média, distância do radar e alerta de pânico | `src/transformers/anomaly_detector.py` (`SignalRules`) |
 | Regras de venda (STOP) | `src/transformers/trade_simulator.py` (`ExitRules`) |
@@ -425,6 +493,11 @@ src/
     fng_adapter.py           Fear & Greed Index (alternative.me)
   transformers/            T — regras de negócio puras, sem I/O
     universe.py              seleção do universo (exclusões, histórico, volume)
+    strategies.py            sinais de estratégia compartilhados (Donchian, EMAs, volume, recuo na alta)
+    selection.py             indicadores, score, classificação e motivos de cada moeda
+    allocation.py            aporte por moeda dentro do orçamento (volatilidade, limites, arredondamento)
+    recommendation.py        contrato daily_signals + recommendation e as suas invariantes
+    selection_backtest.py    backtest da seleção contra referências, com custos
     data_quality.py          auditoria dos candles e disponibilidade (INDISPONÍVEL)
     anomaly_detector.py      SMA 200, tendência, estágio e alerta de pânico de cada dia (vetorizado)
     daily_alerts.py          alertas de virada contra o dia anterior
@@ -445,6 +518,7 @@ research/
   strategy_comparison.py   reproduz a tabela de estratégias (treino x teste)
   strategy_lab.py          laboratório: novas estratégias, validação, referência aleatória (data/research/)
   lab.py                   sinais puros, DCA, estatísticas de operações, sorteio
+  selection_study.py       estudo da seleção e do aporte variável (data/research/selection_study.parquet)
 frontend/                  React + TypeScript + Tailwind
   DESIGN.md                contrato visual: tokens, tipografia, componentes, o que evitar
   src/data/                leitura e validação do Parquet + cálculos e textos puros do painel
@@ -459,7 +533,9 @@ Arquivos publicados em `frontend/public/` (gerados, fora do Git):
 
 | Arquivo | Conteúdo |
 |---|---|
-| `daily_signals.parquet` | Estágio e alertas do dia |
+| `daily_signals.parquet` | Estágio e alertas do dia, score, componentes, classificação, motivos, riscos e aporte de cada moeda |
+| `recommendation.parquet` | Resumo da recomendação: orçamento, mercado, total sugerido, saldo, notas, evidência e estado dos dados |
+| `selection_backtest.parquet` | Seleção contra as referências simples, com custos, em treino, validação e teste |
 | `history.parquet` | Preço, indicadores (SMA 90 e 200, RSI, z-score) e estágio de todos os dias |
 | `backtest.parquet` | Cada operação simulada da regra de tendência (BTC e ETH) |
 | `performance.parquet` | Carteira: tendência x comprar e segurar x pânico, em treino e teste |

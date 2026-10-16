@@ -47,9 +47,10 @@ IBM Plex Sans, self-hosted via @fontsource (400/500/600). Escala: 13 (rótulos d
 
 ## Layout
 
-Largura máxima de 1120px, alinhada à esquerda, em quatro visões escolhidas por uma navegação em abas: **Visão geral**, **Histórico**, **Previsões** e **Pesquisa**. Cada visão é uma grade de 12 colunas e espaçamento `lg` entre blocos.
+Largura máxima de 1120px, alinhada à esquerda, em cinco visões escolhidas por uma navegação em abas: **Visão geral**, **Seleção**, **Histórico**, **Previsões** e **Pesquisa**. Cada visão é uma grade de 12 colunas e espaçamento `lg` entre blocos.
 
-- **Visão geral**, de cima para baixo: faixa de estado (3 fatos lado a lado) → área de avisos → o que fazer hoje → cartões de BTC e ETH lado a lado → bloco de previsão com 1, 7 e 30 dias → gráfico principal na largura toda → suas posições.
+- **Visão geral**, de cima para baixo: faixa da recomendação (5 fatos lado a lado: mercado, orçamento, sugerido, sem investir, dados) → área de avisos → bloco da recomendação de aporte (frase, barra do orçamento, notas, evidência) → cartões das moedas selecionadas (até 3 lado a lado) → tabela das descartadas → regra principal SMA 200 (faixa de estado, o que fazer hoje, cartões de BTC e ETH) → previsão → gráfico → suas posições.
+- **Seleção**: ranking completo com componentes do score, backtest da seleção contra as referências e como a seleção decide.
 - **Histórico**: todas as moedas e as operações simuladas da moeda escolhida.
 - **Previsões**: gráfico com as faixas e a tabela de avaliação contra o preço de hoje.
 - **Pesquisa**: comparação de estratégias, laboratório, como funciona e glossário.
@@ -74,6 +75,7 @@ Plano. Nenhuma sombra. Blocos se separam por fundo (surface sobre ground) e hair
 - **Dica de glossário** — o termo com sublinhado pontilhado e um balão `surface` com borda `hairline`, sem sombra; abre ao passar o mouse, ao focar com o teclado e some com Esc; no celular vira uma faixa fixa na base da tela. O texto longo mora em `src/data/glossary.ts`, nunca no cartão.
 - **Tooltip do gráfico** — balão `surface` com data, valor e fonte (Binance para preço, "calculada aqui" para médias, "modelo estatístico" para estimativas). Estimativas aparecem tracejadas, com a mesma cor do preço e transparência, e nunca se confundem com o histórico.
 
+- **Recomendação** — o valor sugerido em `figure`, sempre com "Aporte sugerido" e a classificação ao lado; classificação usa `signal` (boa oportunidade relativa), neutro (moderada e evitar) e `warning` (aguardar). **Nunca** `good`/verde para oportunidade: verde sugeriria certeza de ganho. A barra do orçamento usa as cores de série (não de status) e sempre mostra o que fica sem investir.
 - **Bloco** — surface, hairline, `md`, padding lg. Um nível só: bloco nunca contém bloco.
 - **Etiqueta de status** — texto + fundo tint da cor de status, `sm`, peso 500.
 - **Número de destaque** — rótulo em muted acima, valor em figure.

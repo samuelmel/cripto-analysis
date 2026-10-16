@@ -27,6 +27,7 @@ import { Nav, panelId, tabId, type ViewId } from "./Nav";
 import { CoinCard, ForecastBlock, NoticesArea, StatusStrip, type StripFacts } from "./Overview";
 import { PositionsSection } from "./Positions";
 import { PriceChart } from "./PriceChart";
+import { RecommendationPanel, RecommendationStrip, SelectionView } from "./Recommendation";
 import { LabPanel } from "./Research";
 import { BacktestPanel, HowItWorks, MarketTable, TodayPanel, TradeList } from "./Sections";
 import { Block, Section } from "./ui";
@@ -62,7 +63,10 @@ export function Dashboard() {
     <div className="mx-auto max-w-[1120px] px-4 pt-10 pb-24 sm:px-8">
       <header>
         <h1 className="text-[28px] font-semibold tracking-[-0.01em]">Monitor de criptomoedas</h1>
-        <p className="mt-1 text-muted">O que fazer hoje com Bitcoin e Ethereum, o que acontece com as outras 13 maiores moedas, e com o que você já comprou.</p>
+        <p className="mt-1 text-muted">
+          Quais moedas merecem um aporte hoje e quanto do seu orçamento, com os motivos e os riscos; a regra principal de Bitcoin e
+          Ethereum; e o que fazer com o que você já comprou.
+        </p>
         <Nav view={view} onChange={setView} />
       </header>
       <div className="mt-8">
@@ -80,7 +84,7 @@ export function Dashboard() {
             <p className="mt-2 text-muted">{state.message}</p>
           </Block>
         )}
-        {state.status === "ready" && <Ready data={state.data} view={view} onChanged={reload} />}
+        {state.status === "ready" && <Ready data={state.data} view={view} onView={setView} onChanged={reload} />}
       </div>
     </div>
   );
@@ -107,8 +111,13 @@ function stripFacts(data: Data, now: Date): StripFacts {
   };
 }
 
-function Ready({ data, view, onChanged }: { readonly data: Data; readonly view: ViewId; readonly onChanged: () => Promise<void> }) {
-  const { signals, history, trades, forecast, sources, lab, performance, positions, closed } = data;
+function Ready({ data, view, onView, onChanged }: {
+  readonly data: Data;
+  readonly view: ViewId;
+  readonly onView: (id: ViewId) => void;
+  readonly onChanged: () => Promise<void>;
+}) {
+  const { signals, recommendation, selectionPerf, history, trades, forecast, sources, lab, performance, positions, closed } = data;
   const first = signals[0];
   const [selected, setSelected] = useState<string>(positions[0]?.symbol ?? "BTC/USDT");
   const [showForecast, setShowForecast] = useState(true);
@@ -155,8 +164,26 @@ function Ready({ data, view, onChanged }: { readonly data: Data; readonly view: 
     <main>
       <div role="tabpanel" id={panelId("geral")} aria-labelledby={tabId("geral")} hidden={view !== "geral"}>
         <div className="space-y-6">
-          <StatusStrip facts={facts} />
+          <RecommendationStrip rec={recommendation} now={now} />
           <NoticesArea items={warnings} />
+          <RecommendationPanel
+            signals={signals}
+            rec={recommendation}
+            onDetails={() => {
+              onView("selecao");
+              window.scrollTo({ top: 0 });
+            }}
+          />
+        </div>
+        <div className="mt-16 space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold">Regra principal: média de 200 dias (Bitcoin e Ethereum)</h2>
+            <p className="mt-1 max-w-[72ch] text-muted">
+              A referência original do painel, preservada. Ela diz se BTC e ETH estão em tendência de alta e quando vender o
+              que você já tem. O aporte de cima vem da seleção, que também avalia risco, liquidez e preço esticado.
+            </p>
+          </div>
+          <StatusStrip facts={facts} />
           <TodayPanel
             verdict={verdict}
             fng={first?.fng_value ?? null}
@@ -200,12 +227,16 @@ function Ready({ data, view, onChanged }: { readonly data: Data; readonly view: 
         </div>
       </div>
 
+      <div role="tabpanel" id={panelId("selecao")} aria-labelledby={tabId("selecao")} hidden={view !== "selecao"}>
+        <SelectionView signals={signals} rec={recommendation} perf={selectionPerf} />
+      </div>
+
       <div role="tabpanel" id={panelId("historico")} aria-labelledby={tabId("historico")} hidden={view !== "historico"}>
         <Section
           id="moedas"
           title="Todas as moedas"
           icon={<Coins size={ICON} aria-hidden />}
-          lead="Só Bitcoin e Ethereum recebem recomendação de compra. As outras são acompanhadas. Clique numa moeda para ver o gráfico e o histórico dela."
+          lead="O que a regra principal (média de 200 dias) diz de cada moeda. O sinal de compra dela vale só para Bitcoin e Ethereum; o aporte em qualquer moeda vem da aba Seleção. Clique numa moeda para ver o gráfico e o histórico dela."
         >
           <MarketTable rows={signals} recommended={RECOMMENDED_SYMBOLS} sparks={sparks} selected={selected} onSelect={setSelected} />
         </Section>

@@ -77,3 +77,15 @@ export function oneOf<T extends string>(allowed: readonly T[], row: Row, key: st
   if (v === null) throw new SchemaError(`coluna "${key}": valor inesperado ${String(row[key])}`);
   return v;
 }
+
+/** Coluna de lista de texto (Parquet LIST<string>); nula vira lista vazia, item que não é texto é erro. */
+export function strList(row: Row, key: string): readonly string[] {
+  const v = row[key];
+  if (v === null || v === undefined) return [];
+  if (!Array.isArray(v)) throw new SchemaError(`coluna "${key}" deveria ser lista`);
+  const items: readonly unknown[] = v;
+  return items.map((item) => {
+    if (typeof item !== "string") throw new SchemaError(`coluna "${key}": item que não é texto`);
+    return item;
+  });
+}

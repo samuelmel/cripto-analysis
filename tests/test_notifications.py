@@ -21,6 +21,7 @@ from src.notifiers import TelegramError, TelegramSettings, send_messages, settin
 from src.notifiers import telegram
 from src.transformers.notification import (
     TELEGRAM_LIMIT,
+    data_notes,
     format_error,
     format_report,
     redact,
@@ -35,155 +36,135 @@ RECOMMENDED = ("BTC/USDT", "ETH/USDT")
 TOKEN = "123456:ABC-DEF-segredo"
 
 
-def signal_row(symbol: str, **over: Any) -> dict[str, Any]:
+def coin(symbol: str, **over: Any) -> dict[str, Any]:
+    """Uma linha de daily_signals (só as colunas que o formatador lê)."""
     row: dict[str, Any] = {
-        "symbol": symbol, "timestamp": LAST, "close": 81682.0 if symbol == "BTC/USDT" else 2421.6,
-        "sma_200": 72243.2 if symbol == "BTC/USDT" else 2141.5, "stage": "COMPRAR", "stage_reason": pd.NA,
-        "alert": pd.NA, "panic": False, "regime_up": True, "fng_value": 53,
+        "symbol": symbol, "timestamp": LAST, "alert": pd.NA, "panic": False, "selected": False, "candidate_rank": pd.NA,
+        "opportunity": "AGUARDAR", "score": 40.0, "allocation_brl": 0.0, "allocation_note": pd.NA,
+        "reasons": [], "risks": [], "blockers": ["mercado defensivo: Bitcoin abaixo da média"],
     }
     row.update(over)
     return row
 
 
+def pick(symbol: str, rank: int, amount: float, **over: Any) -> dict[str, Any]:
+    fields: dict[str, Any] = dict(
+        selected=True, candidate_rank=rank, opportunity="BOA_RELATIVA", score=78.0, allocation_brl=amount,
+        reasons=["tendência de alta: preço 12,0% acima da média de 200 dias", "momento positivo: +8,0% em 30 dias e +20,0% em 90 dias",
+                 "liquidez adequada: US$ 900 mi negociados por dia", "4 de 4 condições favoráveis: acima da média de 200 dias"],
+        risks=["volatilidade elevada: o preço oscila cerca de 95% ao ano"], blockers=[],
+    )
+    return coin(symbol, **{**fields, **over})
+
+
 def signals(*rows: dict[str, Any]) -> pd.DataFrame:
-    frame = pd.DataFrame(rows)
-    return frame.astype({"stage_reason": "string", "alert": "string"})
+    return pd.DataFrame(rows).astype({"alert": "string", "allocation_note": "string", "candidate_rank": "Int64"})
 
 
-def forecast_rows(beats: bool = False, coverage_ok: bool = True) -> pd.DataFrame:
-    rows = []
-    for symbol in RECOMMENDED:
-        for h, lo, hi in ((1, -2.4, 2.2), (7, -7.4, 6.6), (30, -16.7, 15.2)):
-            rows.append({"symbol": symbol, "horizon_days": h, "role": "MODELO", "p10_pct": lo, "p90_pct": hi,
-                         "beats_baseline": beats, "coverage_ok": coverage_ok, "coverage": 0.83})
-    return pd.DataFrame(rows)
+def rec(total: float = 0.0, budget: float = 100.0, **over: Any) -> pd.DataFrame:
+    row: dict[str, Any] = {
+        "run_ts": NOW, "data_day": LAST, "budget_brl": budget, "regime": "FAVORAVEL", "total_brl": total,
+        "unallocated_brl": budget - total, "notes": [], "data_notes": [], "evidence": "No teste fora da amostra a seleção não superou o comprar e segurar.",
+    }
+    row.update(over)
+    return pd.DataFrame([row])
 
 
-def report(sig: pd.DataFrame, fc: pd.DataFrame | None = None, errors: pd.DataFrame | None = None) -> str:
-    texts = format_report(sig, forecast_rows() if fc is None else fc, now=NOW, recommended=RECOMMENDED,
-                          regime_symbol="BTC/USDT", max_stale_days=1, source_errors=errors)
+def report(sig: pd.DataFrame, summary: pd.DataFrame) -> str:
+    texts = format_report(sig, summary, now=NOW, recommended=RECOMMENDED)
     assert validate_messages(texts) == []
     return "\n\n".join(texts)
 
 
-def both(**over: Any) -> pd.DataFrame:
-    return signals(signal_row("BTC/USDT", **over), signal_row("ETH/USDT", **over))
-
-
 # ------------------------------------------------------------------------------ formatação
 
-def test_buy_message_has_everything_a_phone_needs() -> None:
-    text = report(both())
-    assert "16/10/2026" not in text or "Fortaleza" in text
+def test_message_with_picks_uses_only_computed_numbers() -> None:
+    sig = signals(pick("ETH/USDT", 1, 30.0), pick("SOL/USDT", 2, 15.0, opportunity="MODERADA", score=61.0), coin("BTC/USDT"))
+    text = report(sig, rec(total=45.0))
+    assert text.startswith("📊 CRIPTO — ANÁLISE DO DIA")
     assert "15/10/2026 21:10 (Fortaleza)" in text  # 00:10 UTC = 21:10 em Fortaleza, ainda dia 15
-    assert "candle diário fechado de 15/10 (UTC), em dia" in text
-    assert "🟢 BTC — COMPRAR" in text and "🟢 ETH — COMPRAR" in text
-    assert "US$ 81.682" in text and "fechamento diário de 15/10" in text
-    assert "SMA 200: US$ 72.243" in text and "13,1% acima da média" in text
-    assert "Filtro do BTC: BTC acima da SMA 200 dele (ok)" in text
-    assert "Sustenta: fechou acima da SMA 200." in text
-    assert "Invalida: fechar abaixo de US$ 72.243 (SMA 200 atual)." in text
-    assert "ETH fechar" not in text and "ou o BTC fechar abaixo de US$ 72.243" in text  # a invalidação do ETH cita o BTC
-    assert "1d −2% a +2%" in text and "7d −7% a +7%" in text and "30d −17% a +15%" in text
-    assert "Sem vantagem demonstrada sobre o preço de hoje" in text
-    assert "NÃO CONFIÁVEL" not in text and "DADOS PARCIAIS" not in text
-    assert "Nenhuma moeda em pânico." in text
-    assert "não recomendação de investimento" in text
+    assert "Dados: fechamento diário de 15/10 (UTC), em dia." in text
+    assert "Orçamento disponível na simulação: R$ 100" in text
+    assert "Mercado: favorável" in text
+    assert "1. ETH — Aporte sugerido: R$ 30" in text and "2. SOL — Aporte sugerido: R$ 15" in text
+    assert "Classificação: boa oportunidade relativa (score 78 de 100)" in text
+    assert "Classificação: oportunidade moderada (score 61 de 100)" in text
+    assert "Motivo: Tendência de alta (acima da média de 200 dias), momento positivo (subiu em 30 e 90 dias) e liquidez adequada." in text
+    assert "Atenção: volatilidade elevada: o preço oscila cerca de 95% ao ano." in text
+    assert "Total sugerido: R$ 45 de R$ 100." in text and "Saldo não alocado: R$ 55." in text
+    assert "Decisão: considerar um aporte de R$ 45, ou aguardar" in text
+    assert "não garantias de valorização" in text and "não probabilidade de lucro" in text
+    assert "BTC —" not in text  # moeda não selecionada não aparece como oportunidade
+    assert len(text) < 2500
 
 
-def test_message_never_invents_entry_points_or_advice() -> None:
-    text = report(both()).lower()
-    for forbidden in ("ponto de entrada", "compre ", "venda tudo", "alvo", "stop loss", "você deve"):
-        assert forbidden not in text
+def test_single_opportunity_shows_only_one() -> None:
+    text = report(signals(pick("SOL/USDT", 1, 20.0), coin("BTC/USDT"), coin("ETH/USDT")), rec(total=20.0))
+    assert "1. SOL" in text and "2." not in text
 
 
-@pytest.mark.parametrize(
-    ("over", "label", "snippet"),
-    [
-        ({"stage": "PREPARAR", "close": 71000.0}, "🟡 BTC — PREPARAR", "Vira COMPRAR: fechar acima de US$ 72.243"),
-        ({"stage": "NEUTRO", "close": 60000.0, "regime_up": False}, "⚪ BTC — NEUTRO", "Sustenta: fechou abaixo da SMA 200."),
-        ({"stage": "NEUTRO", "alert": "VENDER AGORA", "close": 60000.0, "regime_up": False}, "🔴 BTC — VENDER", "Volta a COMPRAR: fechar acima de US$ 72.243"),
-    ],
-)
-def test_each_signal_has_its_label_and_conditions(over: dict[str, Any], label: str, snippet: str) -> None:
-    text = report(signals(signal_row("BTC/USDT", **over), signal_row("ETH/USDT")))
-    assert label in text
-    assert snippet in text
-    assert "NaN" not in text
+def test_no_opportunity_uses_the_fixed_sentence_and_says_why() -> None:
+    sig = signals(coin("BTC/USDT"), coin("ETH/USDT"), coin("SOL/USDT", blockers=["tendência de baixa: preço 5% abaixo"]))
+    text = report(sig, rec(regime="DEFENSIVO"))
+    assert (
+        "Hoje não encontrei oportunidades suficientemente boas dentro dos critérios configurados. "
+        "Aporte sugerido: R$ 0 de R$ 100. O orçamento permanece sem alocação." in text
+    )
+    assert "Mercado: defensivo" in text
+    assert "Principais motivos: mercado defensivo (2 de 3 moedas)" in text
+    assert "Melhores oportunidades" not in text
 
 
-def test_unavailable_has_reason_and_no_signal_or_forecast() -> None:
-    reason = "dado desatualizado: último candle em 10/10/2026 (5 dias de atraso)"
-    sig = signals(signal_row("BTC/USDT", stage="INDISPONÍVEL", stage_reason=reason), signal_row("ETH/USDT"))
-    text = report(sig)
-    assert "⚫ BTC — INDISPONÍVEL" in text
-    assert reason in text
-    assert "Sem sinal e sem previsão para esta moeda hoje." in text
-    assert "DADOS PARCIAIS" in text
-    assert "🟢 ETH — COMPRAR (NÃO CONFIÁVEL: dados parciais)" in text  # dado parcial: nenhum sinal vira "confiável"
+def test_candidates_without_executable_amount_are_explained() -> None:
+    sig = signals(pick("SOL/USDT", 1, 0.0, allocation_note="aporte de R$ 8 fica abaixo da ordem mínima de R$ 10: impraticável"))
+    text = report(sig, rec(total=0.0, budget=20.0))
+    assert "Aporte sugerido: R$ 0 de R$ 20." in text
+    assert "SOL: aporte de R$ 8 fica abaixo da ordem mínima de R$ 10: impraticável" in text
 
 
-def test_partial_data_marks_every_signal_as_unreliable_and_lists_the_failure() -> None:
-    errors = pd.DataFrame([{"source": "binance", "scope": "ETH/USDT", "detail": "HTTP 503"}])
-    text = report(both(), errors=errors)
-    assert "DADOS PARCIAIS" in text
-    assert text.count("NÃO CONFIÁVEL") == 2
-    assert "Falha na coleta de preços (ETH)" in text
+def test_budget_notes_and_data_limits_are_shown() -> None:
+    notes = ["O modelo teria uma exposição-alvo de R$ 120; a sugestão fica limitada ao orçamento de R$ 100."]
+    limits = ["falha na coleta de preços (ETH): essas moedas não podem ser recomendadas hoje"]
+    text = report(signals(pick("SOL/USDT", 1, 40.0)), rec(total=40.0, notes=notes, data_notes=limits))
+    assert notes[0] in text
+    assert "⚠️ Limitações desta análise" in text and limits[0] in text
 
 
 def test_stale_data_is_flagged_in_the_header() -> None:
-    old = pd.Timestamp("2026-10-13", tz="UTC")
-    text = report(both(timestamp=old))
-    assert "ATRASADO 2 dia(s)" in text
-    assert "DADOS PARCIAIS" in text
+    text = report(signals(coin("BTC/USDT")), rec(data_day=pd.Timestamp("2026-10-13", tz="UTC")))
+    assert "ATRASADO 2 dia(s)" in text and "Limitações desta análise" in text
 
 
-def test_secondary_source_failure_does_not_discredit_price_signals() -> None:
-    errors = pd.DataFrame([{"source": "coingecko", "scope": "MARKET", "detail": "resposta incompleta"}])
-    text = report(both(), errors=errors)
-    assert "Fonte secundária fora do ar (coingecko)" in text
-    assert "os sinais por preço seguem valendo" in text
-    assert "DADOS PARCIAIS" not in text and "NÃO CONFIÁVEL" not in text
+def test_essential_alerts_only_sma200_turns_and_panic() -> None:
+    sig = signals(coin("BTC/USDT", alert="VENDER AGORA"), coin("ETH/USDT"), coin("SOL/USDT", alert="NO RADAR", panic=True))
+    text = report(sig, rec())
+    assert "BTC saiu da tendência de alta hoje (regra principal SMA 200)." in text
+    assert "SOL chegou perto" not in text  # outras moedas não poluem a mensagem
+    assert "Pânico em SOL" in text and "É só aviso" in text
 
 
-def test_panic_is_a_separate_section_without_buy_recommendation() -> None:
-    sig = signals(signal_row("BTC/USDT"), signal_row("ETH/USDT"), signal_row("SOL/USDT", stage="NEUTRO", panic=True, close=100.0, sma_200=90.0))
-    text = report(sig)
-    section = text.split("⚠️ Aviso de pânico")[1]
-    assert "Pânico em: SOL" in section
-    assert "não é recomendação de compra" in text
-    assert "SOL" not in text.split("⚠️ Aviso de pânico")[0]  # SOL só aparece na seção de pânico
+def test_message_never_invents_entry_points_or_certainty() -> None:
+    text = report(signals(pick("SOL/USDT", 1, 40.0)), rec(total=40.0)).lower()
+    for forbidden in ("ponto de entrada", "venda tudo", "alvo de preço", "garantido", "muito bom para comprar", "você deve"):
+        assert forbidden not in text
 
 
-def test_other_coins_only_appear_when_something_relevant_changed() -> None:
-    quiet = signals(signal_row("BTC/USDT"), signal_row("ETH/USDT"), signal_row("SOL/USDT", stage="NEUTRO", close=100.0, sma_200=90.0))
-    text = report(quiet)
-    assert "SOL" not in text and "Outras moedas" not in text and "autorizar compra" not in text
-
-    moved = signals(signal_row("BTC/USDT"), signal_row("ETH/USDT"),
-                    signal_row("SOL/USDT", alert="COMPRAR AGORA", close=100.0, sma_200=90.0))
-    text = report(moved)
-    assert "SOL: entrou em tendência de alta" in text
-    assert "Monitorar não é autorizar compra: a regra só recomenda BTC e ETH." in text
-
-
-def test_forecast_variants() -> None:
-    assert "Previsão: indisponível." in report(both(), fc=forecast_rows().iloc[0:0])
-    edge = report(both(), fc=forecast_rows(beats=True))
-    assert "Vantagem demonstrada sobre o preço de hoje só em: 1d, 7d, 30d." in edge
-    assert "Sem vantagem demonstrada" not in edge
-    off = report(both(), fc=forecast_rows(coverage_ok=False))
-    assert "Faixa pouco calibrada no teste" in off and "1d 83%" in off
-
-
-def test_report_is_split_to_fit_telegram_even_with_many_alerts() -> None:
-    rows = [signal_row("BTC/USDT"), signal_row("ETH/USDT")]
-    rows += [signal_row(f"C{i:03d}/USDT", alert="NO RADAR", stage="PREPARAR", close=10.0, sma_200=10.2) for i in range(400)]
-    texts = format_report(signals(*rows), forecast_rows(), now=NOW, recommended=RECOMMENDED,
-                          regime_symbol="BTC/USDT", max_stale_days=1)
-    assert len(texts) > 1
+def test_report_fits_telegram_and_never_lists_dozens_of_coins() -> None:
+    rows = [coin(f"C{i:03d}/USDT") for i in range(300)] + [pick("SOL/USDT", 1, 40.0)]
+    texts = format_report(signals(*rows), rec(total=40.0), now=NOW, recommended=RECOMMENDED)
     assert all(0 < len(t) <= TELEGRAM_LIMIT for t in texts)
-    assert validate_messages(texts) == []
+    assert "C001" not in "".join(texts)
+
+
+def test_data_notes_summarize_failures_and_unavailable_coins() -> None:
+    available = pd.DataFrame({"symbol": ["BTC/USDT", "SOL/USDT"], "available": [True, False]})
+    errors = pd.DataFrame([{"source": "binance", "scope": "SOL/USDT", "detail": "HTTP 503"},
+                           {"source": "coingecko", "scope": "MARKET", "detail": "x"}])
+    notes = data_notes(available, errors)
+    assert any("falha na coleta de preços (SOL)" in n for n in notes)
+    assert any("fonte secundária fora do ar (coingecko)" in n for n in notes)
+    assert any("1 moeda(s) sem dado confiável hoje (SOL)" in n for n in notes)
+    assert data_notes(available.assign(available=True), None) == []
 
 
 # ------------------------------------------------------------------------------ divisão e validação
@@ -385,8 +366,9 @@ def test_dry_run_needs_no_token_and_no_network(workdir: Path, capsys: pytest.Cap
     assert pipeline.main(["--offline", "--dry-run"]) == 0
     out = capsys.readouterr().out
     assert "dry-run: mensagem válida, nada foi enviado" in out
-    assert "🟢 BTC — COMPRAR" in out
-    assert "Previsão: indisponível." in out  # base sintética curta demais para prever: não inventa previsão
+    assert "CRIPTO — ANÁLISE DO DIA" in out
+    assert "Orçamento disponível na simulação: R$ 100" in out
+    assert "Validação histórica:" in out
 
 
 def test_notify_without_credentials_fails_loudly(workdir: Path) -> None:
@@ -395,7 +377,7 @@ def test_notify_without_credentials_fails_loudly(workdir: Path) -> None:
 
 def test_notify_sends_the_validated_messages(workdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", TOKEN)
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "987654321")
     sent: list[list[str]] = []
     monkeypatch.setattr(pipeline, "send_messages", lambda settings, texts: sent.append(list(texts)))
     assert pipeline.main(["--offline", "--notify"]) == 0
@@ -405,7 +387,7 @@ def test_notify_sends_the_validated_messages(workdir: Path, monkeypatch: pytest.
 
 def test_send_failure_turns_the_run_red(workdir: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", TOKEN)
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "987654321")
 
     def boom(settings: TelegramSettings, texts: list[str]) -> None:
         raise TelegramError("Telegram inacessível depois de 3 tentativas")
@@ -417,12 +399,12 @@ def test_send_failure_turns_the_run_red(workdir: Path, monkeypatch: pytest.Monke
 
 def test_pipeline_failure_sends_a_short_redacted_alert(workdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", TOKEN)
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "987654321")
     monkeypatch.setenv("COINGECKO_API_KEY", "CG-chave-secreta")
     sent: list[list[str]] = []
     monkeypatch.setattr(pipeline, "send_messages", lambda settings, texts: sent.append(list(texts)))
 
-    def broken(today: pd.Timestamp) -> dict[str, pd.DataFrame]:
+    def broken(today: pd.Timestamp, **kwargs: Any) -> dict[str, pd.DataFrame]:
         raise ExtractorError(f"GET falhou: HTTP 451 com CG-chave-secreta e {TOKEN}")
 
     monkeypatch.setattr(pipeline, "analyze", broken)
@@ -438,7 +420,7 @@ def test_unexpected_error_also_alerts_and_no_alert_without_telegram(workdir: Pat
     sent: list[list[str]] = []
     monkeypatch.setattr(pipeline, "send_messages", lambda settings, texts: sent.append(list(texts)))
 
-    def broken(today: pd.Timestamp) -> dict[str, pd.DataFrame]:
+    def broken(today: pd.Timestamp, **kwargs: Any) -> dict[str, pd.DataFrame]:
         raise KeyError("coluna")
 
     monkeypatch.setattr(pipeline, "analyze", broken)
@@ -446,16 +428,16 @@ def test_unexpected_error_also_alerts_and_no_alert_without_telegram(workdir: Pat
     assert sent == []
 
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", TOKEN)
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "987654321")
     assert pipeline.main(["--offline", "--notify"]) == 1
     assert len(sent) == 1 and "KeyError" in sent[0][0]
 
 
 def test_dry_run_never_sends_an_error_alert(workdir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", TOKEN)
-    monkeypatch.setenv("TELEGRAM_CHAT_ID", "42")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "987654321")
     sent: list[Callable[..., Any]] = []
     monkeypatch.setattr(pipeline, "send_messages", lambda *a, **k: sent.append(lambda: None))
-    monkeypatch.setattr(pipeline, "analyze", lambda today: (_ for _ in ()).throw(ExtractorError("x")))
+    monkeypatch.setattr(pipeline, "analyze", lambda today, **kw: (_ for _ in ()).throw(ExtractorError("x")))
     assert pipeline.main(["--offline", "--dry-run", "--notify"]) == 1
     assert sent == []

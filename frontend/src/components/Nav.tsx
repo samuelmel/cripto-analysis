@@ -2,6 +2,7 @@ import type { KeyboardEvent } from "react";
 
 export const VIEWS = [
   { id: "geral", label: "Visão geral" },
+  { id: "selecao", label: "Seleção" },
   { id: "historico", label: "Histórico" },
   { id: "previsoes", label: "Previsões" },
   { id: "pesquisa", label: "Pesquisa" },
