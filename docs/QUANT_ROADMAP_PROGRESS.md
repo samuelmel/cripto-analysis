@@ -164,4 +164,8 @@ Matriz completa, achados e pendências por prioridade: [AUDIT.md](AUDIT.md). O q
 - **Dados:** sinalização de possível deslistagem (sem presumir perda total) e contagem de dias sem preço.
 - **Validação:** catálogo de estratégias (nenhuma confirmada como robusta, por teste) e classificação de qualidade da evidência.
 
-**Continua aberto:** unificar os dois motores (o nome `COMPRAR_E_SEGURAR` existe nos dois com simulações diferentes); universo point-in-time (bloqueado por falta de fonte); convenção de execução; usar o bootstrap nos demais estudos; redesign do frontend (especificação não recebida).
+**Continua aberto:** unificar os dois motores (o nome `COMPRAR_E_SEGURAR` existe nos dois com simulações diferentes); universo point-in-time (bloqueado por falta de fonte); convenção de execução; usar o bootstrap nos demais estudos.
+
+**Redesign do frontend (concluído):** painel horizontal com barra superior, indicadores e painéis em grade; a Visão geral caiu de 5.305 px para 1.341 px de altura no desktop (e de 10.037 para 2.513 no celular), sem rolagem horizontal; nova área de regimes (experimental). Detalhes, medições e limitações da validação visual em [AUDIT.md](AUDIT.md#redesign-do-frontend-16102026).
+
+**Verificação final (16/10/2026):** `uv run pytest` 242 passaram; `mypy --strict` sem erros (42 arquivos); `uv lock --check` e `uv sync --locked --dry-run` consistentes; `npm run build` passou. O estado completo (fases F0 a F5, pendências e conclusão da seleção adaptativa) está em [AUDIT.md](AUDIT.md) e [regime_policy.md](regime_policy.md).

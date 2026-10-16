@@ -23,7 +23,7 @@ npm --prefix frontend run build        # typecheck + build de produção em fron
 npm --prefix frontend run dev          # painel em modo de desenvolvimento
 ```
 
-Em 2026-10-16 (auditoria de consolidação), os comandos de verificação passaram: 219 testes, `mypy --strict` sem erros em 42 arquivos, `uv lock --check` consistente e o build do painel (`tsc` estrito + `vite build`).
+Em 2026-10-16 (auditoria de consolidação e redesign do painel), os comandos de verificação passaram: 242 testes, `mypy --strict` sem erros em 42 arquivos, `uv lock --check` consistente e o build do painel (`tsc` estrito + `vite build`).
 
 O workflow `.github/workflows/ci.yml` roda `uv lock --check`, `uv sync --locked`, `mypy --strict`, `pytest` e o build do painel a cada push na `main` e em pull requests. Ele foi escrito nesta auditoria e **ainda não foi executado no GitHub**; a primeira rodada pode revelar diferenças entre Windows e Linux. O `daily.yml` continua sendo só o pipeline diário.
 
@@ -44,6 +44,7 @@ O workflow `.github/workflows/ci.yml` roda `uv lock --check`, `uv sync --locked`
 | `test_regimes.py` | Regimes de mercado: causalidade, dados ausentes, reprodutibilidade, integração e contrato com o frontend |
 | `test_engine.py` | Motor de pesos: guarda de exposição, caixa parado, moedas sem preço |
 | `test_loaders.py` | Escrita atômica, snappy, snapshots, upsert idempotente e consistência das duas definições do filtro do BTC |
+| `test_frontend_contract.py` | Contrato do painel: todo campo dos tipos TypeScript existe no schema Python e o leitor só consome campos declarados |
 | `test_regime_policy.py` | Fase 5 (pesquisa): políticas por regime, custos de transição, baselines, bootstrap, registro de experimentos e isolamento da produção |
 
 ## Mudanças comuns
@@ -74,7 +75,8 @@ uv run python -m src.pipeline --offline
 ## Frontend
 
 - **Stack:** React 19, TypeScript, Vite, Tailwind CSS 4, `lightweight-charts` nos gráficos e `hyparquet` para ler Parquet no navegador.
-- **Organização:** componentes em `frontend/src/components/` não fazem `fetch`. O carregamento fica em `frontend/src/data/loadSignals.ts`, e os cálculos e textos ficam em funções puras de `frontend/src/data/`.
+- **Organização:** componentes em `frontend/src/components/` não fazem `fetch`. O carregamento fica em `frontend/src/data/loadSignals.ts`, e os cálculos e textos ficam em funções puras de `frontend/src/data/` (`analytics.ts`, `selection.ts`, `kpis.ts` para a faixa de indicadores e `regimes.ts` para os regimes). A casca é `Dashboard.tsx` (barra superior, indicadores, avisos e as cinco visões); cada visão é um componente (`OverviewView`, `SelectionView`, `ForecastView`, `ResearchView`) montado com as primitivas de `ui.tsx` (`Panel`, `Table`, `Segmented`, `Collapsible`).
+- **Contrato com o backend:** todo campo que um tipo de `frontend/src/types/signals.ts` declara precisa existir no schema Python que gera o arquivo, e o leitor só consome campos declarados (`tests/test_frontend_contract.py`).
 - **Rota local de posições:** `frontend/server/positionsApi.ts` só existe no `npm run dev` e só aceita pedidos da própria página.
 - **Design:** cores, tipografia e componentes estão em [frontend/DESIGN.md](../frontend/DESIGN.md).
 

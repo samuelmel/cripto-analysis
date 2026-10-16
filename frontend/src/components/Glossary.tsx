@@ -1,10 +1,13 @@
-import { useId, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { GLOSSARY, GLOSSARY_ORDER, type TermId } from "../data/glossary";
 
 /** Termo com dica: sublinhado pontilhado, abre ao passar o mouse ou focar, fecha com Esc. */
 export function Term({ id, children }: { readonly id: TermId; readonly children?: ReactNode }) {
   const tipId = useId();
   const entry = GLOSSARY[id];
+  /** A dica abre para a esquerda quando o termo está perto da borda direita da janela. */
+  const [alignRight, setAlignRight] = useState(false);
+  const place = (el: HTMLElement): void => setAlignRight(el.getBoundingClientRect().left + 270 > window.innerWidth);
   const onKeyDown = (e: KeyboardEvent<HTMLButtonElement>): void => {
     if (e.key === "Escape") e.currentTarget.blur();
   };
@@ -14,6 +17,8 @@ export function Term({ id, children }: { readonly id: TermId; readonly children?
         type="button"
         aria-describedby={tipId}
         onKeyDown={onKeyDown}
+        onMouseEnter={(e) => place(e.currentTarget)}
+        onFocus={(e) => place(e.currentTarget)}
         className="cursor-help border-b border-dotted border-muted text-left text-inherit"
       >
         {children ?? entry.label}
@@ -21,7 +26,7 @@ export function Term({ id, children }: { readonly id: TermId; readonly children?
       <span
         id={tipId}
         role="tooltip"
-        className="invisible absolute left-0 top-full z-20 w-64 pt-1 group-focus-within:visible group-hover:visible max-md:fixed max-md:inset-x-4 max-md:bottom-4 max-md:top-auto max-md:w-auto max-md:pt-0"
+        className={`hidden absolute top-full z-20 w-64 pt-1 ${alignRight ? "right-0" : "left-0"} group-focus-within:block group-hover:block max-md:fixed max-md:inset-x-4 max-md:bottom-4 max-md:top-auto max-md:w-auto max-md:pt-0`}
       >
         <span className="block rounded-md border border-hairline bg-surface p-3 text-left text-[13px] font-normal leading-snug text-ink">
           <strong className="block font-medium">{entry.label}</strong>

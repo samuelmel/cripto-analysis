@@ -27,6 +27,8 @@
   --color-warning-mark: #fab219;
   --color-warning-bg: #fbf0d3;
 
+  --color-neutral-mark: #8a897f;
+
   --color-series-price: #2a78d6;
   --color-series-average: #eb6834;
   --color-series-trend: #4a3aa7;
@@ -43,9 +45,18 @@ body {
   background: var(--color-ground);
   color: var(--color-ink);
   font-family: var(--font-sans);
-  font-size: 15px;
-  line-height: 1.55;
+  font-size: 14px;
+  line-height: 1.45;
+  /* A página nunca rola na horizontal: dicas e conteúdo largo ficam contidos (clip não cria contêiner de rolagem,
+     então o cabeçalho fixo continua funcionando). */
+  overflow-x: clip;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Barras de rolagem finas nas áreas com rolagem interna (tabelas e listas com altura limitada). */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-hairline) transparent;
 }
 
 :focus-visible {

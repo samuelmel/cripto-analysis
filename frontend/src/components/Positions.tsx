@@ -3,9 +3,9 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { ApiError, addPurchase, deletePosition, registerSale } from "../data/api";
 import { REASON_TEXT, coinName, fmt, parseAmount, signTone, toInput, todayIso } from "../data/analytics";
 import type { ClosedPosition, DailySignal, Position } from "../types/signals";
-import { CoinLabel, CoinLogo } from "./CoinLabel";
+import { CoinLabel } from "./CoinLabel";
 import { REASON_ICON } from "./icons";
-import { Badge, Block, Button, Field, TEXT_TONE, Table, cell, inputClass, numCell } from "./ui";
+import { Badge, Button, Field, TEXT_TONE, Table, cell, inputClass, numCell } from "./ui";
 
 const errorText = (err: unknown): string => (err instanceof ApiError || err instanceof Error ? err.message : String(err));
 
@@ -53,33 +53,15 @@ export function PurchaseForm({ coins, onSaved, onCancel }: {
   };
 
   return (
-    <Block>
+    <div>
       <form onSubmit={(e) => void submit(e)} noValidate>
-        <h3 className="flex items-center gap-2 text-lg font-semibold"><Receipt size={22} aria-hidden /> Registrar uma compra</h3>
-        <fieldset className="mt-4">
-          <legend className="text-[13px] font-medium text-muted">Qual moeda você comprou?</legend>
-          <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-5">
-            {coins.map((c) => {
-              const active = c.symbol === symbol;
-              return (
-                <button
-                  key={c.symbol}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => pick(c.symbol)}
-                  className={`flex items-center gap-2 rounded-sm border px-2 py-2 text-left text-[14px] transition-colors ${
-                    active ? "border-signal bg-signal-bg font-medium" : "border-hairline bg-surface hover:bg-ground"
-                  }`}
-                >
-                  <CoinLogo symbol={c.symbol} size={20} />
-                  {coinName(c.symbol)}
-                </button>
-              );
-            })}
-          </div>
-        </fieldset>
-
-        <div className="mt-5 grid gap-4 sm:grid-cols-3">
+        <h3 className="flex items-center gap-2 text-[14px] font-semibold"><Receipt size={18} aria-hidden /> Registrar uma compra</h3>
+        <div className="mt-3 grid gap-3 sm:grid-cols-4">
+          <Field label="Qual moeda você comprou?">
+            <select className={inputClass} value={symbol} onChange={(e) => pick(e.target.value)}>
+              {coins.map((c) => <option key={c.symbol} value={c.symbol}>{coinName(c.symbol)}</option>)}
+            </select>
+          </Field>
           <Field label="Preço pago por unidade (US$)" {...(current === undefined ? {} : { hint: `Último fechamento: ${fmt.price(current.close)}` })}>
             <input className={inputClass} inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} aria-invalid={price !== "" && priceN === null} required />
           </Field>
@@ -91,19 +73,19 @@ export function PurchaseForm({ coins, onSaved, onCancel }: {
           </Field>
         </div>
 
-        <p className="mt-4 text-muted">
+        <p className="mt-3 text-muted">
           Total investido: <strong className="num font-medium text-ink">{fmt.usd(total)}</strong>
         </p>
         {error !== null && <p role="alert" className="mt-3 text-critical">{error}</p>}
 
-        <div className="mt-5 flex flex-wrap gap-3">
+        <div className="mt-3 flex flex-wrap gap-2">
           <Button type="submit" variant="primary" busy={busy} icon={<Check size={18} aria-hidden />}>
             {busy ? "Salvando…" : `Registrar compra de ${coinName(symbol)}`}
           </Button>
           <Button variant="ghost" onClick={onCancel} disabled={busy}>Cancelar</Button>
         </div>
       </form>
-    </Block>
+    </div>
   );
 }
 
@@ -111,7 +93,7 @@ export function PurchaseForm({ coins, onSaved, onCancel }: {
 
 function Fact({ icon, label, value }: { readonly icon: ReactNode; readonly label: string; readonly value: string }) {
   return (
-    <div className="flex items-center justify-between gap-4 border-t border-hairline py-2 text-[14px]">
+    <div className="flex items-center justify-between gap-4 border-t border-hairline py-1 text-[12px]">
       <dt className="flex items-center gap-2 text-muted">{icon}{label}</dt>
       <dd className="num whitespace-nowrap text-right">{value}</dd>
     </div>
@@ -152,17 +134,17 @@ function PositionCard({ p, onChanged }: { readonly p: Position; readonly onChang
   };
 
   return (
-    <article className="rounded-md border border-hairline bg-surface p-6" aria-label={`Posição em ${coinName(p.symbol)}`}>
+    <article className="rounded-md border border-hairline bg-surface p-3" aria-label={`Posição em ${coinName(p.symbol)}`}>
       <div className="flex items-start justify-between gap-4">
-        <CoinLabel symbol={p.symbol} detailed size={36} />
+        <CoinLabel symbol={p.symbol} detailed size={28} />
         {sell ? <Badge tone="critical">Vender</Badge> : p.action === "INDISPONÍVEL" ? <Badge tone="warning">Sem dados</Badge> : <Badge tone="good">Segurar</Badge>}
       </div>
-      <p className="mt-1 text-[13px] text-muted">{fmt.num(p.qty, 4)} unidades compradas em {fmt.day(p.entry_ts)}</p>
+      <p className="mt-1 text-[12px] text-muted">{fmt.num(p.qty, 4)} unidades compradas em {fmt.day(p.entry_ts)}</p>
 
-      <p className={`mt-4 text-[32px] font-medium leading-tight ${TEXT_TONE[signTone(p.return_pct)]}`}>
-        {fmt.pct(p.return_pct)} <span className="text-lg">{fmt.usd(p.pnl_usd)}</span>
+      <p className={`num mt-2 text-[20px] font-medium leading-tight ${TEXT_TONE[signTone(p.return_pct)]}`}>
+        {fmt.pct(p.return_pct)} <span className="text-[14px]">{fmt.usd(p.pnl_usd)}</span>
       </p>
-      <p className="mt-2 flex gap-2 text-muted">
+      <p className="mt-1 flex gap-2 text-[12px] text-muted">
         {ReasonIcon !== null && <ReasonIcon size={20} className="mt-0.5 shrink-0 text-critical" aria-hidden />}
         <span>
           {p.action === "INDISPONÍVEL"
@@ -173,7 +155,7 @@ function PositionCard({ p, onChanged }: { readonly p: Position; readonly onChang
         </span>
       </p>
 
-      <dl className="mt-4">
+      <dl className="mt-2">
         <Fact icon={<CurrencyDollar size={16} aria-hidden />} label="Você pagou" value={fmt.price(p.entry_price)} />
         <Fact icon={<Tag size={16} aria-hidden />} label="Preço hoje" value={fmt.price(p.last_close)} />
         <Fact
@@ -187,7 +169,7 @@ function PositionCard({ p, onChanged }: { readonly p: Position; readonly onChang
       </dl>
 
       {mode === "view" && (
-        <div className="mt-5 flex flex-wrap gap-3">
+        <div className="mt-3 flex flex-wrap gap-2">
           <Button variant={sell ? "primary" : "secondary"} icon={<Check size={18} aria-hidden />} onClick={() => setMode("sell")}>
             Já vendi
           </Button>
@@ -198,7 +180,7 @@ function PositionCard({ p, onChanged }: { readonly p: Position; readonly onChang
       )}
 
       {mode === "sell" && (
-        <form onSubmit={confirmSale} noValidate className="mt-5 border-t border-hairline pt-4">
+        <form onSubmit={confirmSale} noValidate className="mt-3 border-t border-hairline pt-3">
           <p className="font-medium">Por quanto você vendeu?</p>
           <div className="mt-3 grid gap-4 sm:grid-cols-2">
             <Field label="Preço de venda por unidade (US$)">
@@ -216,7 +198,7 @@ function PositionCard({ p, onChanged }: { readonly p: Position; readonly onChang
       )}
 
       {mode === "delete" && (
-        <div className="mt-5 border-t border-hairline pt-4">
+        <div className="mt-3 border-t border-hairline pt-3">
           <p>Apagar este registro? Use só se você registrou errado — para uma venda, use "Já vendi".</p>
           <div className="mt-3 flex flex-wrap gap-3">
             <Button variant="danger" busy={busy} icon={<Trash size={18} aria-hidden />} onClick={() => void run(() => deletePosition(p.position_id))}>
@@ -250,7 +232,7 @@ export function PositionsSection({ positions, closed, coins, onChanged }: {
       {adding ? (
         <PurchaseForm coins={coins} onSaved={saved} onCancel={() => setAdding(false)} />
       ) : (
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3">
           <Button variant="primary" icon={<Plus size={18} aria-hidden />} onClick={() => setAdding(true)}>
             Registrar uma compra
           </Button>
@@ -259,16 +241,17 @@ export function PositionsSection({ positions, closed, coins, onChanged }: {
       )}
 
       {positions.length > 0 && (
-        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
           {positions.map((p) => <PositionCard key={p.position_id} p={p} onChanged={onChanged} />)}
         </div>
       )}
 
       {closed.length > 0 && (
         <>
-          <h3 className="mt-10 font-medium">Vendas que você registrou</h3>
-          <div className="mt-3">
+          <h3 className="mt-4 text-[13px] font-medium">Vendas que você registrou</h3>
+          <div className="mt-2">
             <Table
+              maxHeight="max-h-48"
               caption="Posições já vendidas e o resultado de cada uma"
               columns={[
                 { label: "Moeda" }, { label: "Compra" }, { label: "Venda" },

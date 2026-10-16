@@ -122,4 +122,16 @@ Nada disso foi apresentado como restauração da F3.
 
 **P3:** módulos órfãos (`storage.py`, `market_metrics.py`) · unificar as duas definições do filtro do BTC · `bfill` em `compute_features` · `requires-python` · stops avaliados no fechamento.
 
-**Frontend:** o redesign pedido na mesma mensagem **não foi iniciado**: o texto recebido trazia o objetivo 1 e as Partes 1 a 3, sem a especificação do objetivo 2 (visual, telas, referências). Ver o fechamento do relatório.
+**Frontend:** redesenhado depois (Parte 4): ver a seção "Redesign do frontend" abaixo.
+
+## Redesign do frontend (16/10/2026)
+
+**Diagnóstico.** Stack: React 19, TypeScript estrito, Vite, Tailwind 4, `lightweight-charts`, `hyparquet`; uma única página com cinco abas (`Dashboard.tsx`) que lê 12 arquivos Parquet. A rolagem excessiva tinha causas estruturais: uma coluna única de 1.120 px (78% de um desktop de 1.440 px), blocos empilhados com 64 px de intervalo, cartões com padding de 24 px e números de 32 px, gráficos de 360 px mais legenda e parágrafos explicativos, e tabelas sem altura limitada.
+
+**Medição (desktop 1440×900 → depois):** Visão geral 5.305 → 1.341 px, Seleção 4.706 → 1.120, Histórico 3.230 → 937, Previsões 2.457 → 900, Pesquisa 4.846 → 1.020. **Celular (390 px):** Visão geral 10.037 → 2.513, Seleção 6.013 → 2.104, Histórico 3.757 → 1.886, Previsões 3.377 → 1.932, Pesquisa 8.031 → 2.148. Tablet (768 px): 1.549 a 2.158. Em nenhum tamanho a página rola na horizontal. Na primeira tela de 1440×900 cabem a barra superior, os oito indicadores, os avisos, o gráfico, a recomendação de aporte e a regra principal completa.
+
+**O que mudou.** Barra superior fixa com abas e estado dos dados; faixa de oito indicadores (cada um de um campo publicado; o que falta vira "—"); grade de 12 colunas; painéis compactos com cabeçalho de uma linha; tabelas com altura limitada, cabeçalho fixo e rolagem interna; texto de ajuda em seções recolhíveis; Pesquisa dividida em grupos por seletor; Previsões com BTC e ETH lado a lado; nova área **Regimes (experimental)** que mostra `market_regimes.parquet` (até então sem tela) com a limitação de que é só descrição. Contrato visual atualizado em `frontend/DESIGN.md`.
+
+**Preservado (verificado no navegador e por teste):** abas e navegação por teclado; seletor de moeda do gráfico e clique nas linhas; registrar compra (formulário com 32 moedas, campos de preço, quantidade e data), "Já vendi" e apagar; posições e vendas registradas; previsão, seleção, backtests, laboratório, glossário e dicas; estados de carregamento, de arquivo ausente (simulado, mostra o comando do terminal) e de erro; os 12 arquivos lidos e a conferência de execução entre `daily_signals` e `recommendation`. O contrato com o backend é verificado por `tests/test_frontend_contract.py` (23 testes). Nenhuma regra de compra, venda, risco, stop, alocação ou backtest foi alterada.
+
+**Limitações da validação visual.** A inspeção foi feita no navegador integrado, que mostra capturas em resolução reduzida e, em alguns momentos, atrasadas em relação ao DOM; por isso as medidas (alturas, overflow, posições) foram tomadas pelo DOM e as capturas serviram de conferência qualitativa. Não foi testado em dispositivo físico, em outros navegadores nem com leitor de tela; o fluxo de **gravar** uma compra (que escreve em `data/positions/`) não foi exercitado para não alterar seus dados. Não há suíte de testes automatizados do frontend (só o build com TypeScript estrito e o teste de contrato em Python).

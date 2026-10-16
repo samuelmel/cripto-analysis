@@ -1,4 +1,4 @@
-import { ChartLineUp, Coins, Flask, Info, Scales, Wallet } from "@phosphor-icons/react";
+import { ArrowsClockwise } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   changeOver,
@@ -6,8 +6,6 @@ import {
   dataLagDays,
   fmt,
   fmtDateTime,
-  fngLabel,
-  fngTone,
   historyOf,
   lastCollection,
   modelForecast,
@@ -18,19 +16,20 @@ import {
   type Tone,
 } from "../data/analytics";
 import { RECOMMENDED_SYMBOLS, coinFullName } from "../data/coins";
+import { buildKpis } from "../data/kpis";
 import { MissingFileError, loadDashboard } from "../data/loadSignals";
 import type { Dashboard as Data } from "../types/signals";
 import { CoinLogo } from "./CoinLabel";
 import { ForecastView } from "./ForecastView";
-import { GlossaryList } from "./Glossary";
+import { KpiStrip } from "./Kpis";
 import { Nav, panelId, tabId, type ViewId } from "./Nav";
-import { CoinCard, ForecastBlock, NoticesArea, StatusStrip, type StripFacts } from "./Overview";
-import { PositionsSection } from "./Positions";
+import { NoticesBar } from "./Overview";
+import { OverviewView } from "./OverviewView";
 import { PriceChart } from "./PriceChart";
-import { RecommendationPanel, RecommendationStrip, SelectionView } from "./Recommendation";
-import { LabPanel } from "./Research";
-import { BacktestPanel, HowItWorks, MarketTable, TodayPanel, TradeList } from "./Sections";
-import { Block, Section } from "./ui";
+import { SelectionView } from "./Recommendation";
+import { ResearchView } from "./ResearchView";
+import { MarketTable, TradeList } from "./Sections";
+import { Empty, Panel, TEXT_TONE } from "./ui";
 
 type State =
   | { readonly status: "loading" }
@@ -38,20 +37,102 @@ type State =
   | { readonly status: "error"; readonly message: string }
   | { readonly status: "ready"; readonly data: Data };
 
-const ICON = 22;
 const CORE: readonly string[] = [...RECOMMENDED_SYMBOLS];
+
+/* ---------- barra superior: nome, abas e estado dos dados ---------- */
+
+interface Freshness {
+  readonly closeDay: string;
+  readonly freshness: string;
+  readonly freshnessTone: Tone;
+  readonly collectedAt: string;
+  readonly runState: string;
+  readonly runTone: Tone;
+}
+
+function freshnessOf(data: Data, now: Date): Freshness {
+  const last = data.signals.reduce<Date | null>((m, s) => (m === null || s.timestamp > m ? s.timestamp : m), null);
+  const lag = dataLagDays(last, now);
+  const collected = lastCollection(data.sources);
+  const failed = collected.failures > 0;
+  const status = data.recommendation.data_status;
+  return {
+    closeDay: fmt.day(last),
+    freshness: lag === null ? "sem dados" : lag <= 0 ? "em dia" : `${lag} ${lag === 1 ? "dia" : "dias"} de atraso`,
+    freshnessTone: lag === null ? "critical" : lag <= 0 ? "good" : "warning",
+    collectedAt: collected.at === null ? "sem registro de coleta" : fmtDateTime(collected.at),
+    runState: failed
+      ? `${collected.failures} ${collected.failures === 1 ? "falha" : "falhas"} de coleta`
+      : status === "OK" ? "OK" : status === "PARCIAL" ? "dados parciais" : "dados indisponíveis",
+    runTone: failed ? "critical" : status === "OK" ? "good" : "warning",
+  };
+}
+
+function TopBar({ view, onView, fresh, onReload, reloading }: {
+  readonly view: ViewId;
+  readonly onView: (v: ViewId) => void;
+  readonly fresh: Freshness | null;
+  readonly onReload: () => void;
+  readonly reloading: boolean;
+}) {
+  return (
+    <header className="sticky top-0 z-30 border-b border-hairline bg-surface">
+      <div className="mx-auto flex max-w-[1760px] flex-wrap items-center gap-x-5 gap-y-1 px-3 py-1.5 sm:px-4">
+        <h1 className="flex items-baseline gap-2 whitespace-nowrap">
+          <span className="text-[15px] font-semibold tracking-[-0.01em]">Crypto Analyzer</span>
+          <span className="hidden text-[12px] text-muted lg:inline">monitor quantitativo</span>
+        </h1>
+        <Nav view={view} onChange={onView} />
+        {fresh !== null && (
+          <dl className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[12px]">
+            <div className="flex gap-1">
+              <dt className="text-muted">Fechamento</dt>
+              <dd className="num font-medium">{fresh.closeDay}</dd>
+              <dd className={TEXT_TONE[fresh.freshnessTone]}>({fresh.freshness})</dd>
+            </div>
+            <div className="hidden gap-1 md:flex">
+              <dt className="text-muted">Coleta</dt>
+              <dd className="num font-medium">{fresh.collectedAt}</dd>
+            </div>
+            <div className="flex gap-1">
+              <dt className="text-muted">Última execução</dt>
+              <dd className={`font-medium ${TEXT_TONE[fresh.runTone]}`}>{fresh.runState}</dd>
+            </div>
+            <button
+              type="button"
+              onClick={onReload}
+              disabled={reloading}
+              aria-label="Recarregar os dados publicados"
+              title="Recarrega os arquivos publicados pelo pipeline (não roda o pipeline)"
+              className="flex items-center gap-1 rounded-sm border border-hairline px-2 py-1 text-muted hover:bg-ground hover:text-ink disabled:opacity-50"
+            >
+              <ArrowsClockwise size={14} aria-hidden /> Recarregar
+            </button>
+          </dl>
+        )}
+      </div>
+    </header>
+  );
+}
+
+/* ---------- aplicativo ---------- */
 
 export function Dashboard() {
   const [state, setState] = useState<State>({ status: "loading" });
   const [view, setView] = useState<ViewId>("geral");
+  const [reloading, setReloading] = useState(false);
+  const now = useMemo(() => new Date(), []);
 
   /** Recarrega mantendo a tela atual até os dados novos chegarem (sem piscar). */
   const reload = useCallback(async (): Promise<void> => {
+    setReloading(true);
     try {
       setState({ status: "ready", data: await loadDashboard() });
     } catch (err) {
       if (err instanceof MissingFileError) setState({ status: "missing" });
       else setState({ status: "error", message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setReloading(false);
     }
   }, []);
 
@@ -59,172 +140,105 @@ export function Dashboard() {
     void reload();
   }, [reload]);
 
+  const fresh = useMemo(() => (state.status === "ready" ? freshnessOf(state.data, now) : null), [state, now]);
+
   return (
-    <div className="mx-auto max-w-[1120px] px-4 pt-10 pb-24 sm:px-8">
-      <header>
-        <h1 className="text-[28px] font-semibold tracking-[-0.01em]">Monitor de criptomoedas</h1>
-        <p className="mt-1 text-muted">
-          Quais moedas merecem um aporte hoje e quanto do seu orçamento, com os motivos e os riscos; a regra principal de Bitcoin e
-          Ethereum; e o que fazer com o que você já comprou.
-        </p>
-        <Nav view={view} onChange={setView} />
-      </header>
-      <div className="mt-8">
-        {state.status === "loading" && <p className="text-muted">Carregando os dados…</p>}
+    <div className="min-h-screen">
+      <TopBar view={view} onView={setView} fresh={fresh} onReload={() => void reload()} reloading={reloading} />
+      <div className="mx-auto max-w-[1760px] px-3 pb-10 pt-3 sm:px-4">
+        {state.status === "loading" && (
+          <div role="status" aria-live="polite" className="space-y-3">
+            <p className="text-muted">Carregando os dados publicados…</p>
+            <div aria-hidden className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-hairline bg-hairline sm:grid-cols-4 xl:grid-cols-8">
+              {Array.from({ length: 8 }, (_, i) => <div key={i} className="h-[58px] bg-surface" />)}
+            </div>
+            <div aria-hidden className="h-[340px] rounded-md border border-hairline bg-surface" />
+          </div>
+        )}
         {state.status === "missing" && (
-          <Block>
-            <p className="font-medium">Ainda não há dados para mostrar.</p>
-            <p className="mt-2 text-muted">Rode o pipeline uma vez no terminal, na pasta do projeto, e recarregue a página:</p>
-            <pre className="mt-3 overflow-x-auto rounded-sm bg-ground px-3 py-2 text-[13px]">uv run python -m src.pipeline</pre>
-          </Block>
+          <Panel id="sem-dados" title="Ainda não há dados para mostrar">
+            <p className="text-muted">Rode o pipeline uma vez no terminal, na pasta do projeto, e recarregue a página:</p>
+            <pre className="mt-2 overflow-x-auto rounded-sm bg-ground px-3 py-2 text-[12px]">uv run python -m src.pipeline</pre>
+          </Panel>
         )}
         {state.status === "error" && (
-          <Block>
-            <p className="font-medium text-critical">Não foi possível ler os dados.</p>
-            <p className="mt-2 text-muted">{state.message}</p>
-          </Block>
+          <Panel id="erro" title="Não foi possível ler os dados">
+            <p className="font-medium text-critical">{state.message}</p>
+            <p className="mt-1 text-muted">Confira se o pipeline terminou sem erro e recarregue.</p>
+          </Panel>
         )}
-        {state.status === "ready" && <Ready data={state.data} view={view} onView={setView} onChanged={reload} />}
+        {state.status === "ready" && <Ready data={state.data} view={view} onView={setView} onChanged={reload} now={now} />}
       </div>
     </div>
   );
 }
 
-function stripFacts(data: Data, now: Date): StripFacts {
-  const btc = data.signals.find((s) => s.symbol === "BTC/USDT");
-  const last = data.signals.reduce<Date | null>((m, s) => (m === null || s.timestamp > m ? s.timestamp : m), null);
-  const lag = dataLagDays(last, now);
-  const collected = lastCollection(data.sources);
-  const reliable = btc !== undefined && btc.stage !== "INDISPONÍVEL";
-  const up = btc?.regime_up === true;
-  const marketTone: Tone = !reliable ? "warning" : up ? "good" : "critical";
-  const staleText = lag === null ? "Sem dados" : lag <= 0 ? "Dados em dia" : `Dados com ${lag} ${lag === 1 ? "dia" : "dias"} de atraso`;
-  const failText = collected.failures > 0 ? `, ${collected.failures} ${collected.failures === 1 ? "falha" : "falhas"} de coleta` : "";
-  return {
-    marketText: !reliable ? "Sem dados confiáveis" : up ? "Em alta" : "Em baixa",
-    marketTone,
-    marketNote: !reliable ? "none" : up ? "up" : "down",
-    collectedAt: collected.at === null ? "Sem registro de coleta" : fmtDateTime(collected.at),
-    freshness: collected.at === null ? `${staleText}. Rode o pipeline sem --offline para registrar a coleta` : `${staleText}${failText}`,
-    freshnessTone: collected.failures > 0 ? "critical" : collected.at === null ? "neutral" : lag !== null && lag <= 0 ? "good" : "warning",
-    analysisDay: fmt.day(last),
-  };
-}
-
-function Ready({ data, view, onView, onChanged }: {
+function Ready({ data, view, onView, onChanged, now }: {
   readonly data: Data;
   readonly view: ViewId;
   readonly onView: (id: ViewId) => void;
   readonly onChanged: () => Promise<void>;
+  readonly now: Date;
 }) {
-  const { signals, recommendation, selectionPerf, history, trades, forecast, sources, lab, performance, positions, closed } = data;
+  const { signals, recommendation, selectionPerf, history, trades, forecast, sources, positions, closed } = data;
   const first = signals[0];
   const [selected, setSelected] = useState<string>(positions[0]?.symbol ?? "BTC/USDT");
-  const [showForecast, setShowForecast] = useState(true);
-  const now = useMemo(() => new Date(), []);
 
   const verdict = useMemo(() => todayVerdict(signals, positions), [signals, positions]);
-  const facts = useMemo(() => stripFacts(data, now), [data, now]);
+  const kpis = useMemo(() => buildKpis(data), [data]);
   const lag = useMemo(
     () => dataLagDays(signals.reduce<Date | null>((m, s) => (m === null || s.timestamp > m ? s.timestamp : m), null), now),
     [signals, now],
   );
   const warnings = useMemo(() => notices(signals, sources, lag), [signals, sources, lag]);
-  const core = useMemo(() => CORE.flatMap((symbol) => signals.filter((s) => s.symbol === symbol)), [signals]);
+  const coreRows = useMemo(
+    () =>
+      CORE.flatMap((symbol) => signals.filter((s) => s.symbol === symbol)).map((signal) => ({
+        signal,
+        view: signalView(signal),
+        change1: changeOver(history, signal.symbol, 1),
+        change30: changeOver(history, signal.symbol, 30),
+        closes: recentCloses(history, signal.symbol),
+      })),
+    [signals, history],
+  );
   const chartHistory = useMemo(() => historyOf(history, selected), [history, selected]);
   const chartTrades = useMemo(() => trades.filter((t) => t.symbol === selected), [trades, selected]);
   const chartPositions = useMemo(() => positions.filter((p) => p.symbol === selected), [positions, selected]);
   const chartForecast = useMemo(() => modelForecast(forecast, selected), [forecast, selected]);
   const coinsByName = useMemo(() => signals.toSorted((a, b) => a.symbol.localeCompare(b.symbol)), [signals]);
-  const sparks = useMemo(
-    () => new Map(signals.map((s) => [s.symbol, recentCloses(history, s.symbol)] as const)),
-    [signals, history],
-  );
+  const sparks = useMemo(() => new Map(signals.map((s) => [s.symbol, recentCloses(history, s.symbol)] as const)), [signals, history]);
   const coin = coinName(selected);
 
-  const chart = (withForecast: boolean) => (
-    <Block>
-      {withForecast && chartForecast.length > 0 && (
-        <label className="mb-3 flex items-center gap-2 text-[14px]">
-          <input type="checkbox" checked={showForecast} onChange={(e) => setShowForecast(e.target.checked)} />
-          Mostrar a faixa de previsão (estimativa)
-        </label>
-      )}
-      <PriceChart
-        history={chartHistory}
-        trades={chartTrades}
-        positions={chartPositions}
-        forecast={withForecast ? chartForecast : []}
-        showForecast={withForecast && showForecast}
-      />
-    </Block>
-  );
-
   return (
-    <main>
+    <main className="space-y-3">
+      <KpiStrip items={kpis} />
+      <NoticesBar items={warnings} />
+
       <div role="tabpanel" id={panelId("geral")} aria-labelledby={tabId("geral")} hidden={view !== "geral"}>
-        <div className="space-y-6">
-          <RecommendationStrip rec={recommendation} now={now} />
-          <NoticesArea items={warnings} />
-          <RecommendationPanel
-            signals={signals}
-            rec={recommendation}
-            onDetails={() => {
-              onView("selecao");
-              window.scrollTo({ top: 0 });
-            }}
-          />
-        </div>
-        <div className="mt-16 space-y-6">
-          <div>
-            <h2 className="text-lg font-semibold">Regra principal: média de 200 dias (Bitcoin e Ethereum)</h2>
-            <p className="mt-1 max-w-[72ch] text-muted">
-              A referência original do painel, preservada. Ela diz se BTC e ETH estão em tendência de alta e quando vender o
-              que você já tem. O aporte de cima vem da seleção, que também avalia risco, liquidez e preço esticado.
-            </p>
-          </div>
-          <StatusStrip facts={facts} />
-          <TodayPanel
-            verdict={verdict}
-            fng={first?.fng_value ?? null}
-            fngText={fngLabel(first?.fng_classification ?? null)}
-            fngTone={fngTone(first?.fng_value ?? null)}
-            asOf={fmt.day(first?.timestamp ?? null)}
-          />
-          <div className="grid gap-6 md:grid-cols-2">
-            {core.map((s) => (
-              <CoinCard
-                key={s.symbol}
-                signal={s}
-                view={signalView(s)}
-                change1={changeOver(history, s.symbol, 1)}
-                change30={changeOver(history, s.symbol, 30)}
-                closes={sparks.get(s.symbol) ?? []}
-                selected={s.symbol === selected}
-                onSelect={setSelected}
-              />
-            ))}
-          </div>
-          <ForecastBlock forecast={forecast} symbols={CORE} />
-          <section aria-labelledby="grafico">
-            <h2 id="grafico" className="mb-4 flex items-center gap-3 text-lg font-semibold">
-              <CoinLogo symbol={selected} size={28} />
-              Gráfico de {coinFullName(selected)}
-              <ChartLineUp size={ICON} className="text-muted" aria-hidden />
-            </h2>
-            {chart(true)}
-          </section>
-        </div>
-        <div className="mt-16">
-          <Section
-            id="posicoes"
-            title="Suas posições"
-            icon={<Wallet size={ICON} aria-hidden />}
-            lead="Registre aqui o que você comprou. O painel acompanha cada compra e avisa quando for hora de vender."
-          >
-            <PositionsSection positions={positions} closed={closed} coins={coinsByName} onChanged={onChanged} />
-          </Section>
-        </div>
+        <OverviewView
+          signals={signals}
+          recommendation={recommendation}
+          verdict={verdict}
+          asOf={fmt.day(first?.timestamp ?? null)}
+          coreRows={coreRows}
+          selected={selected}
+          onSelect={setSelected}
+          coinsByName={coinsByName}
+          sparks={sparks}
+          chartHistory={chartHistory}
+          chartTrades={chartTrades}
+          chartPositions={chartPositions}
+          chartForecast={chartForecast}
+          forecast={forecast}
+          positions={positions}
+          closed={closed}
+          onDetails={() => {
+            onView("selecao");
+            window.scrollTo({ top: 0 });
+          }}
+          onChanged={onChanged}
+        />
       </div>
 
       <div role="tabpanel" id={panelId("selecao")} aria-labelledby={tabId("selecao")} hidden={view !== "selecao"}>
@@ -232,63 +246,55 @@ function Ready({ data, view, onView, onChanged }: {
       </div>
 
       <div role="tabpanel" id={panelId("historico")} aria-labelledby={tabId("historico")} hidden={view !== "historico"}>
-        <Section
-          id="moedas"
-          title="Todas as moedas"
-          icon={<Coins size={ICON} aria-hidden />}
-          lead="O que a regra principal (média de 200 dias) diz de cada moeda. O sinal de compra dela vale só para Bitcoin e Ethereum; o aporte em qualquer moeda vem da aba Seleção. Clique numa moeda para ver o gráfico e o histórico dela."
-        >
-          <MarketTable rows={signals} recommended={RECOMMENDED_SYMBOLS} sparks={sparks} selected={selected} onSelect={setSelected} />
-        </Section>
-        <section aria-labelledby="detalhe" className="mt-16">
-          <h2 id="detalhe" className="flex items-center gap-3 text-lg font-semibold">
-            <CoinLogo symbol={selected} size={28} />
-            {coinFullName(selected)} ({coin}) desde {fmt.day(chartHistory[0]?.timestamp ?? null)}
-          </h2>
-          <div className="mt-5">{chart(false)}</div>
-          <h3 className="mt-8 font-medium">Cada período em que a regra mandou comprar ou segurar {coin}</h3>
-          <div className="mt-3">
-            <TradeList trades={chartTrades} coin={coin} recommended={RECOMMENDED_SYMBOLS.has(selected)} />
+        <div className="grid items-start gap-3 lg:grid-cols-12">
+          <Panel
+            id="moedas-hist"
+            title="Todas as moedas"
+            note="clique para ver o gráfico e o histórico; o sinal de compra da regra vale só para BTC e ETH"
+            className="lg:col-span-6"
+            bodyClassName="p-0"
+          >
+            <MarketTable rows={signals} recommended={RECOMMENDED_SYMBOLS} sparks={sparks} selected={selected} onSelect={setSelected} maxHeight="max-h-[640px]" />
+          </Panel>
+          <div className="min-w-0 space-y-3 lg:col-span-6">
+            <Panel
+              id="detalhe"
+              title={
+                <span className="flex items-center gap-2">
+                  <CoinLogo symbol={selected} size={18} />
+                  {coinFullName(selected)} ({coin})
+                  <span className="font-normal text-muted">desde {fmt.day(chartHistory[0]?.timestamp ?? null)}</span>
+                </span>
+              }
+            >
+              {chartHistory.length === 0 ? (
+                <Empty title="Sem histórico de preço para esta moeda" />
+              ) : (
+                <PriceChart history={chartHistory} trades={chartTrades} positions={chartPositions} forecast={[]} showForecast={false} height={320} />
+              )}
+            </Panel>
+            <Panel id="operacoes" title={`Cada período em que a regra mandou comprar ou segurar ${coin}`} bodyClassName="p-0">
+              <TradeList trades={chartTrades} coin={coin} recommended={RECOMMENDED_SYMBOLS.has(selected)} maxHeight="max-h-[260px]" />
+            </Panel>
           </div>
-        </section>
+        </div>
       </div>
 
       <div role="tabpanel" id={panelId("previsoes")} aria-labelledby={tabId("previsoes")} hidden={view !== "previsoes"}>
         {forecast.length === 0 ? (
-          <Block>
-            <p className="font-medium">Ainda não há previsão para mostrar.</p>
-            <p className="mt-2 text-muted">O pipeline gera a previsão junto com a análise. Rode no terminal e recarregue a página:</p>
-            <pre className="mt-3 overflow-x-auto rounded-sm bg-ground px-3 py-2 text-[13px]">uv run python -m src.pipeline --offline</pre>
-          </Block>
+          <Panel id="sem-previsao" title="Previsões">
+            <Empty title="Ainda não há previsão para mostrar.">
+              O pipeline gera a previsão junto com a análise. Rode no terminal e recarregue a página:
+              <pre className="mt-2 overflow-x-auto rounded-sm bg-ground px-3 py-2 text-[12px] text-ink">uv run python -m src.pipeline --offline</pre>
+            </Empty>
+          </Panel>
         ) : (
           <ForecastView forecast={forecast} symbols={CORE} history={history} trades={trades} positions={positions} />
         )}
       </div>
 
       <div role="tabpanel" id={panelId("pesquisa")} aria-labelledby={tabId("pesquisa")} hidden={view !== "pesquisa"}>
-        <Section id="funciona" title="A regra de compra funciona?" icon={<Scales size={ICON} aria-hidden />}>
-          <BacktestPanel performance={performance} trades={trades} />
-        </Section>
-        <div className="mt-16">
-          <Section
-            id="laboratorio"
-            title="Laboratório de estratégias"
-            icon={<Flask size={ICON} aria-hidden />}
-            lead="Outras ideias testadas com o mesmo motor da regra do painel. Os resultados mostram também o que perdeu."
-          >
-            <LabPanel rows={lab} />
-          </Section>
-        </div>
-        <div className="mt-16">
-          <Section id="como" title="Como funciona" icon={<Info size={ICON} aria-hidden />}>
-            <HowItWorks />
-          </Section>
-        </div>
-        <div className="mt-16">
-          <Section id="glossario" title="Glossário" lead="Os termos do painel em português simples. Nos cartões, passe o mouse sobre o termo sublinhado.">
-            <GlossaryList />
-          </Section>
-        </div>
+        <ResearchView data={data} />
       </div>
     </main>
   );

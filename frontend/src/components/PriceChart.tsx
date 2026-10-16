@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import { fmt } from "../data/analytics";
 import type { Forecast, HistoryPoint, Position, Trade } from "../types/signals";
 import { Term } from "./Glossary";
+import { Collapsible } from "./ui";
 
 /* Cores do DESIGN.md (validadas com validate_palette.js). O canvas não lê CSS vars.
    A estimativa usa a cor do preço com transparência e traço, para nunca se confundir com o histórico. */
@@ -53,10 +54,12 @@ interface Props {
   /** Linhas do modelo para esta moeda (vazio = sem previsão). */
   readonly forecast: readonly Forecast[];
   readonly showForecast: boolean;
+  /** Altura da área do gráfico em px (padrão 300): controlada pelo painel que o contém. */
+  readonly height?: number;
 }
 
 /** Preço e médias de 90 e 200 dias, entradas e saídas da regra, suas compras e, se pedido, a faixa de previsão. */
-export function PriceChart({ history, trades, positions, forecast, showForecast }: Props) {
+export function PriceChart({ history, trades, positions, forecast, showForecast, height = 300 }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const [tip, setTip] = useState<Tip | null>(null);
   const withForecast = showForecast && forecast.length > 0;
@@ -72,7 +75,7 @@ export function PriceChart({ history, trades, positions, forecast, showForecast 
     }
 
     const chart: IChartApi = createChart(el, {
-      height: 360,
+      height,
       autoSize: true,
       layout: {
         background: { type: ColorType.Solid, color: C.surface },
@@ -190,11 +193,11 @@ export function PriceChart({ history, trades, positions, forecast, showForecast 
       chart.timeScale().fitContent();
     }
     return () => chart.remove();
-  }, [history, trades, positions, forecast, withForecast]);
+  }, [history, trades, positions, forecast, withForecast, height]);
 
   return (
     <figure>
-      <figcaption className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-[13px]">
+      <figcaption className="mb-1.5 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[12px]">
         <span className="flex items-center gap-2">
           <span aria-hidden className="inline-block h-0.5 w-4 bg-series-price" />
           Preço de fechamento
@@ -215,7 +218,7 @@ export function PriceChart({ history, trades, positions, forecast, showForecast 
         )}
       </figcaption>
       <div className="relative">
-        <div ref={container} className="w-full" />
+        <div ref={container} className="w-full" style={{ height }} />
         {tip !== null && (
           <div
             role="status"
@@ -228,11 +231,11 @@ export function PriceChart({ history, trades, positions, forecast, showForecast 
           </div>
         )}
       </div>
-      <p className="mt-3 text-[13px] text-muted">
+      <Collapsible summary="Como ler o gráfico" className="mt-1.5">
         Setas azuis para cima: dias em que a regra mandou comprar. Setas para baixo: quando mandou vender, com o resultado (verde lucro,
         vermelho perda). Círculo preto: suas compras. O eixo de preço é proporcional: a mesma distância vertical é a mesma variação em %.
         {withForecast && " Linhas tracejadas à direita são estimativas, não preços reais. Arraste o gráfico para ver todo o histórico."}
-      </p>
+      </Collapsible>
     </figure>
   );
 }

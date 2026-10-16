@@ -13,7 +13,7 @@ export type ViewId = (typeof VIEWS)[number]["id"];
 export const tabId = (id: ViewId): string => `aba-${id}`;
 export const panelId = (id: ViewId): string => `painel-${id}`;
 
-/** Abas em texto sobre uma linha; setas do teclado trocam de visão. */
+/** Abas em texto na barra superior; setas do teclado trocam de visão. */
 export function Nav({ view, onChange }: { readonly view: ViewId; readonly onChange: (id: ViewId) => void }) {
   const move = (e: KeyboardEvent<HTMLButtonElement>, index: number): void => {
     const step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
@@ -26,8 +26,8 @@ export function Nav({ view, onChange }: { readonly view: ViewId; readonly onChan
     }
   };
   return (
-    <nav aria-label="Visões do painel" className="mt-6 border-b border-hairline">
-      <div role="tablist" className="-mb-px flex flex-wrap gap-x-2">
+    <nav aria-label="Visões do painel" className="min-w-0 max-w-full overflow-x-auto">
+      <div role="tablist" className="flex gap-x-1">
         {VIEWS.map((v, i) => {
           const active = v.id === view;
           return (
@@ -41,8 +41,8 @@ export function Nav({ view, onChange }: { readonly view: ViewId; readonly onChan
               tabIndex={active ? 0 : -1}
               onClick={() => onChange(v.id)}
               onKeyDown={(e) => move(e, i)}
-              className={`whitespace-nowrap border-b-2 px-3 py-2 text-[15px] transition-colors ${
-                active ? "border-signal font-medium text-ink" : "border-transparent text-muted hover:text-ink"
+              className={`whitespace-nowrap rounded-sm px-2.5 py-1.5 text-[13px] transition-colors ${
+                active ? "bg-signal-bg font-medium text-signal" : "text-muted hover:bg-ground hover:text-ink"
               }`}
             >
               {v.label}
