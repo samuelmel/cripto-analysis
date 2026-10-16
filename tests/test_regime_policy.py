@@ -169,9 +169,8 @@ def test_all_policies_and_baselines_share_calendar_costs_and_exposure_limit() ->
     reference = indexes[STRATEGY_BTC]
     assert all(idx.equals(reference) for idx in indexes.values())
     assert reference.min() == START and reference.max() == END
-    # O motor existente retém moedas dentro da faixa de tolerância (5 p.p.): a exposição bruta pode passar um pouco de
-    # 100% (vale para todos). Sem a faixa, o limite de 100% é exato.
-    assert all(float(r.exposure.max()) <= 1.0 + 0.10 for r in result.runs.values())
+    # Motor versão 2: a guarda de exposição impede passar de 100% mesmo com a faixa de tolerância (era possível ~118%).
+    assert all(float(r.exposure.max()) <= 1.0 + 1e-9 for r in result.runs.values())
     exact = run(features, regime, Scenario(band=0.0))
     assert all(float(r.exposure.max()) <= 1.0 + 1e-9 for r in exact.runs.values())
     free = run(features, regime, Scenario(cost_scale=0.0))

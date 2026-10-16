@@ -26,7 +26,7 @@ from .policy_experiment import Scenario, ScenarioResult, run_scenario
 from .regime_policy import FIXED_POLICIES, LEARNABLE, MIN_TRAIN_DAYS, POLICY_LEARNED, POLICY_PRIMARY, POLICY_VERSION
 from .regimes import CLASSIFIER_VERSION, RegimeRules, classify_market_regimes
 from .selection import compute_features
-from .selection_backtest import STRATEGY_BTC, STRATEGY_HOLD_ALL, STRATEGY_MOMENTUM, STRATEGY_SMA200
+from .selection_backtest import ENGINE_VERSION, STRATEGY_BTC, STRATEGY_HOLD_ALL, STRATEGY_MOMENTUM, STRATEGY_SMA200
 from .strategies import market_from_candles
 
 PRIMARY_REFERENCE = STRATEGY_SMA200
@@ -71,7 +71,7 @@ class Protocol:
     def describe(self) -> dict[str, object]:
         """Configuração serializável (entra no ID do experimento)."""
         return {
-            "protocol_revision": 2, "primary_start": self.primary_start, "seed": self.seed, "block": self.block, "resamples": self.resamples,
+            "protocol_revision": 3, "engine_version": ENGINE_VERSION, "primary_start": self.primary_start, "seed": self.seed, "block": self.block, "resamples": self.resamples,
             "sensitivity_blocks": list(self.sensitivity_blocks), "include_selection": self.include_selection,
             "scenarios": [asdict(s) for s in self.scenarios],
             "classifiers": {name: asdict(rules) for name, rules in self.classifiers},

@@ -71,6 +71,11 @@ SELECTION_PERF_SCHEMA: dict[str, str] = {
 }
 
 
+ENGINE_VERSION = "weights-2"
+"""1: faixa de tolerância sem limite de exposição (podia passar de 100% ou deixar caixa parado). 2: com guarda de
+exposição (ver `run_weighted`). Entra na configuração dos experimentos de pesquisa."""
+
+
 @dataclass(frozen=True)
 class WeightedRun:
     daily: pd.Series        # retorno diário da carteira, líquido de custos
@@ -78,6 +83,7 @@ class WeightedRun:
     turnover: float         # soma de |mudança de peso| nos rebalanceamentos
     cost: float             # custos totais, fração do capital
     n_trades: int
+    stale_weight_days: float = 0.0  # Σ peso × dias em que a moeda carregada não tinha preço (retorno tratado como 0)
 
 
 def run_weighted(
@@ -87,17 +93,29 @@ def run_weighted(
     start: pd.Timestamp,
     end: pd.Timestamp,
     band: float = config.REBALANCE_BAND,
+    guard_exposure: bool = True,
 ) -> WeightedRun:
     """Simula pesos-alvo (`targets`: linhas = dias de rebalanceamento, valores = fração do capital) em [start, end].
 
     `band`: moeda mantida (peso atual e alvo > 0) só é reajustada se |alvo − atual| > band.
+
+    `guard_exposure` (padrão, `ENGINE_VERSION` 2): a faixa não pode produzir uma carteira com exposição total acima
+    da exposição-alvo (alavancagem implícita: moedas mantidas ficam acima do alvo enquanto a nova entra no alvo) nem
+    mais de `band` abaixo dela (caixa parado: o dinheiro de uma moeda que saiu não era reinvestido). Nesses casos o
+    rebalanceamento vai direto aos alvos. `False` reproduz o motor da versão 1, só para comparação.
+
+    Dia sem preço de uma moeda carregada: o retorno é tratado como 0 (o preço fica parado) e o peso exposto é somado
+    em `stale_weight_days`. Não há perda por deslistagem: é viés de sobrevivência, sinalizado, não corrigido.
     """
     days = returns.loc[start:end].index
     cols = list(returns.columns)
     if len(days) == 0:
         empty = pd.Series(dtype="float64")
         return WeightedRun(empty, empty, 0.0, 0.0, 0)
-    r = returns.reindex(index=days, columns=cols).fillna(0.0).to_numpy(dtype="float64")
+    raw = returns.reindex(index=days, columns=cols).to_numpy(dtype="float64")
+    missing = np.isnan(raw)
+    r = np.where(missing, 0.0, raw)
+    stale = 0.0
     c = cost_per_side.reindex(index=days, columns=cols).ffill().fillna(0.0).to_numpy(dtype="float64")
     t = targets.reindex(columns=cols).fillna(0.0)
     plan = {pd.Timestamp(d): row for d, row in zip(t.index, t.to_numpy(dtype="float64"), strict=True)}
@@ -110,6 +128,7 @@ def run_weighted(
     trades = 0
     for i, day in enumerate(days):
         gross = float(w @ r[i])
+        stale += float(w @ missing[i])
         out[i] = (1.0 - pending) * (1.0 + gross) - 1.0
         exposure[i] = float(w.sum())
         cost += pending
@@ -120,13 +139,19 @@ def run_weighted(
         target = plan.get(pd.Timestamp(day))
         if target is not None:
             keep = (w > 1e-12) & (target > 1e-12) & (np.abs(target - w) <= band)
-            target = np.where(keep, w, target)
+            goal = target
+            target = np.where(keep, w, goal)
+            if guard_exposure:
+                over = float(target.sum()) > float(goal.sum()) + 1e-12
+                idle = float(goal.sum()) - float(target.sum()) > band + 1e-12
+                if over or idle:
+                    target = goal
             delta = np.abs(target - w)
             turnover += float(delta.sum())
             pending = float((delta * c[i]).sum())
             trades += int(((w <= 1e-12) & (target > 1e-12)).sum())
             w = target.copy()
-    return WeightedRun(pd.Series(out, index=days), pd.Series(exposure, index=days), turnover, cost, trades)
+    return WeightedRun(pd.Series(out, index=days), pd.Series(exposure, index=days), turnover, cost, trades, stale)
 
 
 def rebalance_days(features: pd.DataFrame, every: int) -> pd.DatetimeIndex:
@@ -259,7 +284,7 @@ def evaluate_selection(
 
 
 def evidence(perf: pd.DataFrame, period: str) -> str:
-    """Uma frase sobre o que o teste fora da amostra mostrou, comparando a seleção com as referências simples."""
+    """Uma frase sobre o que o período de teste mostrou, comparando a seleção com as referências simples."""
     test = perf[perf["period"].eq(period)]
     sharpe = {str(k): as_float(v) for k, v in zip(test["strategy"], test["sharpe"], strict=True)}
     own = sharpe.get(STRATEGY_SELECTION, float("nan"))
@@ -275,7 +300,7 @@ def evidence(perf: pd.DataFrame, period: str) -> str:
         return f"{x:.{d}f}".replace(".", ",")
 
     head = (
-        f"No teste fora da amostra ({pd.Timestamp(str(row['start'])):%Y} em diante), a seleção teve Sharpe {num(own)}, "
+        f"No período de teste ({pd.Timestamp(str(row['start'])):%Y} em diante; já consultado antes, não é prospectivo), a seleção teve Sharpe {num(own)}, "
         f"retorno de {num(as_float(row['annual_return_pct']))}% ao ano e pior queda de {num(as_float(row['max_drawdown_pct']), 0)}%"
     )
     if len(beaten) == len(refs):
