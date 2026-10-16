@@ -23,9 +23,9 @@ npm --prefix frontend run build        # typecheck + build de produção em fron
 npm --prefix frontend run dev          # painel em modo de desenvolvimento
 ```
 
-Em 2026-10-15, os quatro comandos de verificação passaram: 151 testes, `mypy --strict` sem erros em 33 arquivos e `tsc` sem erros.
+Em 2026-10-16 (auditoria de consolidação), os comandos de verificação passaram: 219 testes, `mypy --strict` sem erros em 42 arquivos, `uv lock --check` consistente e o build do painel (`tsc` estrito + `vite build`).
 
-Não existe um workflow de CI que rode esses testes a cada push. O único workflow, `daily.yml`, executa o pipeline diário.
+O workflow `.github/workflows/ci.yml` roda `uv lock --check`, `uv sync --locked`, `mypy --strict`, `pytest` e o build do painel a cada push na `main` e em pull requests. Ele foi escrito nesta auditoria e **ainda não foi executado no GitHub**; a primeira rodada pode revelar diferenças entre Windows e Linux. O `daily.yml` continua sendo só o pipeline diário.
 
 ## Testes
 
@@ -42,6 +42,8 @@ Não existe um workflow de CI que rode esses testes a cada push. O único workfl
 | `test_forecast.py`, `test_lab.py` | Previsão walk-forward e laboratório de estratégias |
 | `test_pipeline.py` | Pipeline de ponta a ponta, offline |
 | `test_regimes.py` | Regimes de mercado: causalidade, dados ausentes, reprodutibilidade, integração e contrato com o frontend |
+| `test_engine.py` | Motor de pesos: guarda de exposição, caixa parado, moedas sem preço |
+| `test_loaders.py` | Escrita atômica, snappy, snapshots, upsert idempotente e consistência das duas definições do filtro do BTC |
 | `test_regime_policy.py` | Fase 5 (pesquisa): políticas por regime, custos de transição, baselines, bootstrap, registro de experimentos e isolamento da produção |
 
 ## Mudanças comuns

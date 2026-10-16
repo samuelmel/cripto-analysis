@@ -72,6 +72,17 @@ def test_stale_data_boundary() -> None:
     assert "28/06/2026" in two_days_late["reason"].iloc[0]
 
 
+def test_long_gap_flags_a_possible_delisting_without_assuming_the_cause() -> None:
+    btc, eth = ramp(100, 200, 250), ramp(50, 150, 250)
+    month_late = availability(_history(btc, eth, "2026-05-30"), ("BTC/USDT", "ETH/USDT"), TODAY)  # 31 dias de atraso
+    reason = month_late["reason"].iloc[0]
+    assert not month_late["available"].any() and "desatualizado" in reason
+    assert "possível deslistagem" in reason and "causa não verificada" in reason
+    assert "perda" not in reason  # nunca presume perda total
+    short = availability(_history(btc, eth, "2026-06-20"), ("BTC/USDT", "ETH/USDT"), TODAY)  # 10 dias: só desatualizada
+    assert "desatualizado" in short["reason"].iloc[0] and "deslistagem" not in short["reason"].iloc[0]
+
+
 def test_stale_btc_makes_other_coins_unavailable() -> None:
     btc = make_candles({"BTC/USDT": ramp(100, 200, 250)}, "2026-06-20")
     eth = make_candles({"ETH/USDT": ramp(50, 150, 250)}, "2026-06-30")

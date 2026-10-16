@@ -16,7 +16,9 @@ from .policy_evaluation import (
     BOOTSTRAP_RESAMPLES,
     DAYS_PER_YEAR,
     PRIMARY_BLOCK,
+    EVIDENCE_LEVELS,
     SharpeComparison,
+    classify_evidence,
     holm_adjust,
     metrics,
     paired_sharpe_bootstrap,
@@ -71,7 +73,7 @@ class Protocol:
     def describe(self) -> dict[str, object]:
         """Configuração serializável (entra no ID do experimento)."""
         return {
-            "protocol_revision": 3, "engine_version": ENGINE_VERSION, "primary_start": self.primary_start, "seed": self.seed, "block": self.block, "resamples": self.resamples,
+            "protocol_revision": 4, "engine_version": ENGINE_VERSION, "primary_start": self.primary_start, "seed": self.seed, "block": self.block, "resamples": self.resamples,
             "sensitivity_blocks": list(self.sensitivity_blocks), "include_selection": self.include_selection,
             "scenarios": [asdict(s) for s in self.scenarios],
             "classifiers": {name: asdict(rules) for name, rules in self.classifiers},
@@ -168,6 +170,8 @@ def run_study(candles: pd.DataFrame, as_of: pd.Timestamp, protocol: Protocol = P
         key = f"{policy} vs {baseline}"
         rows += [_row("comparacao", "base", "PRIMARIA", key, metric, value, note) for metric, value in comp.row().items()]
         rows.append(_row("comparacao", "base", "PRIMARIA", key, "p_holm", p_holm, note))
+        grade = classify_evidence(comp, p_holm, prospective=False)  # não existe período prospectivo
+        rows.append(_row("evidencia", "base", "PRIMARIA", key, "nivel", float(EVIDENCE_LEVELS.index(grade)), grade))
     for block in protocol.sensitivity_blocks:
         for policy in POLICY_NAMES:
             comp = paired_sharpe_bootstrap(slice_window(base.runs[policy].daily, primary),

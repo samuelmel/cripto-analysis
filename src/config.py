@@ -77,6 +77,11 @@ MAX_STALE_DAYS = 1
 """O último candle fechado pode estar até 1 dia mais velho que o esperado; além disso a moeda fica
 INDISPONÍVEL (nunca gera sinal "atual" com dado velho)."""
 
+LONG_STALE_DAYS = 30
+"""Sem candle há mais que isso: além de desatualizada, a moeda é sinalizada como POSSÍVEL deslistagem, pausa ou
+conversão do token. Não há fonte confiável de listagem na base, então a causa nunca é presumida (e a moeda nunca
+é tratada como perda total)."""
+
 REGIME_SYMBOL = "BTC/USDT"
 """Moeda cujo estado de tendência (acima/abaixo da SMA 200) vale como filtro de mercado para todas."""
 

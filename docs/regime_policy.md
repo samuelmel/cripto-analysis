@@ -3,7 +3,7 @@
 Estudo de pesquisa, **isolado da produção**: não altera sinais, aportes, recomendações, stops, painel nem Telegram, e não executa ordens. Código: [`regime_policy.py`](../src/transformers/regime_policy.py) (políticas), [`policy_experiment.py`](../src/transformers/policy_experiment.py) (cenário), [`policy_study.py`](../src/transformers/policy_study.py) (protocolo completo), [`policy_evaluation.py`](../src/transformers/policy_evaluation.py) (métricas, bootstrap, Holm, IDs), [`experiment_log.py`](../src/loaders/experiment_log.py) (registro) e [`research/regime_policy_study.py`](../research/regime_policy_study.py) (execução).
 
 > [!IMPORTANT]
-> **Resultado em uma frase:** a hipótese principal **não foi sustentada**. A diferença de Sharpe da política primária contra a regra de tendência fixa foi −0,07 (IC 95% de −0,20 a +0,06), e nenhuma das 20 comparações da família é significativa, nem antes do ajuste. O resultado é **inconclusivo, com estimativa pontual nula ou negativa**, e é uma avaliação histórica exploratória (seção 8).
+> **Resultado em uma frase:** a hipótese principal **não foi sustentada**. A diferença de Sharpe da política primária contra a regra de tendência fixa foi −0,06 (IC 95% de −0,18 a +0,05, com o motor corrigido na consolidação; −0,07 e [−0,20; +0,06] com o motor anterior), e nenhuma das 20 comparações da família é significativa, nem antes do ajuste. O resultado é **inconclusivo, com estimativa pontual nula ou negativa**, e é uma avaliação histórica exploratória (seção 8).
 >
 > As seções 1 a 7 (protocolo) foram escritas **antes** da primeira execução do estudo. As mudanças posteriores estão listadas, com data e motivo, na seção 9 ("Desvios do protocolo").
 
@@ -85,6 +85,9 @@ uv run python research/regime_policy_study.py
 
 ## 8. Resultados (avaliação histórica exploratória)
 
+> [!NOTE]
+> As tabelas 8.1 a 8.5 são da **revisão 2, com o motor de pesos versão 1**, que tinha o defeito da faixa de tolerância (seção 9, item 1). O defeito foi corrigido na auditoria de consolidação (`ENGINE_VERSION = weights-2`) e o estudo foi refeito: ver **8.6**, que passa a ser a referência. A conclusão não mudou. As revisões 1 e 2 continuam no registro de experimentos.
+
 Base local de 17/08/2017 a 15/10/2026, 32 moedas após `select_universe`. Janela primária: 01/01/2021 a 15/10/2026 (2.114 dias). Experimentos registrados em `data/research/experiments.parquet`: `30d753afd5555bba` (protocolo revisão 1) e `494685b03e2fdb68` (revisão 2, ver seção 9); dados `a6f4b2e2367b…`; código no HEAD `d45b976` com árvore de trabalho alterada; semente `20261016`; a revisão 2 foi executada duas vezes e a segunda confirmou **"reproduzido"** (mesmo hash de resultados `be18aba8…`).
 
 ### 8.1 Janela primária, cenário-base (custos centrais, faixa de tolerância do motor)
@@ -159,11 +162,26 @@ A diferença é **negativa em todas as 12 variantes** (de −0,02 a −0,38). A 
 
 Mapeamento escolhido por ano (só dados anteriores): em 2021, `ALTA` → `TENDENCIA_SMA200`, `BAIXA` → `MOMENTO_SIMPLES`, `MISTO` → `COMPRAR_E_SEGURAR`, `LATERAL` → `CAIXA`; a partir de 2023, quase tudo vira `TENDENCIA_SMA200` (que em `BAIXA` fica em caixa por construção). As escolhas de 2021–2022 vieram de poucos episódios (`BAIXA` com 383 dias de treino em 2021, concentrados em 2018–2020) e perderam dinheiro em 2022. Pior Sharpe da família contra a tendência fixa (−0,46). É um exemplo concreto de aprender o mapeamento a partir de poucos regimes.
 
+### 8.6 Revisões 3 e 4: motor corrigido (`weights-2`)
+
+Experimentos `18ef20f62a6d1b3b` (revisão 3) e `53aae5614341a57f` (revisão 4, que acrescenta a classificação de evidência); mesma semente, mesmos dados (`a6f4b2e2367b…`); a revisão 4 foi executada duas vezes e a segunda confirmou "reproduzido". Com o motor corrigido a exposição bruta nunca passa de 100% e `COMPRAR_E_SEGURAR` fica 99,7% investido (antes, 57%).
+
+| | `BTC` | `COMPRAR_E_SEGURAR` | `MOMENTO_SIMPLES` | `TENDENCIA_SMA200` | `P1` | `P2` | `P3` | `P4` | `P5` | `SELECAO` |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Sharpe (janela primária) | 0,51 | 0,68 | 0,84 | **0,98** | 0,92 | 0,99 | 0,65 | 0,88 | 0,53 | 0,88 |
+| Exposição média | 99,7% | 99,7% | 99,1% | 35,3% | 32,6% | 50,8% | 30,0% | 49,7% | 53,5% | 32,3% |
+| Revisão 2 (motor antigo): Sharpe | 0,51 | 0,81 | 0,85 | 0,99 | 0,93 | 0,99 | 0,69 | 0,92 | 0,53 | 0,87 |
+
+- **Primária:** `P1` − `TENDENCIA_SMA200` = **−0,059**, IC 95% [−0,184; +0,051], p = 0,33. Não atende ao critério de apoio.
+- **Família de 20:** nenhum p < 0,05 (menor: 0,096, `P5` contra a tendência fixa, **negativo**); todos os p de Holm = 1,0. Classificação de evidência (`classify_evidence`): **as 20 comparações são `SEM_EVIDENCIA`**.
+- **Robustez:** a diferença de `P1` contra a tendência fixa é negativa nas 12 variantes (de −0,004 a −0,362); a pior, de novo, é o regime indisponível em 10% dos dias (−0,36; IC [−0,77; −0,08]). Custo ×0,5 e ×2 praticamente iguais (−0,060 e −0,057).
+- A correção mexeu pouco em `P1`–`P3` (que ficam em caixa a maior parte do tempo) e muito nos baselines largos (`COMPRAR_E_SEGURAR` caiu de 0,81 para 0,68). O motor antigo favorecia ligeiramente os baselines nos dois sentidos, e a leitura da hipótese principal não depende disso.
+
 ## 9. Desvios do protocolo, achados e limitações
 
 **Desvios (todos declarados):**
 
-1. *Antes da primeira execução:* acrescentei a variante "sem faixa de tolerância" (`band=0`). Ao escrever os testes descobri que o motor existente (`run_weighted`) **retém** moedas cujo peso-alvo muda menos de 5 p.p.; com cerca de 30 moedas (peso ~3% cada) isso significa que as posições quase nunca são reajustadas e moedas que saem do universo elegível liberam caixa que não é reinvestido. O efeito: `COMPRAR_E_SEGURAR` fica só 57% investido no cenário-base, e outras carteiras chegam a ultrapassar 100% de exposição bruta em até 6% (`MOMENTO_SIMPLES`, 106%). Isso vale igual para todas as políticas e **não** foi corrigido (alterar o motor mudaria o backtest de produção). Com `band=0` o baseline fica 99,7% investido e seu Sharpe cai de 0,81 para 0,64; a conclusão sobre `P1` não muda (−0,059).
+1. *Antes da primeira execução:* acrescentei a variante "sem faixa de tolerância" (`band=0`). Ao escrever os testes descobri que o motor existente (`run_weighted`) **retém** moedas cujo peso-alvo muda menos de 5 p.p.; com cerca de 30 moedas (peso ~3% cada) isso significa que as posições quase nunca são reajustadas e moedas que saem do universo elegível liberam caixa que não é reinvestido. O efeito: `COMPRAR_E_SEGURAR` fica só 57% investido no cenário-base, e outras carteiras chegam a ultrapassar 100% de exposição bruta em até 6% (`MOMENTO_SIMPLES`, 106%). Isso valia igual para todas as políticas. **Foi corrigido depois, na auditoria de consolidação** (motor `weights-2`, commit `0477f27`; ver 8.6 e `docs/AUDIT.md`). Com `band=0` o baseline fica 99,7% investido e seu Sharpe cai de 0,81 para 0,64; a conclusão sobre `P1` não muda (−0,059).
 2. *Depois da primeira execução (revisão 2):* acrescentei a seção suplementar "IC da comparação primária em todas as variantes" (8.4), depois de ver que o cenário-base tinha esse artefato. É descritiva, não escolhe cenário nenhum e não entra na família; por isso o ID do experimento mudou (`30d753af…` → `494685b0…`). Os resultados da base são idênticos nas duas execuções; a primeira continua no registro.
 
 **Limitações:**

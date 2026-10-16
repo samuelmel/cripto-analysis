@@ -102,6 +102,7 @@ def availability(
     *,
     regime_symbol: str = config.REGIME_SYMBOL,
     max_stale_days: int = config.MAX_STALE_DAYS,
+    long_stale_days: int = config.LONG_STALE_DAYS,
 ) -> pd.DataFrame:
     """Se cada moeda de `symbols` tem dado confiável hoje (AVAILABILITY_SCHEMA).
 
@@ -118,9 +119,11 @@ def availability(
     shown = table["last_ts"].dt.strftime("%d/%m/%Y")
     own = pd.Series(
         np.select(
-            [table["last_ts"].isna(), lag.gt(max_stale_days), table["sma_200"].isna()],
+            [table["last_ts"].isna(), lag.gt(long_stale_days), lag.gt(max_stale_days), table["sma_200"].isna()],
             [
                 "sem candles na base",
+                "dado desatualizado: último candle em " + shown + " (" + lag.astype("string") + " dias de atraso); "
+                "possível deslistagem, pausa ou conversão do token, causa não verificada",
                 "dado desatualizado: último candle em " + shown + " (" + lag.astype("string") + " dias de atraso)",
                 "histórico insuficiente: menos de 200 dias para calcular a média",
             ],

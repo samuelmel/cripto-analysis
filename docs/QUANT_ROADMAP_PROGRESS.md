@@ -152,3 +152,16 @@ Fases 0–3 continuam como no quadro do início (parcial ou não encontrado). Fa
 ### Estado do Git (Fase 5)
 
 Nenhum commit, push, merge ou rebase da Fase 5. Todas as alterações estão no diretório de trabalho, junto com as pendências antigas, que foram preservadas.
+
+## Auditoria de consolidação F0–F5 (16/10/2026)
+
+Matriz completa, achados e pendências por prioridade: [AUDIT.md](AUDIT.md). O quadro "Estado das fases anteriores" acima é o retrato do momento da Fase 4; o estado atual está no AUDIT.md.
+
+**Mudou nesta etapa (cada item com teste de regressão):**
+- **Motor de pesos corrigido** (`ENGINE_VERSION = weights-2`): a faixa de tolerância permitia exposição de até 118% e deixava caixa parado (comprar e segurar com 57% de exposição). Sinais, aportes e recomendação não mudaram; os baselines largos ficaram mais fracos e a frase de evidência foi atualizada. A Fase 5 foi refeita com o motor novo e a conclusão se manteve.
+- **Texto "fora da amostra"** retirado da frase de evidência (o período de teste já foi consultado).
+- **Higiene:** workflow de CI (`ci.yml`, ainda não executado no GitHub), dependências mortas (`ccxt`, `aiohttp`) e `requirements.txt` removidos, `numpy` declarada, testes dos loaders.
+- **Dados:** sinalização de possível deslistagem (sem presumir perda total) e contagem de dias sem preço.
+- **Validação:** catálogo de estratégias (nenhuma confirmada como robusta, por teste) e classificação de qualidade da evidência.
+
+**Continua aberto:** unificar os dois motores (o nome `COMPRAR_E_SEGURAR` existe nos dois com simulações diferentes); universo point-in-time (bloqueado por falta de fonte); convenção de execução; usar o bootstrap nos demais estudos; redesign do frontend (especificação não recebida).

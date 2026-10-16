@@ -150,6 +150,32 @@ def paired_sharpe_bootstrap(
     return SharpeComparison(n, effective_sample_size(xa - xb), sharpe_of(xa), sharpe_of(xb), point, float(lo), float(hi), p, block, resamples, seed)
 
 
+EVIDENCE_INSUFFICIENT = "INSUFICIENTE"
+EVIDENCE_NONE = "SEM_EVIDENCIA"
+EVIDENCE_HINT = "INDICIO_EXPLORATORIO"
+EVIDENCE_CONFIRMED = "CONFIRMADO_PROSPECTIVO"
+EVIDENCE_LEVELS: tuple[str, ...] = (EVIDENCE_INSUFFICIENT, EVIDENCE_NONE, EVIDENCE_HINT, EVIDENCE_CONFIRMED)
+
+
+def classify_evidence(comparison: SharpeComparison, p_holm: float, prospective: bool = False) -> str:
+    """Qualidade da evidência de uma comparação de Sharpe, em quatro níveis (ordem crescente de confiança).
+
+    INSUFICIENTE            amostra abaixo do mínimo (sem estimativa nem intervalo)
+    SEM_EVIDENCIA           o intervalo de 95% inclui zero
+    INDICIO_EXPLORATORIO    o intervalo exclui zero, mas o período não é prospectivo ou o p de Holm não é < 0,05
+    CONFIRMADO_PROSPECTIVO  o intervalo exclui zero, p de Holm < 0,05 e o período é prospectivo (nunca ocorre hoje)
+
+    A direção do efeito (a favor ou contra) está em `diff`; o nível só diz o quanto a estimativa merece confiança.
+    """
+    if not math.isfinite(comparison.diff) or not math.isfinite(comparison.ci_low):
+        return EVIDENCE_INSUFFICIENT
+    if comparison.ci_low <= 0.0 <= comparison.ci_high:
+        return EVIDENCE_NONE
+    if prospective and math.isfinite(p_holm) and p_holm < 0.05:
+        return EVIDENCE_CONFIRMED
+    return EVIDENCE_HINT
+
+
 def holm_adjust(p_values: Sequence[float]) -> list[float]:
     """Valores-p ajustados pelo método de Holm (controla a taxa de erro por família). NaN permanece NaN."""
     valid = [(p, i) for i, p in enumerate(p_values) if math.isfinite(p)]

@@ -22,7 +22,9 @@ from src.loaders.experiment_log import (
     read_registry,
 )
 from src.transformers.policy_evaluation import (
+    SharpeComparison,
     block_indices,
+    classify_evidence,
     chronological_split,
     data_fingerprint,
     drawdown_stats,
@@ -439,3 +441,40 @@ def test_production_does_not_import_the_research_policy_modules() -> None:
     assert out.stdout.strip() == ""
     source = (ROOT / "src" / "pipeline.py").read_text(encoding="utf-8")
     assert "regime_policy" not in source and "policy_study" not in source
+
+
+# ---------------------------------------------------------------------------------------------
+# Qualidade da evidência e catálogo de estratégias
+# ---------------------------------------------------------------------------------------------
+
+def _comparison(diff: float, lo: float, hi: float, n: int = 2000) -> SharpeComparison:
+    return SharpeComparison(n, float(n), 1.0, 1.0 - diff, diff, lo, hi, 0.01, 20, 100, 0)
+
+
+def test_evidence_grade_never_reaches_confirmed_without_a_prospective_period() -> None:
+    assert classify_evidence(_comparison(float("nan"), float("nan"), float("nan"), 100), 1.0) == "INSUFICIENTE"
+    assert classify_evidence(_comparison(-0.07, -0.2, 0.06), 1.0) == "SEM_EVIDENCIA"
+    assert classify_evidence(_comparison(0.5, 0.1, 0.9), 0.001) == "INDICIO_EXPLORATORIO"  # significativo, mas não prospectivo
+    assert classify_evidence(_comparison(0.5, 0.1, 0.9), 0.2, prospective=True) == "INDICIO_EXPLORATORIO"
+    assert classify_evidence(_comparison(0.5, 0.1, 0.9), 0.001, prospective=True) == "CONFIRMADO_PROSPECTIVO"
+    assert classify_evidence(_comparison(-0.5, -0.9, -0.1), 0.001) == "INDICIO_EXPLORATORIO"  # contra também é só indício
+
+
+def test_every_strategy_name_used_by_the_engines_is_in_the_catalog_and_none_is_confirmed() -> None:
+    from src.transformers import selection_backtest, trade_simulator
+    from src.transformers.strategy_catalog import BY_NAME, CATALOG, KINDS, confirmed_robust
+
+    used = {v for k, v in vars(selection_backtest).items() if k.startswith("STRATEGY_") and isinstance(v, str)}
+    used |= {v for k, v in vars(trade_simulator).items() if k.startswith("STRATEGY_") and isinstance(v, str)}
+    used |= set(POLICY_NAMES) | {CASH}
+    assert used <= set(BY_NAME), sorted(used - set(BY_NAME))
+    assert confirmed_robust() == ()  # conclusão histórica: nenhuma estratégia confirmada como robusta
+    assert all(e.kind in KINDS and e.description for e in CATALOG)
+
+
+def test_study_grades_every_family_comparison() -> None:
+    first = run_study(world(800), as_of_for(END), Protocol(
+        resamples=100, sensitivity_blocks=(10,), classifiers=(), scenarios=(Scenario("base"),), include_selection=False,
+        primary_start="2025-01-01"))
+    grades = first.results[first.results["section"].eq("evidencia")]
+    assert len(grades) == 20 and set(grades["note"]) <= {"INSUFICIENTE", "SEM_EVIDENCIA", "INDICIO_EXPLORATORIO"}
