@@ -22,6 +22,11 @@ Estratégias:
 
 Limitações: universo = moedas que existem hoje (viés de sobrevivência); uma única amostra histórica,
 com poucos ciclos de mercado; sem impostos; execução ideal no fechamento. Passado não garante futuro.
+
+ATENÇÃO (Fase 2): este estudo ainda usa o motor LEGADO (`trade_simulator.evaluate_portfolio`): execução ao fechamento do dia do sinal,
+rebalanceamento diário sem custo e só taxa. Seus números NÃO são comparáveis com os do pipeline, que usa o motor único
+(`src/transformers/backtest_engine.py`). Migração prevista para a Fase 3 (validação walk-forward); até lá, leia os
+resultados como históricos e exploratórios. Comparação dos motores: `research/engine_reconciliation.py`.
 """
 
 from __future__ import annotations
@@ -38,28 +43,10 @@ from src.config import FEE_PER_SIDE, RECOMMENDED, TEST_PERIOD, TRAIN_PERIOD, UNI
 from src.loaders.market_store import read_fng, read_ohlcv  # noqa: E402
 from src.transformers.anomaly_detector import classify_history  # noqa: E402
 from src.transformers.panic_backtest import panic_trades  # noqa: E402
+from src.transformers.strategies import dip_in_uptrend  # noqa: E402,F401  (reexportado)
 from src.transformers.trade_simulator import evaluate_portfolio, positions_from_trades, wide  # noqa: E402
 
 BENCHMARK = "BTC/USDT"
-
-
-def dip_in_uptrend(
-    px: pd.DataFrame, sma200: pd.DataFrame, z: pd.DataFrame, enter_z: float = -1.0, exit_z: float = 1.0
-) -> pd.DataFrame:
-    """Compra a queda (z < enter_z) com a moeda acima da SMA 200; sai com z >= exit_z ou 3% abaixo da SMA 200."""
-    pos = pd.DataFrame(0.0, index=px.index, columns=px.columns)
-    for c in px.columns:
-        inside = False
-        out: list[float] = []
-        for p, s2, zz in zip(px[c].to_numpy(), sma200[c].to_numpy(), z[c].to_numpy(), strict=True):
-            up = bool(p > s2) if not np.isnan(s2) else False
-            if not inside and up and zz < enter_z:
-                inside = True
-            elif inside and (zz >= exit_z or (not np.isnan(s2) and p < s2 * 0.97)):
-                inside = False
-            out.append(1.0 if inside else 0.0)
-        pos[c] = out
-    return pos
 
 
 def build_strategies(history: pd.DataFrame) -> tuple[dict[str, pd.DataFrame], pd.DataFrame, pd.DataFrame]:

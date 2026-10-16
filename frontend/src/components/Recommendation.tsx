@@ -331,8 +331,9 @@ export function SelectionView({ signals, rec, perf }: {
         <h2 id="bt-selecao" className="text-lg font-semibold">A seleção funciona no passado?</h2>
         <p className="mt-1 max-w-[72ch] text-muted">
           A mesma seleção e o mesmo aporte do painel, refeitos a cada 7 dias com o orçamento de {brl(rec.budget_brl)}, contra
-          referências simples. Custos incluídos: taxa de 0,1% por lado, spread e slippage estimados. O teste nunca entrou em
-          nenhuma escolha de peso ou limiar.
+          referências simples, com a mesma execução para todas (sinal no fechamento, ordem na abertura do dia seguinte).
+          Custos incluídos: taxa de 0,1% por lado, spread e slippage estimados. O teste não entrou em nenhuma escolha de
+          peso ou limiar, mas já foi consultado no desenvolvimento: é um resultado exploratório.
         </p>
         <p className="mt-3 max-w-[72ch]">{rec.evidence}</p>
         {perf.length === 0 ? (
@@ -367,7 +368,8 @@ export function SelectionView({ signals, rec, perf }: {
         )}
         <p className="mt-3 max-w-[72ch] text-[13px] text-muted">
           Limites: só entram moedas que existem hoje (as que quebraram não aparecem, o que favorece comprar altcoins); spread e
-          slippage são estimados, não medidos; execução no fechamento; sem impostos. O estudo completo (referência aleatória,
+          slippage são estimados, não medidos; execução na abertura do dia seguinte (aproximação, não garantia); moeda que
+          para de negociar com posição aberta conta como perda total; sem impostos. O estudo completo (referência aleatória,
           ano a ano, regimes de volatilidade e sensibilidade dos pesos) é gerado por research/selection_study.py.
         </p>
       </section>

@@ -106,9 +106,9 @@ uv run python research/selection_study.py
 
 acrescenta DCA fixo, referência aleatória (mesmo número de moedas, mesma exposição e mesmo giro, moedas sorteadas entre as elegíveis, 100 sementes fixas), as variantes do filtro de regime, resultado ano a ano (walk-forward), desempenho por regime de volatilidade do BTC (limiares medidos no treino), sensibilidade de pesos e limiares (só treino e validação), redundância entre componentes (Spearman) e viabilidade das quantias pequenas com R$ 100. Grava em `data/research/selection_study.parquet` sem tocar nos resultados anteriores (`strategy_lab.parquet`, tabelas abaixo).
 
-**Resultados com dados reais: pendentes.** Esta mudança foi desenvolvida num ambiente sem acesso às APIs de mercado (Binance, CoinGecko e alternative.me bloqueadas pela rede), então o estudo só foi executado sobre preços sintéticos, para conferir o código; esses números não dizem nada sobre o mercado e não estão aqui. Rode o pipeline e o estudo com a base real antes de usar as sugestões. A regra de leitura é: se a seleção não superar, **no teste**, comprar e segurar e o momento simples em retorno por risco depois dos custos, a vantagem não está demonstrada, e o painel e o Telegram dizem isso automaticamente (campo `evidence`).
+**Resultados com dados reais: pendentes.** Esta mudança foi desenvolvida num ambiente sem acesso às APIs de mercado (Binance, CoinGecko e alternative.me bloqueadas pela rede), então o estudo só foi executado sobre preços sintéticos, para conferir o código; esses números não dizem nada sobre o mercado e não estão aqui. Rode o pipeline e o estudo com a base real antes de usar as sugestões. Desde a Fase 3, o campo `evidence` (painel e Telegram) compara a seleção com comprar e segurar **as mesmas moedas**, com as mesmas premissas, pela diferença de Sharpe com intervalo de 90% (bootstrap em blocos, semente fixa), e diz explicitamente que 2023 em diante é um período **já consultado** no desenvolvimento, não um teste intocado. Intervalo que inclui zero = "diferença compatível com sorte: a vantagem não está demonstrada". A avaliação completa, com todas as estratégias e correção para comparações múltiplas, está em [Validação estatística](#validação-estatística).
 
-Limitações: viés de sobrevivência (moedas que quebraram, como LUNA e FTT, não estão no universo, o que favorece comprar altcoins); spread e slippage são hipóteses (`SPREAD_TIERS`, `SLIPPAGE`), não medidas; execução no fechamento; uma única história de mercado; sem impostos. Não há execução de ordens: nenhuma chave de corretora, nenhuma API que movimente dinheiro.
+Desde a Fase 2 roda no [motor único](#motor-de-backtest): mesma execução (abertura do dia seguinte), mesmos custos e o mesmo universo point-in-time para a seleção e para cada referência. Limitações: as candidatas continuam sendo as moedas de `UNIVERSE` (moedas que quebraram, como LUNA e FTT, não estão na base do pipeline, o que favorece comprar altcoins; o universo histórico completo está só na base de pesquisa, `data/archive`); spread e slippage são hipóteses (`SPREAD_TIERS`, `SLIPPAGE`), não medidas; a abertura seguinte é uma aproximação do preço alcançável; uma única história de mercado; sem impostos. Não há execução de ordens: nenhuma chave de corretora, nenhuma API que movimente dinheiro.
 
 ## Requisitos
 
@@ -254,7 +254,7 @@ O `mcp_server.py` expõe a tool `run_crypto_pipeline`. Adicione dentro de `mcpSe
 
 ## Laboratório de estratégias
 
-O sinal do painel (SMA 200) não muda com nada daqui. O laboratório existe para responder, com o mesmo motor de carteira do pipeline (taxa de 0,1% por lado, posição decidida em t vale para t+1, peso igual), se alguma outra ideia merece entrar.
+O sinal do painel (SMA 200) não muda com nada daqui. O laboratório existe para responder se alguma outra ideia merece entrar. **Ele ainda usa o motor antigo** (`run_portfolio`: taxa de 0,1% por lado, posição decidida em t vale para t+1, rebalanceamento diário sem custo): seus números não são comparáveis com os do pipeline, que usa o [motor único](#motor-de-backtest). Na Fase 3, as mesmas estratégias e grades foram reavaliadas no motor único, com walk-forward e correção para comparações múltiplas, em [Validação estatística](#validação-estatística); para decidir, vale aquela avaliação. O laboratório antigo fica como registro histórico.
 
 ```bash
 uv run python research/strategy_lab.py
@@ -371,7 +371,7 @@ O arquivo [.github/workflows/daily.yml](.github/workflows/daily.yml) roda o pipe
 
 Segurança: `permissions: contents: read`, `concurrency` sem execuções simultâneas, e os segredos entram só como `secrets` do GitHub, só no passo do pipeline.
 
-**Sobre o estado.** O runner começa sem a pasta `data/`: a cada execução o pipeline baixa o histórico inteiro de novo (cerca de 40 s na primeira carga) e recalcula tudo. O sinal de "ontem", usado nos alertas de virada, é recalculado a partir do histórico, sem estado guardado. **As suas posições (`data/positions`) não existem no runner**: a mensagem diária cobre os sinais de BTC e ETH, não as suas compras. Para ver o status das suas posições, use o painel no seu computador.
+**Sobre o estado.** O runner começa sem a pasta `data/`: a cada execução o pipeline baixa o histórico inteiro de novo (cerca de 40 s na primeira carga) e recalcula tudo. A fonte de verdade dos preços é a própria Binance, não um cache. Ao final (mesmo se o pipeline falhar), o passo "Guardar o estado de auditoria" sobe como artefato privado do repositório, por 90 dias, o registro de fontes (com o histórico de falhas), as revisões de candles, o fingerprint dos dados usados e o snapshot dos sinais; nada de posições nem segredos. Falha nesse passo não deixa o job vermelho. O sinal de "ontem", usado nos alertas de virada, é recalculado a partir do histórico, sem estado guardado. **As suas posições (`data/positions`) não existem no runner**: a mensagem diária cobre os sinais de BTC e ETH, não as suas compras. Para ver o status das suas posições, use o painel no seu computador.
 
 ### O que você precisa fazer manualmente
 
@@ -388,7 +388,10 @@ Segurança: `permissions: contents: read`, `concurrency` sem execuções simult�
 | Binance | Candles diários de preço e volume (a única fonte de preço) | `GET /api/v3/klines`, uma moeda por vez, até 1000 candles por página; a vela ainda aberta é descartada | `data/market/ohlcv_1d/symbol=…/data.parquet` (upsert por moeda e dia) |
 | CoinGecko | Market cap e volume atuais, uma foto por execução | `GET /coins/markets`, uma chamada para todas; chave Demo opcional no header `x-cg-demo-api-key` (`COINGECKO_API_KEY`) | `data/market/coingecko/data.parquet` |
 | alternative.me | Fear & Greed diário (só alimenta o aviso de pânico) | `GET /fng/` | `data/market/fng/data.parquet` |
-| (registro) | Quando cada fonte foi atualizada, com status e erro | gravado a cada atualização | `data/market/source_log/data.parquet` |
+| (registro) | Quando cada fonte foi atualizada, com status e erro | gravado a cada atualização | `data/market/source_log/data.parquet` (última de cada fonte) e `history.parquet` (todas, append-only) |
+| (revisões) | Valor de candle já gravado que uma nova leitura alterou (valor antigo e novo) | a cada atualização | `data/market/revisions/data.parquet` |
+| (dados usados) | Linhas, intervalo e SHA-256 dos candles de cada moeda usados em cada execução | a cada análise | `data/market/dataset_manifest/history.parquet`; o relatório mostra o hash combinado |
+| Arquivo oficial da Binance (pesquisa) | Candles diários de todos os pares spot, **inclusive os deslistados** (LUNA, FTT, UST...), em ZIPs com SHA-256 | `python -m src.archive` (abaixo) | `data/archive/` (não é lida pelo pipeline diário) |
 
 Garantias:
 
@@ -397,8 +400,25 @@ Garantias:
 - **Fonte secundária** (CoinGecko, Fear & Greed) fora do ar não derruba o pipeline: market cap fica nulo e o aviso de pânico não dispara.
 - **Fonte primária** (Binance) fora do ar para uma moeda: o erro é registrado e a análise segue com a base local; a moeda sem candle recente fica INDISPONÍVEL.
 - **Fornecedores não se misturam:** se chegarem candles de outra fonte para uma moeda que já tem base, a gravação é recusada.
-- **Auditoria dos candles** a cada execução (aparece no relatório): duplicados, fora de ordem, preço nulo/NaN/infinito/<= 0, fontes misturadas e lacunas de dias. Preço inválido e duplicados são descartados antes dos indicadores.
+- **Auditoria dos candles** a cada execução (aparece no relatório): duplicados, fora de ordem, preço nulo/NaN/infinito/<= 0, fontes misturadas, lacunas de dias, OHLC inconsistente (máxima abaixo do fechamento etc.), volume negativo, candle fora da meia-noite UTC e candle ainda não fechado no momento da leitura. Preço inválido e duplicados são descartados antes dos indicadores.
 - **Dado desatualizado nunca gera sinal atual:** o último candle fechado esperado é o de ontem (UTC); com mais de `MAX_STALE_DAYS` de atraso, ou sem 200 dias de histórico, ou com o BTC (filtro de mercado) indisponível, o estágio vira `INDISPONÍVEL` com o motivo em `stage_reason`, sem alertas e sem pânico. Posições dessa moeda também ficam INDISPONÍVEIS, a menos que o STOP já tenha disparado.
+
+### Base point-in-time do arquivo da Binance (pesquisa)
+
+O universo do pipeline diário (`UNIVERSE`) são moedas que existem **hoje**: usá-lo para testar o passado tem viés de sobrevivência. Para a pesquisa há uma base separada, montada do arquivo público oficial da Binance (`data.binance.vision`, servido pelo bucket S3 `s3-ap-northeast-1.amazonaws.com/data.binance.vision`), que guarda também os pares que deixaram de negociar:
+
+```bash
+uv run python -m src.archive catalog        # todos os pares USDT do arquivo, vivos e deslistados
+uv run python -m src.archive sync --core    # só as moedas de UNIVERSE
+uv run python -m src.archive sync --all     # todos os candidatos (sem alavancados, stablecoins, fiat, ouro, embrulhados)
+uv run python -m src.archive universe       # universo de cada dia, eventos de entrada e saída, resumo de sobrevivência
+uv run python -m src.archive status         # tamanho da base, fingerprint e problemas de qualidade
+```
+
+- **Verificado:** cada ZIP é conferido contra o `.CHECKSUM` (SHA-256) publicado; sem checksum ou com divergência, nada é gravado. O manifesto (`data/archive/manifest`) guarda chave, ETag, SHA-256 e linhas de cada arquivo.
+- **Incremental e idempotente:** o que já foi ingerido com o mesmo ETag não é baixado de novo; reexecutar não duplica candles; arquivo republicado pela Binance é baixado de novo e a mudança vai para `data/archive/revisions`. Falha num par vai para `data/archive/sync_log` e não toca nos outros.
+- **Universo de cada dia** (`transformers/point_in_time.py`): no dia D só entram dados até o fechamento de D; histórico e volume médio são medidos até D; o limite de tamanho escolhe as de maior volume **em D**. Lacuna de mais de `EPISODE_GAP_DAYS` (7) dias encerra o episódio: o que voltar depois é outro ativo (caso real: `LUNAUSDT` ficou 18 dias parada em maio de 2022 e voltou como Terra 2.0).
+- **Limites (o viés não está eliminado):** só enxerga pares listados na Binance spot; o fim de uma série é "sem candles depois de X" (deslistagem **inferida**, o arquivo não traz o anúncio); renomeações (MATIC → POL) aparecem como saída de um par e entrada de outro; as exclusões `NON_CRYPTO_BASES` são uma lista curada com o conhecimento de hoje; possíveis ações tokenizadas (sufixo B, 2025–2026) não são excluídas, só sinalizadas.
 
 ### Universo de moedas
 
@@ -412,7 +432,94 @@ uv run pytest
 
 Sem chamadas reais de rede (um teste que tentar abrir conexão falha). Cobrem a fronteira da SMA 200, o filtro do BTC, o STOP, posições encerradas, o pipeline `--offline`, API indisponível, timeout, resposta incompleta e dado desatualizado.
 
+`tests/test_golden_baseline.py` roda o pipeline inteiro sobre um mercado **sintético** fixo (`tests/synthetic_market.py`) e compara as saídas com `tests/golden/*.parquet`: uma refatoração que deveria ser só técnica não pode mudar esses números. Mudança intencional de regra é documentada em `docs/QUANT_ROADMAP_PROGRESS.md` antes de regenerar com `UPDATE_GOLDEN=1 uv run pytest tests/test_golden_baseline.py`. Os números sintéticos não dizem nada sobre o mercado.
+
+O CI (`.github/workflows/ci.yml`) roda em todo pull request: `uv lock --check`, `requirements.txt` em sincronia com o `uv.lock`, nenhum Parquet/CSV/`.env` versionado, `mypy --strict src/ mcp_server.py`, `pytest` e o build do frontend. Não usa segredos nem acessa APIs de mercado. `requirements.txt` é gerado: `uv export --format requirements.txt --no-dev --locked --no-emit-project --no-hashes -o requirements.txt`.
+
+## Motor de backtest
+
+Desde a Fase 2 do roadmap há **um único motor de referência** (`src/transformers/backtest_engine.py`), usado por tudo que o pipeline publica: a carteira (`performance.parquet`), as operações da tendência (`backtest.parquet`) e a seleção contra as referências (`selection_backtest.parquet`). Todas as estratégias e referências de uma mesma tabela usam exatamente as mesmas premissas. Premissas versionadas em `src/config.py` (`EXECUTION_MODEL_VERSION = "next-open-v1"`):
+
+| Premissa | Regra |
+|---|---|
+| Sinal | calculado com dados até o **fechamento** do candle diário de D |
+| Execução | na **abertura do candle seguinte** (D+1), nunca ao fechamento de D que gerou o sinal. A abertura é uma aproximação do preço alcançável, não uma garantia |
+| Sem preço válido | candle ausente: a ordem espera até `MAX_ORDER_DELAY_DAYS` (3) dias; depois expira, sem execução a preço inventado. Uma decisão nova substitui a pendente |
+| Custos | compra a abertura × (1 + meio-spread + slippage), venda a abertura × (1 − meio-spread − slippage), taxa de 0,1% sobre o executado (`src/transformers/costs.py`, o mesmo modelo que a seleção usa para dizer se um aporte é viável). Meio-spread pela faixa de volume conhecida até a véspera |
+| Caixa | vendas antes das compras; compras limitadas ao caixa (escaladas quando não cabem, com registro); sem alavancagem, sem venda a descoberto, caixa sem rendimento |
+| Universo | em cada dia só ativos elegíveis no universo **point-in-time** daquele dia (`point_in_time.py`); ativo que sai do universo é vendido. BTC e ETH seguem a regra ao vivo e nunca saem por histórico ou volume |
+| Deslistagem | ativo em carteira sem candle há mais de `EPISODE_GAP_DAYS` (7) é baixado com `DELIST_RECOVERY` (0 = perda total, conservador). Nenhum retorno atravessa uma lacuna entre episódios |
+| Rebalanceamento | carteira de peso igual: todo dia, pagando o custo de cada ajuste; seleção e referências: a cada 7 dias, com banda de 5 pontos (`REBALANCE_BAND`) |
+| Stop | é um sinal de fechamento, executado na abertura seguinte (o gap entra no resultado); não há stop intradiário |
+
+Cada execução produz o livro de operações (preço de referência, preço executado, taxa, custo de spread e de slippage, caixa depois) e o livro de ordens (decisão, execução, atraso, status, fração executada). `reconcile` confere caixa = capital + fluxos, patrimônio = caixa + posições, retornos que reproduzem o patrimônio final, quantidades = compras − vendas − baixas, exposição ≤ 100%. Se não fechar, o pipeline não publica nada.
+
+**Medido com dados reais** (arquivo oficial da Binance, 794.968 pares de candles consecutivos): a abertura de D+1 difere do fechamento de D em 0,033% na mediana (0,61% no percentil 99; máximo de 42,7%). Nas 32 moedas de `UNIVERSE`, 0,008% na mediana e 6,4% no máximo. A Binance negocia 24 horas: a mudança para a abertura seguinte quase não pesa no caso típico e tira o otimismo dos casos extremos.
+
+**Os motores antigos** (`trade_simulator.run_portfolio`/`performance_summary`/`backtest` e `selection_backtest.run_weighted`/`evaluate_selection_legacy`) continuam no código só para reproduzir resultados antigos (`tests/test_legacy_engines.py`) e para o laboratório de `research/`, que ainda não migrou (Fase 3). Diferenças medidas, cada uma com teste em `tests/test_engine_reconciliation.py`: sem custos e com abertura = fechamento anterior, o motor único reproduz os dois exatamente; o `run_portfolio` rebalanceava para peso igual todo dia sem cobrar por isso e perdia o movimento de preço através de um candle ausente; o `run_weighted` podia passar de 100% de exposição com a banda (alavancagem implícita: até 116,7% no mercado sintético) e mantinha um ativo deslistado pelo último preço. A atribuição passo a passo, premissa por premissa, sai de `uv run python research/engine_reconciliation.py` (`--archive` para usar a base do arquivo oficial).
+
+## Validação estatística
+
+Fase 3 do roadmap. Responde se alguma estratégia do projeto tem evidência que vá além da sorte, sem escolher o melhor resultado histórico:
+
+```bash
+uv run python research/validation_study.py             # base do arquivo oficial (data/archive)
+uv run python research/validation_study.py --base market
+```
+
+**Protocolo `wf-v1`** (fixado no código antes de rodar; detalhes em [docs/QUANT_ROADMAP_PROGRESS.md](docs/QUANT_ROADMAP_PROGRESS.md#fase-3--validação-estatística)):
+
+| Item | Regra |
+|---|---|
+| Dados | todos os pares USDT do arquivo da Binance que estiveram no universo point-in-time em algum dia (271), inclusive os que pararam de negociar |
+| Janelas | walk-forward anual: teste de 12 meses a partir de 2020-01-01; treino ancorado desde o primeiro candle; validação = 730 dias antes de cada escolha; embargo 0 (métricas diárias marcadas a mercado) |
+| Status dos dados | **todo o histórico já foi explorado** no desenvolvimento das regras. O walk-forward impede que a escolha de parâmetros veja o teste, não que as regras tenham sido desenhadas olhando esses anos. Só dado posterior a 2026-10-15 será prospectivo |
+| Família | 16 hipóteses: as 11 regras e grades já testadas em BTC+ETH e 5 estratégias do universo point-in-time. H0: Sharpe(estratégia) − Sharpe(referência) ≤ 0, unilateral, α = 5%, **Holm**. Teste impossível (pânico sem Fear & Greed) fica na família com p = 1 |
+| Referência | comprar e segurar **as mesmas moedas**, mesmo motor, custos, banda e posição inicial (escolhida antes, por argumento); só BTC aparece como referência descritiva |
+| Incerteza | bootstrap estacionário pareado e conjunto (Politis e Romano), bloco automático (Politis e White), 2.000 reamostras, semente 20261016, intervalo percentil de 90%; sensibilidade a blocos de 5, 20 e 60 dias; ajuste pelo máximo da estatística (Reality Check) além de Holm |
+| Robustez | custo baixo e alto, atraso de 1 dia, cada janela começando em caixa, deslistagem com 100% de recuperação, 2% dos candles removidos, variações moderadas de parâmetro, regimes do BTC |
+| Classificação | `INVALIDA`, `EVIDENCIA_INSUFICIENTE` (amostra ou diferença compatível com sorte), `NEGATIVA`, `PROMISSORA_NAO_CONFIRMADA`, `ROBUSTA_NO_PROTOCOLO` (exige todos os critérios de `src/transformers/evidence.py`) |
+
+Tudo vai para `data/research/validation/` em modo append-only: registro de experimentos com id determinístico (estratégia, parâmetros, período, universo, referência, versão do motor, custos, fingerprint dos dados e da configuração), e uma execução nunca sobrescreve outra.
+
+**Resultado com dados reais** (2020-01-01 a 2026-10-15, 2.480 dias, base com fingerprint `dc80de01535f89b9`, sem Fear & Greed neste ambiente). Diferença de Sharpe contra comprar e segurar as mesmas moedas, intervalo de 90%:
+
+| Estratégia | Universo | Sharpe | ΔSharpe (IC 90%) | p | p Holm | Classificação |
+|---|---|---|---|---|---|---|
+| Seleção (aporte variável) | todas (PIT) | 1,13 | +0,71 (+0,08 a +1,23) | 0,017 | 0,27 | promissora, não confirmada |
+| Seleção, peso igual | todas (PIT) | 0,92 | +0,51 (−0,11 a +1,00) | 0,047 | 0,71 | evidência insuficiente |
+| Tendência (regra do painel) | BTC+ETH | 1,07 | +0,11 (−0,37 a +0,55) | 0,32 | 1 | evidência insuficiente |
+| Tendência sem filtro do BTC | BTC+ETH | 1,04 | +0,07 (−0,36 a +0,49) | 0,34 | 1 | evidência insuficiente |
+| Tendência + BTC, sem STOP | BTC+ETH | 1,07 | +0,11 (−0,37 a +0,55) | 0,32 | 1 | evidência insuficiente (idêntica à do painel: o STOP de −20% nunca disparou) |
+| Rompimento + volume (grade) | BTC+ETH | 1,02 | +0,06 (−0,47 a +0,50) | 0,36 | 1 | evidência insuficiente |
+| SMA 200 semanal | todas (PIT) | 0,53 | +0,11 (−0,46 a +0,63) | 0,32 | 1 | evidência insuficiente |
+| Tendência diária | todas (PIT) | 0,41 | +0,12 (−0,37 a +0,57) | 0,29 | 1 | evidência insuficiente |
+| Donchian (grade) | BTC+ETH | 0,90 | −0,07 (−0,62 a +0,36) | 0,52 | 1 | negativa |
+| Cruzamento SMA 50/200 | BTC+ETH | 0,79 | −0,17 (−0,65 a +0,28) | 0,72 | 1 | negativa |
+| Momento 90 dias | BTC+ETH | 0,76 | −0,21 (−0,81 a +0,29) | 0,72 | 1 | negativa |
+| RSI sobrevendido (grade) | BTC+ETH | 0,28 | −0,69 (−1,46 a +0,05) | 0,93 | 1 | negativa |
+| Momento simples | todas (PIT) | −0,37 | −0,78 (−1,31 a −0,35) | 0,99 | 1 | negativa (significativamente inferior) |
+| Bollinger (grade) | BTC+ETH | −0,13 | −1,09 (−1,74 a −0,51) | 1,00 | 1 | negativa (significativamente inferior) |
+| Queda dentro da alta | BTC+ETH | −0,28 | −1,24 (−2,15 a −0,33) | 0,99 | 1 | negativa (significativamente inferior) |
+| Pânico | BTC+ETH | — | — | — | 1 | inválida: Fear & Greed ausente (não tratado como zero) |
+
+Referências no mesmo período: comprar e segurar BTC+ETH Sharpe 0,96 (pior queda −76%); comprar e segurar todas (PIT, semanal) 0,42 (−96%); só BTC 0,90 (−77%).
+
+Como ler, sem exagerar:
+
+- **Nenhuma estratégia tem evidência robusta.** A única com intervalo acima de zero (a seleção) não sobrevive à correção para as 16 hipóteses (p ajustado 0,27; 0,17 pelo ajuste do máximo). Ela atende os demais critérios (estável em 5 de 7 janelas, positiva em todos os cenários de estresse e nas 4 variações de parâmetro), por isso é "promissora, não confirmada": a hipótese a acompanhar prospectivamente, não uma conclusão.
+- **A regra do painel (tendência em BTC+ETH) não se distingue de comprar e segurar em retorno por risco** (+0,11, intervalo de −0,37 a +0,55). A vantagem dela é a pior queda menor (−60% contra −76%), que esta família de testes não usa como hipótese.
+- **Seis estratégias perderam da referência**, três de forma significativa (momento simples, Bollinger, queda dentro da alta).
+- Os números são de um histórico já explorado; deslistagens inferidas incluem renomeações (ver limitações) e spread/slippage são hipóteses. Um intervalo de confiança descreve a incerteza desta amostra, não garante retorno futuro.
+
 ## O que o backtest mostra
+
+> **Resultados exploratórios e do MOTOR ANTIGO.** As tabelas desta seção, do laboratório e da previsão foram
+> calculadas antes da Fase 2, com o motor antigo (execução ao fechamento do sinal, só taxa), com dados até
+> 2026-10-14. Não são diretamente comparáveis com o que o pipeline publica agora (motor único, seção acima). O período
+> "teste" (2023 em diante) já foi consultado várias vezes durante o desenvolvimento: não é um teste final intocado. Estão sujeitas a viés de sobrevivência, a um universo filtrado com o volume atual e à
+> execução no fechamento do próprio candle do sinal. Ficam como referência histórica, não como validação. Detalhes
+> e o plano de correção em [docs/QUANT_ROADMAP_PROGRESS.md](docs/QUANT_ROADMAP_PROGRESS.md).
 
 O backtest é de **carteira**: peso igual entre as moedas que já têm dados, com taxa de 0,1% sobre cada mudança de posição. A posição decidida no fechamento do dia t vale para o retorno de t+1, e todas as estratégias só começam quando a SMA 200 da moeda existe. A regra foi escolhida no **treino (2018–2022)** e conferida no **teste (2023–2026)**, dados que a escolha não viu.
 
@@ -462,7 +569,7 @@ O script lê a base local, avalia sete estratégias (comprar e segurar, pânico,
 - **Viés de sobrevivência:** o universo são as moedas que existem hoje. Moedas que quebraram ou saíram do top 15 não estão na amostra, o que favorece qualquer estratégia de comprar moedas.
 - **Uma única amostra histórica:** são poucos ciclos de mercado (dois grandes ciclos de alta e baixa do BTC). Uma regra que funcionou neles pode não funcionar no próximo.
 - **O passado não garante o futuro.** O treino/teste reduz o risco de ajustar a regra aos dados, mas não o elimina.
-- **Sem impostos** (ganho de capital, IR sobre vendas) e execução ideal: compra e venda exatamente no fechamento, sem diferença entre preço e execução (slippage), além da taxa de 0,1%.
+- **Sem impostos** (ganho de capital, IR sobre vendas). Nas tabelas desta seção (motor antigo), execução ideal: compra e venda exatamente no fechamento, sem spread nem slippage, só a taxa de 0,1%. O pipeline atual executa na abertura seguinte com taxa, spread e slippage ([motor único](#motor-de-backtest)).
 - **A regra atrasa:** a média de 200 dias reage devagar; a regra compra depois da virada e vende depois do topo.
 
 ## Configuração
@@ -486,22 +593,37 @@ Depois de mudar uma regra, rode `uv run python -m src.pipeline --offline` para r
 src/
   pipeline.py              orquestra: atualiza base → analisa → compara com ontem → publica
   positions.py             CLI das suas posições
+  archive.py               CLI da base point-in-time do arquivo oficial da Binance (data/archive)
   config.py                universo de moedas
   extractors/              E — um adaptador por fonte, saída padronizada
     binance_adapter.py       candles 1d (/api/v3/klines)
     coingecko_adapter.py     market cap atual (/coins/markets)
     fng_adapter.py           Fear & Greed Index (alternative.me)
+    binance_archive.py       arquivo oficial data.binance.vision (ZIPs com SHA-256, inclusive pares deslistados)
   transformers/            T — regras de negócio puras, sem I/O
-    universe.py              seleção do universo (exclusões, histórico, volume)
-    strategies.py            sinais de estratégia compartilhados (Donchian, EMAs, volume, recuo na alta)
+    universe.py              seleção do universo de HOJE (exclusões, histórico, volume)
+    point_in_time.py         universo de cada dia só com dados até aquele dia; episódios; eventos de entrada e saída
+    dataset.py               fingerprint dos dados, manifesto por moeda, trilha de revisões de candles
+    costs.py                 modelo de custos (taxa, meio-spread por faixa de volume, slippage)
+    backtest_engine.py       motor único: execução na abertura seguinte, caixa, ordens, custos, reconciliação
+    portfolio_backtest.py    tendência x comprar e segurar x pânico e operações da tendência, no motor único
+    strategies.py            sinais de estratégia compartilhados (Donchian, EMAs, volume, Bollinger, RSI, recuo e queda na alta)
     selection.py             indicadores, score, classificação e motivos de cada moeda
     allocation.py            aporte por moeda dentro do orçamento (volatilidade, limites, arredondamento)
     recommendation.py        contrato daily_signals + recommendation e as suas invariantes
-    selection_backtest.py    backtest da seleção contra referências, com custos
+    selection_backtest.py    backtest da seleção contra referências, no motor único (e o legado run_weighted)
+    metrics.py               métricas de uma série diária de retornos, com convenções e mínimos de amostra
+    bootstrap.py             bootstrap estacionário em blocos: bloco automático, IC, p-valores, ajuste pelo máximo
+    multiple_testing.py      Holm-Bonferroni sobre uma família declarada antes
+    walk_forward.py          dobras de treino, validação e teste; escolha de parâmetros sem ver o teste
+    strategy_catalog.py      todas as estratégias já testadas no projeto, como sinais 0/1 com variações
+    validation.py            protocolo da Fase 3: cenários, dobras, bootstrap conjunto, Holm e classificação
+    evidence.py              critérios pré-registrados e categorias de evidência
+    experiments.py           registro de experimentos: id determinístico, fingerprints, bloqueio de mistura de motores
     data_quality.py          auditoria dos candles e disponibilidade (INDISPONÍVEL)
     anomaly_detector.py      SMA 200, tendência, estágio e alerta de pânico de cada dia (vetorizado)
     daily_alerts.py          alertas de virada contra o dia anterior
-    trade_simulator.py       operações da tendência e backtest de carteira (treino/teste, taxa)
+    trade_simulator.py       sinal de tendência e regras de saída; motores antigos (legado, só para reproduzir)
     panic_backtest.py        a regra antiga do pânico, congelada só para comparação
     notification.py          mensagem do Telegram (pura): relatório, divisão em 4096, validação
     forecast.py              previsão P10/P50/P90 de BTC e ETH contra o baseline
@@ -510,7 +632,9 @@ src/
     market_store.py          base histórica (data/market)
     history_store.py         snapshot diário (data/signals/history)
     positions_store.py       suas posições (data/positions)
-    source_log.py            registro da atualização de cada fonte
+    source_log.py            registro da atualização de cada fonte (última e histórico)
+    archive_store.py         base do arquivo oficial (candles, manifesto, catálogo, sync_log, point-in-time)
+    experiment_store.py      registro e tabelas da validação (data/research/validation), append-only
   notifiers/               envio (rede) de notificações
     telegram.py              sendMessage com timeout, retry e sem vazar o token
     parquet_loader.py        publicação para o painel
@@ -519,6 +643,8 @@ research/
   strategy_lab.py          laboratório: novas estratégias, validação, referência aleatória (data/research/)
   lab.py                   sinais puros, DCA, estatísticas de operações, sorteio
   selection_study.py       estudo da seleção e do aporte variável (data/research/selection_study.parquet)
+  engine_reconciliation.py motor antigo x motor único, uma premissa por vez (data/research/engine_reconciliation.parquet)
+  validation_study.py      validação estatística (Fase 3): família, walk-forward, bootstrap, Holm (data/research/validation/)
 frontend/                  React + TypeScript + Tailwind
   DESIGN.md                contrato visual: tokens, tipografia, componentes, o que evitar
   src/data/                leitura e validação do Parquet + cálculos e textos puros do painel

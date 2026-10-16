@@ -160,6 +160,7 @@ export const REASON_TEXT: Record<ExitReason, string> = {
   STOP: "caiu 20% em relação ao preço de compra — o limite de perda foi atingido",
   TENDENCIA: "o preço fechou abaixo da média dos últimos 200 dias — a tendência de alta acabou",
   MERCADO: "o Bitcoin fechou abaixo da média dos últimos 200 dias — o mercado todo virou para baixo",
+  DESLISTAGEM: "a moeda parou de negociar com a posição aberta — a simulação a dá como perdida",
 };
 
 /** A regra em si, para a explicação de como funciona. */
@@ -167,12 +168,14 @@ export const RULE_TEXT: Record<ExitReason, string> = {
   TENDENCIA: "se o preço fechar o dia abaixo da média dos últimos 200 dias, venda: a tendência de alta acabou",
   MERCADO: "se o Bitcoin fechar abaixo da média dos 200 dias dele, venda também as outras moedas: o mercado virou",
   STOP: "se o preço cair 20% abaixo do que você pagou, venda para não perder mais (proteção extra)",
+  DESLISTAGEM: "não é uma regra de venda: no backtest, moeda que para de negociar com posição aberta conta como perda total",
 };
 
 export const REASON_SHORT: Record<ExitReason, string> = {
   STOP: "Limite de perda",
   TENDENCIA: "Tendência acabou",
   MERCADO: "Mercado virou",
+  DESLISTAGEM: "Parou de negociar",
 };
 
 export interface Verdict {

@@ -270,7 +270,7 @@ function PerformanceTable({ rows, universe, period }: {
   const label = `${PERIOD_NAME[period]} (${periodYears(rows, period)})`;
   return (
     <Table
-      caption={`Resultado da carteira no período ${label}, com taxa de 0,1% em cada compra e venda`}
+      caption={`Resultado da carteira no período ${label}, com taxa, spread e slippage em cada compra e venda`}
       columns={[
         { label }, { label: "Retorno total", numeric: true }, { label: "Por ano", numeric: true, narrow: "hide" },
         { label: "Pior queda", numeric: true }, { label: "Tempo comprado", numeric: true, narrow: "hide" },
@@ -316,9 +316,11 @@ export function BacktestPanel({ performance, trades }: {
           <span>{verdict === null ? "Ainda não há dados suficientes para responder." : VERDICT_HEADLINE[verdict]}</span>
         </p>
         <p className="mt-2 max-w-[72ch] text-muted">
-          Simulamos uma carteira com Bitcoin e Ethereum em partes iguais, com taxa de 0,1% a cada compra e venda. A regra foi
-          escolhida olhando só o período de treino; o período de teste são anos que a escolha não viu. Comprar e segurar
-          significa comprar no começo e nunca vender.
+          Simulamos uma carteira com Bitcoin e Ethereum em partes iguais: o sinal é calculado no fechamento do dia e a
+          compra ou venda acontece na abertura do dia seguinte, pagando taxa de 0,1%, spread e slippage estimados. A regra
+          foi escolhida olhando só o período de treino, mas o período de teste já foi consultado durante o
+          desenvolvimento: leia como resultado exploratório, não como prova. Comprar e segurar significa comprar no começo
+          e nunca vender.
         </p>
         {trend !== null && hold !== null && (
           <div className="mt-6 grid gap-6 sm:grid-cols-2">
@@ -408,8 +410,8 @@ export function BacktestPanel({ performance, trades }: {
 
       <p className="mt-6 max-w-[72ch] text-[13px] text-muted">
         Limites desta análise: só entram moedas que existem hoje (as que sumiram não aparecem, o que favorece os
-        resultados); é uma única história de mercado, com poucos ciclos; não há impostos nem diferença entre o preço
-        do fechamento e o que você de fato consegue pagar. O passado não garante o futuro.
+        resultados); é uma única história de mercado, com poucos ciclos; não há impostos; a abertura do dia seguinte é
+        uma aproximação do preço que você de fato consegue pagar, não uma garantia. O passado não garante o futuro.
       </p>
     </>
   );

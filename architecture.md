@@ -1,4 +1,9 @@
-# crypto-analyzer — Arquitetura de Dados
+# crypto-analyzer — Arquitetura de Dados (camada legada `data/raw`)
+
+> **Documento histórico.** Descreve os scripts de extração da raiz (`extract_*.py`) e a base legada `data/raw/`,
+> anteriores ao pipeline em `src/`. A arquitetura vigente (pipeline diário, base `data/market/`, regras de sinal,
+> seleção e saídas para o painel) está no [README](README.md) e no inventário em
+> [docs/LEGACY.md](docs/LEGACY.md). Em caso de divergência, vale o README.
 
 ## Objetivo
 Extrair até 10 anos de OHLCV (open, high, low, close, volume) de criptomoedas via API pública gratuita e armazenar em formato analítico eficiente para backtests, features e dashboards.
@@ -116,13 +121,11 @@ src/
   loaders/      L — persistência para o frontend
 frontend/       React + TypeScript
 ```
-### Pipeline diário (`src/pipeline.py`, agendado por `run_daily.cmd` às 21:10 BRT)
-1. Extrai 250 dias de candles 1d da Binance (universo em `src/config.py`), market cap atual do CoinGecko e o Fear & Greed.
-2. `anomaly_detector.detect` classifica cada ativo: **COMPRAR** (z-score < -2.5, RSI < 30, F&G < 25), **PREPARAR** (radar: z-score < -1.5 e RSI < 40) ou **NEUTRO**.
-3. `daily_alerts.compare_with_previous` compara com o último dia salvo e gera `COMPRAR AGORA`, `NO RADAR` ou `SAIU DO RADAR`.
-4. Salva `data/signals/history/date=YYYY-MM-DD/signals.parquet` e publica `frontend/public/daily_signals.parquet`.
-
-CoinGecko e F&G são opcionais: se falharem, o pipeline segue (sem F&G nenhum ativo vira COMPRAR). Falha da Binance aborta sem tocar no arquivo publicado.
+### Pipeline diário (`src/pipeline.py`)
+A descrição que existia aqui (COMPRAR quando z-score < -2,5, RSI < 30 e F&G < 25) está **obsoleta**: essa é a
+antiga regra "comprar no pânico", que perdeu dinheiro no backtest. Hoje o pânico é só um alerta informativo
+(`panic`), nunca uma recomendação de compra; a regra de compra de referência é a tendência (fechamento acima da
+SMA 200 da moeda e do BTC) e o aporte vem da camada de seleção. Detalhes atuais: README, "Como funciona".
 
 Formato de saída de todo extrator: chaves `timestamp` (UTC), `source`, `symbol` (`MARKET` para séries globais) + as `value_columns` declaradas pelo adaptador. `BaseExtractor.standardize` garante tipos, unicidade de (timestamp, symbol) e ordenação. Os scripts `extract_*.py` da raiz são a referência de implementação até serem migrados para os adaptadores.
 

@@ -13,8 +13,10 @@ Publica em frontend/public/:
     recommendation.parquet  resumo da recomendação: orçamento, mercado, total sugerido, saldo, evidência, dados
     selection_backtest.parquet  a seleção contra referências simples, com custos, em treino, validação e teste
     history.parquet         histórico de preço, indicadores e estágio (gráficos)
-    backtest.parquet        cada operação histórica da regra de tendência (BTC e ETH)
+    backtest.parquet        cada operação histórica da regra de tendência (BTC e ETH), na abertura seguinte, líquida
     performance.parquet     carteira: tendência x comprar e segurar x pânico, em treino e teste
+Os três backtests (selection_backtest, backtest, performance) usam o motor único (`backtest_engine.py`, premissas
+`config.EXECUTION_MODEL_VERSION`) e o universo point-in-time; os livros são reconciliados antes de publicar.
     forecast.parquet        previsão de 1, 7 e 30 dias de BTC e ETH (faixa P10–P90) contra o baseline
     sources.parquet         quando e como cada fonte foi atualizada (alerta de falha de coleta)
     positions.parquet       suas posições com a recomendação VENDER / SEGURAR
@@ -26,6 +28,7 @@ import argparse
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -33,8 +36,8 @@ import pandas as pd
 
 from .config import (
     BUDGET_BRL,
-    FEE_PER_SIDE,
     FORECAST_SEED,
+    REBALANCE_BAND,
     RECOMMENDED,
     REGIME_FILTER,
     REGIME_SYMBOL,
@@ -42,7 +45,9 @@ from .config import (
     TEST_PERIOD,
     TRAIN_PERIOD,
     UNIVERSE,
+    VALIDATION_BOOTSTRAP,
     VALIDATION_PERIOD,
+    VALIDATION_SEED,
 )
 from .extractors import MARKET_SYMBOL, BaseExtractor, BinanceAdapter, CoinGeckoMarketAdapter, ExtractorError, FearGreedAdapter
 from .extractors.binance_adapter import DEFAULT_HOST as BINANCE_DEFAULT_HOST
@@ -50,6 +55,7 @@ from .notifiers import TelegramError, send_messages, settings_from_env
 from .loaders.history_store import read_previous, write_snapshot
 from .loaders.market_store import (
     MixedSourceError,
+    append_dataset_manifest,
     last_timestamp,
     read_coingecko,
     read_fng,
@@ -67,19 +73,23 @@ from .transformers.allocation import allocate
 from .transformers.notification import data_notes, format_error, format_report, redact, validate_messages
 from .transformers.recommendation import build_recommendation, validate_recommendation
 from .transformers.selection import REGIME_UNAVAILABLE, assess, compute_features, features_on, regime_series
-from .transformers.selection_backtest import evaluate_selection, evidence
+from .transformers.selection_backtest import evaluate_selection_runs, evidence_with_uncertainty
+from .transformers.bootstrap import BootstrapConfig
 from .transformers.strategies import market_from_candles
 from .transformers.data_quality import audit_candles, availability, clean_candles, mark_unavailable
+from .transformers.dataset import combined_fingerprint, dataset_manifest
 from .transformers.daily_alerts import ALERT_BUY, ALERT_EXIT, ALERT_SELL, ALERT_WATCH, compare_with_previous
 from .transformers.position_advisor import ACTION_SELL, ACTION_UNAVAILABLE, advise, realized
 from .transformers.universe import select_universe
+from .transformers.backtest_engine import ExecutionConfig, MarketPanel, panel_from_candles
+from .transformers.costs import CostModel
+from .transformers.point_in_time import universe_history
+from .transformers.portfolio_backtest import performance_summary, trend_trades
 from .transformers.trade_simulator import (
     PERIOD_TEST,
     PERIOD_TRAIN,
     STRATEGY_HOLD,
     STRATEGY_TREND,
-    backtest,
-    performance_summary,
     wide,
 )
 
@@ -142,7 +152,7 @@ def update_base(now: datetime, *, rebuild: bool = False, binance_host: str = BIN
         try:
             candles = BinanceAdapter([symbol], host=binance_host).extract(start, now)
             if not candles.empty:
-                write_ohlcv(candles)
+                write_ohlcv(candles, ingested_at=pd.Timestamp(now))
                 logger.info("%s: +%d candles (%s a %s)", symbol, len(candles),
                             f"{candles['timestamp'].min():%Y-%m-%d}", f"{candles['timestamp'].max():%Y-%m-%d}")
         except (ExtractorError, MixedSourceError) as exc:
@@ -175,8 +185,9 @@ def analyze(
 
     selection = select_universe(UNIVERSE, raw)
     kept = raw[raw["symbol"].isin(selection.kept)]
-    issues = audit_candles(kept)
+    issues = audit_candles(kept, as_of=today)
     candles = clean_candles(kept)
+    dataset = dataset_manifest(candles)  # identidade dos dados desta execução (linhas, intervalo, SHA-256 por moeda)
     fng = read_fng()
 
     history = classify_history(candles, fng)
@@ -195,21 +206,28 @@ def analyze(
     regime = REGIME_UNAVAILABLE if REGIME_SYMBOL in unavailable else str(regimes.get(day, REGIME_UNAVAILABLE))
     assessed = assess(features_on(features, day), regime, unavailable=unavailable)
     allocation, summary = allocate(assessed, budget, regime)
-    selection_perf, _ = evaluate_selection(features, regimes, SELECTION_PERIODS, budget, SELECTION_REBALANCE_DAYS)
+    # Backtests: motor único, mesmas premissas para todas as estratégias e referências, universo point-in-time.
+    bt = backtest_inputs(raw, fng)
+    selection_perf, _, selection_runs = evaluate_selection_runs(
+        bt.features, regime_series(bt.features), SELECTION_PERIODS, budget, SELECTION_REBALANCE_DAYS, bt.panel, bt.cfg,
+        eligible=bt.eligible,
+    )
     signals, recommendation = build_recommendation(
         signals, assessed, allocation, summary,
         run_ts=pd.Timestamp(today), regime=regime, regime_filter=REGIME_FILTER, regime_symbol=REGIME_SYMBOL,
         excluded=[f"{s.split('/')[0]}: {why}" for s, why in selection.dropped.items()],
-        evidence=evidence(selection_perf, "TESTE"),
+        evidence=evidence_with_uncertainty(selection_perf, selection_runs, "TESTE",
+                                           BootstrapConfig(n_boot=VALIDATION_BOOTSTRAP, seed=VALIDATION_SEED)),
         data_notes=data_notes(available, source_errors),
     )
     problems = validate_recommendation(signals, recommendation)
     if problems:
         raise ValueError("recomendação inconsistente, nada publicado: " + "; ".join(problems))
 
-    trades = backtest(history, RECOMMENDED)
+    trades = trend_trades(bt.history, bt.panel, RECOMMENDED, bt.portfolio_cfg, eligible=bt.eligible)
     performance = performance_summary(
-        history, {"PRINCIPAIS": RECOMMENDED, "TODAS": selection.kept}, PERIODS, FEE_PER_SIDE
+        bt.history, bt.panel, {"PRINCIPAIS": RECOMMENDED, "TODAS": bt.symbols}, PERIODS, bt.portfolio_cfg,
+        eligible=bt.eligible,
     )
     positions = _publish_positions(history, available)
     # Só prevê moedas com dado confiável hoje; sem dado, não há previsão (nunca uma antiga apresentada como atual).
@@ -217,6 +235,7 @@ def analyze(
     forecast = forecast_table(wide(history, "close"), usable, VALIDATION, TEST, FORECAST_SEED)
 
     write_snapshot(signals, day)
+    append_dataset_manifest(dataset, pd.Timestamp(today))
     write_parquet(history, PUBLIC_DIR / "history.parquet")
     write_parquet(trades, PUBLIC_DIR / "backtest.parquet")
     write_parquet(performance, PUBLIC_DIR / "performance.parquet")
@@ -229,8 +248,42 @@ def analyze(
     return {
         "signals": signals, "backtest": trades, "performance": performance, "positions": positions, "forecast": forecast,
         "availability": available, "issues": issues, "dropped": dropped, "recommendation": recommendation,
-        "selection_backtest": selection_perf,
+        "selection_backtest": selection_perf, "dataset": dataset,
     }
+
+
+@dataclass(frozen=True)
+class BacktestInputs:
+    history: pd.DataFrame      # indicadores de TODAS as moedas da base (não só as que passam no filtro de hoje)
+    features: pd.DataFrame
+    panel: MarketPanel
+    eligible: pd.DataFrame     # universo point-in-time: elegível em cada dia só com dados até aquele dia
+    symbols: tuple[str, ...]
+    cfg: ExecutionConfig            # seleção: rebalanceamento semanal com banda (config.REBALANCE_BAND)
+    portfolio_cfg: ExecutionConfig  # carteira de peso igual: rebalanceamento diário exato, todo custo cobrado
+
+
+def backtest_inputs(raw: pd.DataFrame, fng: pd.DataFrame) -> BacktestInputs:
+    """Entradas dos backtests a partir da base inteira. O universo de cada dia vem de `point_in_time` (histórico e
+    volume medidos até o dia), e não de `select_universe`, que decide com os dados de hoje. As candidatas continuam
+    sendo as moedas de config.UNIVERSE presentes na base (viés de sobrevivência da lista, documentado)."""
+    candles = clean_candles(raw)
+    history = classify_history(candles, fng)
+    pit = universe_history(candles)
+    eligible = pit.pivot(index="timestamp", columns="symbol", values="eligible").fillna(False).astype(bool)
+    model = CostModel()
+    return BacktestInputs(
+        history=history,
+        features=compute_features(market_from_candles(candles)),
+        panel=panel_from_candles(candles, model),
+        eligible=eligible,
+        symbols=tuple(sorted(candles["symbol"].astype(str).unique())),
+        cfg=ExecutionConfig(costs=model, rebalance_band=REBALANCE_BAND),
+        # Peso igual entre ~32 moedas (~3% cada): uma banda absoluta de 5 pontos transformaria "peso igual" em
+        # "deixar as vencedoras crescerem". A estratégia é a mesma do legado (peso igual todo dia), agora pagando o
+        # rebalanceamento que o legado fazia de graça.
+        portfolio_cfg=ExecutionConfig(costs=model, rebalance_band=0.0),
+    )
 
 
 def _publish_positions(history: pd.DataFrame, available: pd.DataFrame) -> pd.DataFrame:
@@ -256,6 +309,9 @@ def report(result: dict[str, pd.DataFrame], source_errors: pd.DataFrame | None =
     signals, trades, performance, positions = result["signals"], result["backtest"], result["performance"], result["positions"]
     day = pd.Timestamp(signals["timestamp"].max())
     lines = [f"Ciclo {day:%Y-%m-%d} · {len(signals)} ativos · F&G {signals['fng_value'].iloc[0]}"]
+    if "dataset" in result and not result["dataset"].empty:
+        data = result["dataset"]
+        lines.append(f"  dados: {int(data['rows'].sum())} candles de {len(data)} moedas · SHA-256 {combined_fingerprint(data)[:16]}")
     for _, e in (source_errors if source_errors is not None else pd.DataFrame()).iterrows():
         lines.append(f"  AVISO fonte {e['source']} ({e['scope']}): {e['detail']}")
     for _, d in result["dropped"].iterrows():

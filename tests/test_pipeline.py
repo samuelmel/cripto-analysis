@@ -51,6 +51,18 @@ def test_offline_pipeline_runs_and_publishes(workdir: Path, capsys: pytest.Captu
     assert signals["stage_reason"].isna().all()
 
 
+def test_each_run_records_the_fingerprint_of_the_data_it_used(workdir: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from src.loaders.market_store import read_dataset_manifests
+
+    write_ohlcv(_base())
+    assert pipeline.main(["--offline"]) == 0
+    assert pipeline.main(["--offline"]) == 0
+    runs = read_dataset_manifests()
+    assert runs["run_ts"].nunique() == 2
+    assert runs.groupby("symbol")["sha256"].nunique().eq(1).all()  # mesmos dados = mesmo hash
+    assert "SHA-256" in capsys.readouterr().out
+
+
 def test_offline_pipeline_with_stale_base_marks_everything_unavailable(workdir: Path) -> None:
     write_ohlcv(_base())
     result = pipeline.analyze(pd.Timestamp.now(tz="UTC") + pd.Timedelta(days=10))

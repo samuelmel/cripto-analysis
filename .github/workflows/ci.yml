@@ -1,0 +1,82 @@
+name: CI
+
+# Verificações de pull request. Não roda o pipeline diário, não acessa APIs de mercado e não usa segredos:
+# os testes bloqueiam rede (tests/conftest.py) e trabalham só com dados sintéticos.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Instalar o uv (mesma versão do pipeline diário)
+        run: python -m pip install "uv==0.13.0"
+
+      - name: uv.lock coerente com pyproject.toml
+        run: uv lock --check
+
+      - name: requirements.txt gerado do uv.lock (sem divergência)
+        run: |
+          # O cabeçalho gerado traz o caminho de saída: regenera no próprio arquivo e compara com a cópia versionada.
+          cp requirements.txt "${RUNNER_TEMP}/requirements.committed.txt"
+          uv export --format requirements.txt --no-dev --locked --no-emit-project --no-hashes -o requirements.txt
+          diff -u "${RUNNER_TEMP}/requirements.committed.txt" requirements.txt || {
+            echo "::error title=requirements.txt desatualizado::Rode: uv export --format requirements.txt --no-dev --locked --no-emit-project --no-hashes -o requirements.txt"
+            exit 1
+          }
+
+      - name: Nenhum dado gerado, CSV ou segredo versionado
+        run: |
+          bad=$(git ls-files '*.parquet' '*.csv' '.env' '.env.*' | grep -v '^tests/golden/.*\.parquet$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error title=Arquivo proibido versionado::$bad"
+            exit 1
+          fi
+
+      - name: Instalar as dependências (versões travadas)
+        run: uv sync --locked
+
+      - name: Tipagem (mypy --strict)
+        run: uv run mypy --strict src/ mcp_server.py
+
+      - name: Testes
+        run: uv run pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar as dependências (versões travadas)
+        run: npm ci
+
+      - name: Tipagem e build (tsc strict + vite)
+        run: npm run build

@@ -55,7 +55,7 @@ RECOMMENDATION_SCHEMA: dict[str, str] = {
     "n_funded": "Int64",
     "notes": "object",                     # lista de str: limites do orçamento, aportes impraticáveis
     "excluded": "object",                  # lista de str: moedas fora da análise e por quê
-    "evidence": "string",                  # o que o backtest fora da amostra mostrou
+    "evidence": "string",                  # o que o backtest de 2023 em diante (período explorado) mostrou, com incerteza
     "data_status": "string",               # OK / PARCIAL / INDISPONIVEL
     "data_notes": "object",                # lista de str: limitações dos dados nesta execução
 }

@@ -37,6 +37,10 @@ ISSUE_UNORDERED = "fora_de_ordem"
 ISSUE_BAD_PRICE = "preco_invalido"
 ISSUE_MIXED_SOURCES = "fontes_misturadas"
 ISSUE_GAPS = "lacunas"
+ISSUE_OHLC = "ohlc_inconsistente"
+ISSUE_NEGATIVE_VOLUME = "volume_negativo"
+ISSUE_MISALIGNED = "horario_desalinhado"
+ISSUE_UNCLOSED = "candle_nao_fechado"
 
 
 def _invalid_price(candles: pd.DataFrame) -> pd.Series:
@@ -48,8 +52,11 @@ def _invalid_price(candles: pd.DataFrame) -> pd.Series:
     return ~valid
 
 
-def audit_candles(candles: pd.DataFrame) -> pd.DataFrame:
-    """Problemas encontrados nos candles, um por (symbol, tipo), no formato de ISSUE_SCHEMA. Vazio se não há."""
+def audit_candles(candles: pd.DataFrame, as_of: pd.Timestamp | None = None) -> pd.DataFrame:
+    """Problemas encontrados nos candles, um por (symbol, tipo), no formato de ISSUE_SCHEMA. Vazio se não há.
+
+    `as_of` (opcional, injetado): momento da leitura; candle diário que ainda não fechou em `as_of` (abre em D,
+    fecha às 00:00 de D+1) é apontado como `candle_nao_fechado`."""
     if candles.empty:
         return pd.DataFrame({c: pd.Series(dtype=t) for c, t in ISSUE_SCHEMA.items()})
 
@@ -80,6 +87,21 @@ def audit_candles(candles: pd.DataFrame) -> pd.DataFrame:
     days = candles.assign(day=candles["timestamp"].dt.floor("D")).groupby("symbol")["day"]
     span = (days.max() - days.min()).dt.days + 1
     add(ISSUE_GAPS, span - days.nunique(), "dias sem candle entre o primeiro e o último")
+
+    if {"open", "high", "low", "close"} <= set(candles.columns):
+        p = candles[["open", "high", "low", "close"]].apply(pd.to_numeric, errors="coerce")
+        bad = p["high"].lt(p[["open", "close", "low"]].max(axis=1)) | p["low"].gt(p[["open", "close", "high"]].min(axis=1))
+        add(ISSUE_OHLC, bad.groupby(symbol).sum(), "máxima abaixo de abertura/fechamento ou mínima acima deles")
+    for col in ("volume", "quote_volume"):
+        if col in candles.columns:
+            add(ISSUE_NEGATIVE_VOLUME, pd.to_numeric(candles[col], errors="coerce").lt(0).groupby(symbol).sum(),
+                f"{col} negativo")
+    add(ISSUE_MISALIGNED, candles["timestamp"].ne(candles["timestamp"].dt.floor("D")).groupby(symbol).sum(),
+        "candle diário que não abre às 00:00 UTC")
+    if as_of is not None:
+        limit = as_of if as_of.tzinfo else as_of.tz_localize("UTC")
+        open_now = (candles["timestamp"] + pd.Timedelta(days=1)).gt(limit)
+        add(ISSUE_UNCLOSED, open_now.groupby(symbol).sum(), "candle que ainda não tinha fechado no momento da leitura")
 
     return pd.concat(rows, ignore_index=True).astype(ISSUE_SCHEMA) if rows else pd.DataFrame(
         {c: pd.Series(dtype=t) for c, t in ISSUE_SCHEMA.items()}
