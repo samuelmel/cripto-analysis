@@ -117,7 +117,7 @@ Nada disso foi apresentado como restauração da F3.
 **P1 (corrigidas):** motor de pesos com exposição acima de 100% e caixa parado · texto "fora da amostra" · ausência de CI de testes (workflow criado, ainda não executado no GitHub).
 **P1 (abertas):** (a) dois motores com resultados não comparáveis e o mesmo nome de estratégia: exige decisão sobre unificar; (b) viés de sobrevivência do universo: bloqueado por falta de fonte point-in-time.
 
-**P2 (corrigidas):** dependências mortas e `requirements.txt` · testes de loaders · sinalização de possível deslistagem · catálogo de estratégias · classificação de evidência · contagem de dias sem preço.
+**P2 (corrigidas):** estudo completo da seleção, que estava "pendente" na documentação, executado com dados reais (resultado em `docs/backtesting.md`: vantagem não demonstrada) · dependências mortas e `requirements.txt` · testes de loaders · sinalização de possível deslistagem · catálogo de estratégias · classificação de evidência · contagem de dias sem preço.
 **P2 (abertas):** usar o bootstrap e a classificação de evidência também nos outros estudos (`strategy_lab`, `selection_study`) · sensibilidade do regime à janela da média · convenção de execução (fechamento × abertura de D+1) · `data/raw/` e funding rate não integrados · registrar fingerprint no pipeline.
 
 **P3:** módulos órfãos (`storage.py`, `market_metrics.py`) · unificar as duas definições do filtro do BTC · `bfill` em `compute_features` · `requires-python` · stops avaliados no fechamento.
