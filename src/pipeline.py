@@ -12,6 +12,7 @@ Publica em frontend/public/:
     daily_signals.parquet   snapshot do dia: estágio SMA 200, alertas, score, classificação e aporte de cada moeda
     recommendation.parquet  resumo da recomendação: orçamento, mercado, total sugerido, saldo, evidência, dados
     selection_backtest.parquet  a seleção contra referências simples, com custos, em treino, validação e teste
+    market_regimes.parquet  regime de mercado do BTC por dia (tendência e volatilidade, causal); só descrição
     history.parquet         histórico de preço, indicadores e estágio (gráficos)
     backtest.parquet        cada operação histórica da regra de tendência (BTC e ETH)
     performance.parquet     carteira: tendência x comprar e segurar x pânico, em treino e teste
@@ -66,6 +67,7 @@ from .transformers.forecast import forecast_table
 from .transformers.allocation import allocate
 from .transformers.notification import data_notes, format_error, format_report, redact, validate_messages
 from .transformers.recommendation import build_recommendation, validate_recommendation
+from .transformers.regimes import classify_market_regimes
 from .transformers.selection import REGIME_UNAVAILABLE, assess, compute_features, features_on, regime_series
 from .transformers.selection_backtest import evaluate_selection, evidence
 from .transformers.strategies import market_from_candles
@@ -193,6 +195,13 @@ def analyze(
     regimes = regime_series(features)
     unavailable = {str(r.symbol): str(r.reason) for r in available.itertuples() if not bool(r.available)}
     regime = REGIME_UNAVAILABLE if REGIME_SYMBOL in unavailable else str(regimes.get(day, REGIME_UNAVAILABLE))
+    # Regimes de mercado (Fase 4): descrição causal publicada ao lado do regime antigo. Só leitura: não entra em
+    # assess/allocate/evaluate_selection nem em nenhuma regra de compra, venda ou risco.
+    ref = candles[candles["symbol"].eq(REGIME_SYMBOL)]
+    market_regimes = classify_market_regimes(
+        pd.Series(ref["close"].to_numpy(dtype="float64"), index=pd.DatetimeIndex(ref["timestamp"])),
+        pd.Timestamp(today), legacy=regimes,
+    )
     assessed = assess(features_on(features, day), regime, unavailable=unavailable)
     allocation, summary = allocate(assessed, budget, regime)
     selection_perf, _ = evaluate_selection(features, regimes, SELECTION_PERIODS, budget, SELECTION_REBALANCE_DAYS)
@@ -222,6 +231,7 @@ def analyze(
     write_parquet(performance, PUBLIC_DIR / "performance.parquet")
     write_parquet(forecast, PUBLIC_DIR / "forecast.parquet")
     write_parquet(selection_perf, PUBLIC_DIR / "selection_backtest.parquet")
+    write_parquet(market_regimes, PUBLIC_DIR / "market_regimes.parquet")
     write_parquet(read_source_log(), PUBLIC_DIR / "sources.parquet")
     write_parquet(recommendation, PUBLIC_DIR / "recommendation.parquet")
     write_daily_signals(signals)  # por último: o estado final da execução (CLAUDE.md §3)
@@ -229,7 +239,7 @@ def analyze(
     return {
         "signals": signals, "backtest": trades, "performance": performance, "positions": positions, "forecast": forecast,
         "availability": available, "issues": issues, "dropped": dropped, "recommendation": recommendation,
-        "selection_backtest": selection_perf,
+        "selection_backtest": selection_perf, "market_regimes": market_regimes,
     }
 
 

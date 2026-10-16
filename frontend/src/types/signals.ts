@@ -4,6 +4,7 @@
  *   DailySignal   recommendation.SIGNALS_SCHEMA    (daily_signals.parquet: sinal SMA 200 + seleção + aporte)
  *   Recommendation recommendation.RECOMMENDATION_SCHEMA (recommendation.parquet, uma linha)
  *   SelectionPerf selection_backtest.SELECTION_PERF_SCHEMA (selection_backtest.parquet)
+ *   MarketRegime  regimes.REGIME_SCHEMA            (market_regimes.parquet, opcional: regime de mercado por dia)
  *   HistoryPoint  anomaly_detector.HISTORY_SCHEMA  (history.parquet)
  *   Trade         trade_simulator.TRADE_SCHEMA     (backtest.parquet)
  *   Performance   trade_simulator.PERFORMANCE_SCHEMA (performance.parquet)
@@ -42,6 +43,16 @@ export type Opportunity = (typeof OPPORTUNITIES)[number];
 
 export const REGIMES = ["FAVORAVEL", "NEUTRO", "DEFENSIVO", "INDISPONIVEL"] as const;
 export type Regime = (typeof REGIMES)[number];
+
+/** Regimes de mercado (transformers/regimes.py), separados de `Regime`: outro significado, outro tipo. */
+export const MARKET_TREND_REGIMES = ["ALTA", "BAIXA", "LATERAL", "MISTO", "INDETERMINADO", "INDISPONIVEL"] as const;
+export type MarketTrendRegime = (typeof MARKET_TREND_REGIMES)[number];
+
+export const MARKET_VOL_REGIMES = ["NORMAL", "ALTA", "INDISPONIVEL"] as const;
+export type MarketVolRegime = (typeof MARKET_VOL_REGIMES)[number];
+
+export const REGIME_STATUSES = ["OK", "SEM_CANDLE", "DADO_INVALIDO", "HISTORICO_INSUFICIENTE", "DADOS_INCOMPLETOS"] as const;
+export type RegimeStatus = (typeof REGIME_STATUSES)[number];
 
 export const DECISIONS = ["NAO_INVESTIR", "APORTE_PEQUENO", "APORTE_PARCIAL", "APORTE_AMPLO"] as const;
 export type Decision = (typeof DECISIONS)[number];
@@ -314,10 +325,35 @@ export interface ClosedPosition {
   readonly pnl_usd: number;
 }
 
+/**
+ * Uma linha de market_regimes.parquet: o regime do BTC no dia `timestamp`, conhecido só a partir de `known_at`
+ * (fechamento do candle). Não há probabilidade: as regras não são um modelo calibrado.
+ */
+export interface MarketRegime {
+  readonly timestamp: Date;
+  readonly known_at: Date;
+  readonly symbol: string;
+  readonly close: number | null;
+  readonly dist_ma_pct: number | null;
+  readonly slope_ma_pct: number | null;
+  readonly vol_ann_pct: number | null;
+  readonly vol_rank_pct: number | null;
+  readonly trend_raw: MarketTrendRegime | null;
+  readonly trend_regime: MarketTrendRegime;
+  readonly vol_regime: MarketVolRegime;
+  readonly status: RegimeStatus;
+  readonly vol_status: RegimeStatus;
+  readonly legacy_regime: Regime | null;
+  readonly classifier_version: string;
+  readonly params_hash: string;
+  readonly data_fingerprint: string;
+}
+
 export interface Dashboard {
   readonly signals: readonly DailySignal[];
   readonly recommendation: Recommendation;
   readonly selectionPerf: readonly SelectionPerf[];
+  readonly marketRegimes: readonly MarketRegime[];
   readonly history: readonly HistoryPoint[];
   readonly trades: readonly Trade[];
   readonly performance: readonly Performance[];

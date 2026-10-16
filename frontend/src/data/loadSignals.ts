@@ -9,8 +9,11 @@ import {
   EXIT_REASONS,
   FORECAST_ROLES,
   LAB_PERIODS,
+  MARKET_TREND_REGIMES,
+  MARKET_VOL_REGIMES,
   PERIODS,
   PORTFOLIOS,
+  REGIME_STATUSES,
   STAGES,
   SOURCE_STATUSES,
   STRATEGIES,
@@ -21,6 +24,7 @@ import {
   type Forecast,
   type HistoryPoint,
   type LabResult,
+  type MarketRegime,
   type Performance,
   type Position,
   type Recommendation,
@@ -143,6 +147,26 @@ const parseSelectionPerf = (r: Row): SelectionPerf => ({
   n_trades: numOrNull(r, "n_trades"),
   cost_pct: numOrNull(r, "cost_pct"),
   rebalance_days: numOrNull(r, "rebalance_days"),
+});
+
+const parseMarketRegime = (r: Row): MarketRegime => ({
+  timestamp: date(r, "timestamp"),
+  known_at: date(r, "known_at"),
+  symbol: str(r, "symbol"),
+  close: numOrNull(r, "close"),
+  dist_ma_pct: numOrNull(r, "dist_ma_pct"),
+  slope_ma_pct: numOrNull(r, "slope_ma_pct"),
+  vol_ann_pct: numOrNull(r, "vol_ann_pct"),
+  vol_rank_pct: numOrNull(r, "vol_rank_pct"),
+  trend_raw: oneOfOrNull(MARKET_TREND_REGIMES, r, "trend_raw"),
+  trend_regime: oneOf(MARKET_TREND_REGIMES, r, "trend_regime"),
+  vol_regime: oneOf(MARKET_VOL_REGIMES, r, "vol_regime"),
+  status: oneOf(REGIME_STATUSES, r, "status"),
+  vol_status: oneOf(REGIME_STATUSES, r, "vol_status"),
+  legacy_regime: oneOfOrNull(REGIMES, r, "legacy_regime"),
+  classifier_version: str(r, "classifier_version"),
+  params_hash: str(r, "params_hash"),
+  data_fingerprint: str(r, "data_fingerprint"),
 });
 
 /** A recomendação tem de ser da mesma execução de daily_signals e respeitar o orçamento; senão o painel não a mostra. */
@@ -307,10 +331,11 @@ async function optionalRows(url: string): Promise<readonly Row[]> {
 
 /** Leitura: baixa e valida tudo que o pipeline publicou (a escrita fica em api.ts). */
 export async function loadDashboard(base = ""): Promise<Dashboard> {
-  const [signals, recs, selectionPerf, history, trades, performance, forecast, sources, lab, positions, closed] = await Promise.all([
+  const [signals, recs, selectionPerf, marketRegimes, history, trades, performance, forecast, sources, lab, positions, closed] = await Promise.all([
     fetchRows(`${base}/daily_signals.parquet`),
     fetchRows(`${base}/recommendation.parquet`),
     optionalRows(`${base}/selection_backtest.parquet`),
+    optionalRows(`${base}/market_regimes.parquet`),
     fetchRows(`${base}/history.parquet`),
     fetchRows(`${base}/backtest.parquet`),
     fetchRows(`${base}/performance.parquet`),
@@ -330,6 +355,7 @@ export async function loadDashboard(base = ""): Promise<Dashboard> {
     signals: parsed,
     recommendation,
     selectionPerf: selectionPerf.map(parseSelectionPerf),
+    marketRegimes: marketRegimes.map(parseMarketRegime),
     history: history.map(parseHistory),
     trades: trades.map(parseTrade),
     performance: performance.map(parsePerformance),

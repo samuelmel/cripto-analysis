@@ -198,6 +198,33 @@ hipótese conservadora (não há livro de ofertas nas fontes integradas), não u
 SLIPPAGE = 0.0005
 """Slippage estimado por lado (0,05%) para ordens pequenas a mercado."""
 
+# ---------------------------------------------------------------------------------------------
+# Classificação de regimes de mercado (transformers/regimes.py). Valores fixados a priori, por critério econômico,
+# sem olhar o desempenho de nenhuma estratégia. Mudou aqui, muda `params_hash` na saída (rastreabilidade).
+# ---------------------------------------------------------------------------------------------
+
+REGIME_MA_WINDOW = 200
+"""Média móvel de tendência de longo prazo (dias), a mesma referência da regra principal."""
+REGIME_SLOPE_DAYS = 30
+"""Inclinação = variação da média móvel em 30 dias (a média de 200 dias muda devagar; 30 dias separa alta de queda)."""
+REGIME_TREND_BAND = 0.05
+"""Zona morta do preço em torno da média: dentro de ±5% o preço não está nem acima nem abaixo com clareza."""
+REGIME_SLOPE_FLAT = 0.02
+"""Zona morta da inclinação: a média variar menos de ±2% em 30 dias vale como 'plana'."""
+REGIME_CONFIRM_DAYS = 5
+"""Um estado de tendência só é adotado depois de 5 dias seguidos iguais (reduz trocas por ruído). Custo: atraso."""
+REGIME_VOL_WINDOW = 30
+"""Volatilidade realizada: desvio dos retornos log de 30 dias, anualizado (365)."""
+REGIME_VOL_ENTER = 0.80
+"""Entra em volatilidade ALTA quando a volatilidade de hoje supera 80% dos valores do PASSADO do próprio ativo."""
+REGIME_VOL_EXIT = 0.70
+"""Sai de volatilidade ALTA quando cai abaixo do percentil 70 do passado (histerese: evita oscilar no limiar)."""
+REGIME_VOL_MIN_HISTORY = 365
+"""Observações passadas de volatilidade exigidas antes de classificar a volatilidade (aquecimento do percentil)."""
+REGIME_MIN_COVERAGE = 0.90
+"""Fração mínima de dias com candle dentro de cada janela. Abaixo disso o regime fica DADOS_INCOMPLETOS; nada é
+preenchido com zero nem com preço repetido."""
+
 SELECTION_REBALANCE_DAYS = 7
 """Backtest da seleção: a carteira simulada segue a recomendação a cada 7 dias (rodar todo dia trocaria de
 moeda por ruído e pagaria mais custo)."""
