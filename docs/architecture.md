@@ -110,6 +110,10 @@ src/
     selection_backtest.py    backtest da seleção contra referências, com custos
     regimes.py               regime de mercado causal (tendência e volatilidade), versionado
     regime_evaluation.py     estabilidade e diagnóstico dos regimes (puro)
+    regime_policy.py         (pesquisa, fora da produção) regime -> estratégia, Fase 5
+    policy_experiment.py     (pesquisa) cenário: baselines e políticas sob as mesmas condições
+    policy_study.py          (pesquisa) protocolo completo, bootstrap e Holm
+    policy_evaluation.py     (pesquisa) métricas, bootstrap em blocos, Holm, fingerprints
     trade_simulator.py       operações da tendência e backtest de carteira
     panic_backtest.py        a regra antiga do pânico, congelada para comparação
     forecast.py              previsão P10/P50/P90 contra a referência
@@ -121,6 +125,7 @@ src/
     positions_store.py       suas posições (data/positions)
     source_log.py            registro de atualização das fontes
     parquet_loader.py        publicação atômica para o painel
+    experiment_log.py        (pesquisa) registro append-only de experimentos
   notifiers/
     telegram.py              sendMessage com timeout e retry, sem vazar o token
 research/
@@ -129,6 +134,7 @@ research/
   lab.py                   sinais puros, DCA, estatísticas de operações, sorteio
   selection_study.py       estudo completo da seleção e do aporte
   regime_study.py          estudo temporal dos regimes de mercado
+  regime_policy_study.py   seleção de estratégias por regime (Fase 5, exploratório)
 frontend/
   DESIGN.md                contrato visual
   server/positionsApi.ts   rota local do dev server para registrar posições

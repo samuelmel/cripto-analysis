@@ -42,6 +42,7 @@ Não existe um workflow de CI que rode esses testes a cada push. O único workfl
 | `test_forecast.py`, `test_lab.py` | Previsão walk-forward e laboratório de estratégias |
 | `test_pipeline.py` | Pipeline de ponta a ponta, offline |
 | `test_regimes.py` | Regimes de mercado: causalidade, dados ausentes, reprodutibilidade, integração e contrato com o frontend |
+| `test_regime_policy.py` | Fase 5 (pesquisa): políticas por regime, custos de transição, baselines, bootstrap, registro de experimentos e isolamento da produção |
 
 ## Mudanças comuns
 

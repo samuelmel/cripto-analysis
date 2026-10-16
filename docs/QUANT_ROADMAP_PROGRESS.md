@@ -1,6 +1,6 @@
 # Roadmap quantitativo: progresso verificado
 
-Este arquivo registra o que foi **verificado no código e nos testes deste repositório**, não o que foi planejado ou relatado em conversas anteriores. Última atualização: Fase 4, 16/10/2026.
+Este arquivo registra o que foi **verificado no código e nos testes deste repositório**, não o que foi planejado ou relatado em conversas anteriores. Última atualização: Fase 5, 16/10/2026.
 
 > [!WARNING]
 > O enunciado da Fase 4 descreve as Fases 0 a 3 (coleta point-in-time com checksums, motor único com execução em D+1, validação estatística com bootstrap temporal, controle de múltiplas comparações e registro de experimentos). Ao inspecionar este repositório (`crypto-analyzer`, branch `main`), **esses artefatos não foram encontrados**. Também não existiam `docs/QUANT_ROADMAP_PROGRESS.md` nem `docs/LEGACY.md` antes desta atualização. Nada abaixo presume que trabalho de outra sessão ou de outro repositório (`cripto-analysis`) esteja disponível aqui.
@@ -85,6 +85,70 @@ Resumo; lista completa em [regimes.md](regimes.md): uma única série e uma úni
 4. Decisão explícita, com evidência fora da amostra, sobre a janela da média e a confirmação.
 5. Autorização explícita para qualquer mudança na estratégia de referência ou nas regras de compra, venda e stop.
 
-### Estado do Git
+### Estado do Git (Fase 4)
 
-Nenhum commit nem push foi feito. As alterações anteriores não commitadas (README, remoção dos scripts antigos, `docs/` não rastreada) foram preservadas.
+A Fase 4 foi commitada localmente (`d45b976`, sem push) a pedido do usuário. As alterações antigas não commitadas (README, remoção dos scripts antigos, parte de `docs/`) foram preservadas fora desse commit.
+
+## Fase 5: seleção de estratégias por regime (pesquisa)
+
+Protocolo, resultados e limitações: [regime_policy.md](regime_policy.md). Estudo de pesquisa isolado da produção: **nada** em `pipeline.py`, seleção, alocação, recomendação, painel ou Telegram foi alterado, e um teste confere que a produção não importa os módulos novos.
+
+### Auditoria inicial (o que existia)
+
+Fase 4 presente, com os 32 testes passando; motor `selection_backtest.run_weighted` (execução no fechamento de `D`, sem convenção de abertura de D+1); baselines em `baseline_targets`. **Ausentes:** bootstrap e intervalos para estratégias, controle de múltiplas comparações, Sortino e tempo de recuperação, registro de experimentos. Foram implementados só os componentes mínimos para esta fase, sem declarar a Fase 3 restaurada.
+
+### Resultado
+
+**Hipótese principal não sustentada; resultado inconclusivo, com estimativa pontual nula ou negativa.** Primária (`P1_DEFENSIVA` contra `TENDENCIA_SMA200`): diferença de Sharpe −0,07, IC 95% [−0,20; +0,06], p = 0,31. Das 20 comparações da família, nenhuma tem p < 0,05 antes do ajuste (mínimo 0,08) e todos os p de Holm são 1,0. A diferença da primária é negativa nas 12 variantes de robustez. A política aprendida (`P5`) foi a pior da família. Não há base para integrar nada à produção.
+
+### Achado sobre o motor existente
+
+A faixa de tolerância de 5 p.p. de `run_weighted` deixa carteiras largas (cerca de 30 moedas) com exposição média de só 57% (`COMPRAR_E_SEGURAR`) e permite exposição bruta de até 106% (`MOMENTO_SIMPLES`). Vale igual para todas as políticas e não foi corrigido (mudaria o backtest de produção). Com faixa zero o baseline fica 99,7% investido (Sharpe 0,64) e a conclusão não muda. O `selection_backtest.parquet` publicado pelo pipeline carrega o mesmo artefato.
+
+### Arquivos criados
+
+| Arquivo | Papel |
+|---|---|
+| `src/transformers/regime_policy.py` | Tabelas de regime → estratégia (`regime-policy-1.0.0`), política aprendida só com o passado, guarda de `known_at` |
+| `src/transformers/policy_experiment.py` | Cenário: baselines, candidatas e políticas sob as mesmas condições |
+| `src/transformers/policy_study.py` | Protocolo completo, comparações, Holm, robustez |
+| `src/transformers/policy_evaluation.py` | Métricas (Sharpe, Sortino, quedas), bootstrap em blocos, Holm, tamanho efetivo, fingerprints |
+| `src/loaders/experiment_log.py` | Registro append-only de experimentos |
+| `research/regime_policy_study.py` | Execução e gravação em `data/research/` |
+| `tests/test_regime_policy.py` | 20 testes |
+| `docs/regime_policy.md` | Protocolo (escrito antes da primeira execução), resultados e desvios |
+
+### Verificações executadas (16/10/2026)
+
+| Comando | Resultado |
+|---|---|
+| `uv run pytest` | 203 passaram (183 anteriores + 20 novos), 0 falhas |
+| `uv run mypy --strict src/ mcp_server.py` | Sem erros (41 arquivos) |
+| `uv lock --check` / `uv sync --locked --dry-run` | Consistente; sem mudanças |
+| `npm run build` (em `frontend/`) | Passou (o frontend não foi alterado) |
+| `uv run python research/regime_policy_study.py` | Executado duas vezes na revisão 2; a segunda confirmou "reproduzido" (mesmo hash de resultados) |
+| Mutação (regime de outro dia na decisão; P5 treinando com o ano corrente) | Os testes de causalidade falharam nos dois casos |
+
+### Critérios de conclusão
+
+| Critério | Situação |
+|---|---|
+| Implementação real auditada | **Cumprido** |
+| Política definida, versionada e testada | **Cumprido** (4 tabelas fixas + 1 aprendida) |
+| Sem vazamento temporal conhecido | **Cumprido** (truncamento do futuro, alteração de preços futuros e treino de P5 testados; mutações detectadas) |
+| Baselines sob condições equivalentes | **Cumprido, com ressalva**: mesmo motor, calendário, custos e capital inicial em caixa; o artefato da faixa de tolerância está documentado e há variante sem faixa |
+| Avaliação temporal documentada | **Parcial**: anos civis, `VALIDACAO` e `TESTE`, mas **não há período prospectivo intocado**; tudo é exploratório |
+| Custos de transição incluídos | **Cumprido** |
+| Incerteza e múltiplas comparações | **Cumprido, com ressalva**: bootstrap em blocos e Holm implementados; blocos de 20 dias provavelmente subestimam a incerteza de regimes longos |
+| Resultados negativos preservados | **Cumprido** (registro append-only, duas revisões, resultados completos em Parquet) |
+| Testes e verificações executados | **Cumprido** (tabela acima) |
+| Documentação permite reproduzir | **Cumprido** |
+| Produção inalterada | **Cumprido** |
+
+### O que ainda precisa ser verificado nas Fases 0–4
+
+Fases 0–3 continuam como no quadro do início (parcial ou não encontrado). Fase 4: a sensibilidade à janela da média (150/250 dias mudam ~17–20% dos rótulos) e a ausência de evidência de que os regimes separem retornos futuros seguem sem resolução. Motor: decidir se a faixa de tolerância deve mudar (afeta o `selection_backtest.parquet` de produção) e se a execução deve passar à abertura de D+1. Validação: um período prospectivo só existirá com dados futuros.
+
+### Estado do Git (Fase 5)
+
+Nenhum commit, push, merge ou rebase da Fase 5. Todas as alterações estão no diretório de trabalho, junto com as pendências antigas, que foram preservadas.
