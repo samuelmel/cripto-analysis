@@ -32,6 +32,7 @@ from src.loaders.experiment_log import NEW, append_experiment  # noqa: E402
 from src.loaders.market_store import read_ohlcv  # noqa: E402
 from src.loaders.parquet_loader import write_parquet  # noqa: E402
 from src.transformers.data_quality import clean_candles  # noqa: E402
+from src.transformers.series_continuity import ContinuityRules, split_discontinuities  # noqa: E402
 from src.transformers.policy_evaluation import data_fingerprint, experiment_id, results_digest  # noqa: E402
 from src.transformers.signal_validation import (  # noqa: E402
     STATUS_VALIDATED,
@@ -70,13 +71,22 @@ def git_state() -> tuple[str, bool]:
         return "desconhecido", True
 
 
-def load_candles() -> pd.DataFrame:
+CONTINUITY_DIR = EVIDENCE_DIR / "continuidade_v1"
+CONTINUITY_REPORT = EVIDENCE_DIR / "continuity_report.parquet"
+
+
+def load_candles(continuity: bool = False) -> pd.DataFrame:
     folders = sorted((PIT_DIR / "ohlcv_1d").glob("symbol=*"))
     symbols = [f.name[len("symbol="):].replace("_", "/") for f in folders]
     raw = read_ohlcv(symbols, PIT_DIR)
     if raw.empty or config.REGIME_SYMBOL not in set(raw["symbol"]):
         raise SystemExit("base point-in-time ausente ou sem BTC: rode research/build_pit_database.py antes")
-    return clean_candles(raw)
+    cleaned = clean_candles(raw)
+    if not continuity:
+        return cleaned
+    segmented, report = split_discontinuities(cleaned, ContinuityRules())
+    write_parquet(report, CONTINUITY_REPORT)
+    return segmented
 
 
 def cmd_counts() -> int:
@@ -97,19 +107,22 @@ def cmd_counts() -> int:
     return 0
 
 
-def cmd_run(allow_second: bool) -> int:
+def cmd_run(allow_second: bool, continuity: bool = False) -> int:
     n_min = int(getattr(config, "VALIDATION_MIN_INDEPENDENT", 0))
     if n_min < 1:
         print("config.VALIDATION_MIN_INDEPENDENT (N_MIN) ainda não foi fixado: rode `counts` e fixe-o antes")
         return 1
     rules = ValidationRules()
-    candles = load_candles()
+    candles = load_candles(continuity)
     fingerprint = data_fingerprint(candles)
+    classifier = CLASSIFIER + (f"+{config.CONTINUITY_VERSION}" if continuity else "")
+    evidence_path = CONTINUITY_DIR / EVIDENCE_PATH.name if continuity else EVIDENCE_PATH
+    detail_path = CONTINUITY_DIR / DETAIL_PATH.name if continuity else DETAIL_PATH
     cfg = {
         "horizons": list(rules.horizons), "development_end": rules.development_end, "holdout_start": rules.holdout_start,
         "alpha": rules.alpha, "seed": rules.seed, "null_draws": rules.null_draws, "resamples": rules.resamples,
         "n_min": n_min, "holdout_min_signals": rules.holdout_min_signals, "engine": ENGINE_LABEL,
-        "classifier": CLASSIFIER,
+        "classifier": classifier,
         "pit": {**{k: v for k, v in vars(rules.pit).items() if k != "excluded"}, "excluded": sorted(rules.pit.excluded)},
     }
     exp_id = experiment_id(cfg, fingerprint)
@@ -130,7 +143,7 @@ def cmd_run(allow_second: bool) -> int:
     head, dirty = git_state()
     record: dict[str, object] = {
         "experiment_id": exp_id, "created_at": pd.Timestamp.now(tz="UTC"), "code_version": head, "working_tree_dirty": dirty,
-        "data_fingerprint": fingerprint, "classifier_version": CLASSIFIER, "classifier_params_hash": experiment_id(cfg, "-")[:16],
+        "data_fingerprint": fingerprint, "classifier_version": classifier, "classifier_params_hash": experiment_id(cfg, "-")[:16],
         "policy_version": "comprar-sma200-v1", "universe": "PIT_USDT",
         "period_start": pd.Timestamp(candles["timestamp"].min()), "period_end": pd.Timestamp(candles["timestamp"].max()),
         "seed": rules.seed, "bootstrap_block": 0, "bootstrap_resamples": rules.resamples,
@@ -138,12 +151,13 @@ def cmd_run(allow_second: bool) -> int:
         "n_hypotheses": tested,  # combinações (moeda, horizonte) efetivamente testadas (família do Holm)
         "config_json": str(cfg) + f" | candidatas={candidates}",
         "results_digest": results_digest(detail.drop(columns=["symbol"]).assign(symbol=detail["symbol"].astype(str)).select_dtypes("number")),
-        "results_file": str(EVIDENCE_PATH), "status": STATUS_HOLDOUT_DONE, "limitations": LIMITATIONS,
+        "results_file": str(evidence_path), "status": STATUS_HOLDOUT_DONE, "limitations": LIMITATIONS,
     }
     outcome = append_experiment(record, REGISTRY_PATH)
-    write_parquet(final, EVIDENCE_PATH)
-    write_parquet(detail, DETAIL_PATH)
-    write_parquet(final, FRONTEND_COPY)
+    write_parquet(final, evidence_path)
+    write_parquet(detail, detail_path)
+    if not continuity:  # a versão com continuidade não troca a evidência que o pipeline lê (decisão separada)
+        write_parquet(final, FRONTEND_COPY)
 
     print(f"experimento {exp_id} ({'novo' if outcome == NEW else outcome}) · dados {fingerprint[:12]} · código {head[:10]}"
           f"{' (árvore com alterações)' if dirty else ''} · N_MIN {n_min}")
@@ -164,8 +178,9 @@ def main() -> int:
     sub.add_parser("counts")
     run = sub.add_parser("run")
     run.add_argument("--allow-second-holdout", action="store_true")
+    run.add_argument("--continuity", action="store_true", help="aplica docs/data_continuity.md (saída em evidence/continuidade_v1/)")
     args = parser.parse_args()
-    return cmd_counts() if args.cmd == "counts" else cmd_run(bool(args.allow_second_holdout))
+    return cmd_counts() if args.cmd == "counts" else cmd_run(bool(args.allow_second_holdout), bool(args.continuity))
 
 
 if __name__ == "__main__":

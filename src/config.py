@@ -328,3 +328,8 @@ VALIDATION_MIN_INDEPENDENT = 12
 (sem nenhum retorno): no desenvolvimento, 20 moedas têm >= 12 sinais independentes em 7 dias e 11 em 30 dias (15 ou
 mais: 15 e 7 moedas). Abaixo de ~12 observações o bootstrap em blocos (bloco 3) e o valor-p da referência aleatória
 deixam de ser confiáveis; 12 mantém a família de Holm pequena sem deixar quase nenhuma moeda avaliável."""
+
+# --- Continuidade das séries (docs/data_continuity.md): uma quebra divide o par em instrumentos distintos.
+CONTINUITY_VERSION = "continuidade-v1"
+CONTINUITY_GAP_DAYS = 3            # 2 ou mais candles diários ausentes seguidos
+CONTINUITY_MAX_UP_JUMP = 10.0      # fechamento subindo mais de 10x em um dia (queda grande NÃO é quebra)

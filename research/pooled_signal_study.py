@@ -23,6 +23,7 @@ from research.signal_evidence_study import (  # noqa: E402
     git_state,
     load_candles,
 )
+from src import config  # noqa: E402
 from src.loaders.experiment_log import NEW, append_experiment  # noqa: E402
 from src.loaders.parquet_loader import write_parquet  # noqa: E402
 from src.transformers.policy_evaluation import data_fingerprint, experiment_id, results_digest  # noqa: E402
@@ -36,9 +37,11 @@ from src.transformers.pooled_validation import (  # noqa: E402
 )
 from src.transformers.signal_validation import ValidationRules, prepare, stable_seed  # noqa: E402
 
-RESULT_PATH = EVIDENCE_DIR / "pooled_signal_evidence.parquet"
-SENSITIVITY_PATH = EVIDENCE_DIR / "pooled_signal_sensitivity.parquet"
-CLASSIFIER = "sma200+btc-regime:pooled-v1"
+CONTINUITY = "--continuity" in sys.argv[1:]
+OUT_DIR = EVIDENCE_DIR / "continuidade_v1" if CONTINUITY else EVIDENCE_DIR
+RESULT_PATH = OUT_DIR / "pooled_signal_evidence.parquet"
+SENSITIVITY_PATH = OUT_DIR / "pooled_signal_sensitivity.parquet"
+CLASSIFIER = "sma200+btc-regime:pooled-v1" + (f"+{config.CONTINUITY_VERSION}" if CONTINUITY else "")
 LIMITATIONS = (
     "Segunda olhada nos mesmos dados de desenvolvimento, motivada pelo resultado nulo por moeda; pares renomeados são "
     "distintos; retorno em horizonte fixo sem stop; referência inclui a deriva da própria moeda; poucos ciclos de mercado; "
@@ -49,7 +52,7 @@ LIMITATIONS = (
 def main() -> int:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     rules = ValidationRules()
-    candles = load_candles()
+    candles = load_candles(CONTINUITY)
     fingerprint = data_fingerprint(candles)
     prep = prepare(candles, rules)
     final = apply_pooled_holdout(evaluate_pooled(prep, rules), prep, rules)
