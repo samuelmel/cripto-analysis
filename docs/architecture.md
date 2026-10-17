@@ -114,7 +114,7 @@ src/
     policy_experiment.py     (pesquisa) cenário: baselines e políticas sob as mesmas condições
     policy_study.py          (pesquisa) protocolo completo, bootstrap e Holm
     policy_evaluation.py     (pesquisa) métricas, bootstrap em blocos, Holm, fingerprints, classificação de evidência
-    strategy_catalog.py      (pesquisa) catálogo das estratégias e do estado da evidência
+    strategy_evidence_catalog.py (pesquisa) catálogo das estratégias e do estado da evidência
     trade_simulator.py       operações da tendência e backtest de carteira
     panic_backtest.py        a regra antiga do pânico, congelada para comparação
     forecast.py              previsão P10/P50/P90 contra a referência

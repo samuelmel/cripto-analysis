@@ -49,6 +49,7 @@ import numpy as np
 import pandas as pd
 
 from .. import config
+from . import costs
 from .strategies import Market, daily, donchian_breakout, ema_cross, pullback_in_uptrend, rsi, volume_breakout
 
 OPP_STRONG = "BOA_RELATIVA"
@@ -180,6 +181,10 @@ class SelectionRules:
         if not 0 <= self.score_moderate <= self.score_strong <= 100:
             raise ValueError("precisa 0 <= SCORE_MODERATE <= SCORE_STRONG <= 100")
 
+    @property
+    def cost_model(self) -> costs.CostModel:
+        return costs.CostModel(fee_rate=self.fee_per_side, slippage=self.slippage, spread_tiers=self.spread_tiers)
+
 
 # ---------------------------------------------------------------------------------------------
 # 1. Indicadores
@@ -190,12 +195,9 @@ def _param(rules: SelectionRules, setup: str, key: str) -> float:
 
 
 def cost_per_side(avg_volume: pd.DataFrame, rules: SelectionRules) -> pd.DataFrame:
-    """Taxa + meia-largura do spread estimado pela faixa de volume + slippage, por lado (fração)."""
-    spread = pd.DataFrame(np.nan, index=avg_volume.index, columns=avg_volume.columns)
-    for floor, half in sorted(rules.spread_tiers, key=lambda t: t[0]):  # da faixa mais baixa para a mais alta
-        spread = spread.mask(avg_volume.ge(floor), half)
-    worst = max(half for _, half in rules.spread_tiers)
-    return spread.fillna(worst) + rules.fee_per_side + rules.slippage
+    """Taxa + meia-largura do spread estimado pela faixa de volume + slippage, por lado (fração). Mesmo modelo de
+    custos do motor de backtest (`costs.py`)."""
+    return costs.cost_per_side(avg_volume, rules.cost_model)
 
 
 def compute_features(market: Market, rules: SelectionRules = SelectionRules()) -> pd.DataFrame:

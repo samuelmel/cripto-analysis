@@ -462,7 +462,7 @@ def test_evidence_grade_never_reaches_confirmed_without_a_prospective_period() -
 
 def test_every_strategy_name_used_by_the_engines_is_in_the_catalog_and_none_is_confirmed() -> None:
     from src.transformers import selection_backtest, trade_simulator
-    from src.transformers.strategy_catalog import BY_NAME, CATALOG, KINDS, confirmed_robust
+    from src.transformers.strategy_evidence_catalog import BY_NAME, CATALOG, KINDS, confirmed_robust
 
     used = {v for k, v in vars(selection_backtest).items() if k.startswith("STRATEGY_") and isinstance(v, str)}
     used |= {v for k, v in vars(trade_simulator).items() if k.startswith("STRATEGY_") and isinstance(v, str)}

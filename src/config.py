@@ -73,6 +73,30 @@ EXCLUDED_BASES: dict[str, str] = {
 LEVERAGED_SUFFIXES: tuple[str, ...] = ("UP", "DOWN", "BULL", "BEAR")
 """Token alavancado = símbolo de outra moeda do UNIVERSE + um destes sufixos (ex.: BTCUP, ETHBEAR)."""
 
+NON_CRYPTO_BASES: dict[str, str] = {
+    **{b: "stablecoin" for b in (
+        "BUSD", "USDP", "PAX", "TUSD", "USDC", "USDT", "FDUSD", "DAI", "FRAX", "SUSD", "USDE", "USDS", "USDSB",
+        "USDSOLD", "USD1", "RLUSD", "XUSD", "BFUSD", "AEUR", "EURI",
+    )},
+    "UST": "stablecoin algorítmica (Terra; colapsou em 2022, foi renomeada USTC)",
+    "USTC": "stablecoin algorítmica (ex-UST)",
+    **{b: "moeda fiduciária" for b in ("EUR", "GBP", "AUD", "BKRW")},
+    **{b: "token lastreado em ouro: não é cripto" for b in ("PAXG", "XAUT")},
+    "WBTC": "duplicata do BTC (BTC embrulhado em outra rede)",
+    "WBETH": "derivativo do ETH (staking líquido da Binance)",
+    "BETH": "derivativo do ETH (ETH em staking na Binance)",
+    "BNSOL": "derivativo do SOL (staking líquido da Binance)",
+}
+"""Universo HISTÓRICO (point-in-time, `transformers/point_in_time.py`): bases do arquivo da Binance que não são
+candidatas a estratégia de tendência, além de EXCLUDED_BASES. Lista curada à mão com o conhecimento de hoje (o
+arquivo não traz a categoria do ativo): só entra o que é inequívoco. Possíveis ações tokenizadas (ex.: AAPLB,
+listadas em 2025–2026) NÃO estão aqui: são só sinalizadas para revisão. Não afeta o pipeline diário."""
+
+EPISODE_GAP_DAYS = 7
+"""Mais dias que isso sem candle num par = fim de um episódio de negociação; o que vier depois é tratado como um
+ativo novo (histórico zerado, sem retorno atravessando a lacuna). Caso real: LUNAUSDT ficou 18 dias sem negociar
+em maio de 2022 e voltou como outro ativo (Terra 2.0) sob o mesmo símbolo."""
+
 MAX_STALE_DAYS = 1
 """O último candle fechado pode estar até 1 dia mais velho que o esperado; além disso a moeda fica
 INDISPONÍVEL (nunca gera sinal "atual" com dado velho)."""
@@ -87,7 +111,14 @@ REGIME_SYMBOL = "BTC/USDT"
 
 TRAIN_PERIOD: tuple[str, str] = ("2018-01-01", "2022-12-31")
 TEST_PERIOD: tuple[str, str] = ("2023-01-01", "2026-12-31")
-"""Períodos do backtest de carteira: a regra foi escolhida no treino e conferida no teste."""
+"""Períodos dos backtests publicados. O "teste" (2023 em diante) já foi consultado muitas vezes durante o
+desenvolvimento: é um período EXPLORADO, não um teste intocado (ver docs/QUANT_ROADMAP_PROGRESS.md, Fase 3). A
+validação estatística (walk-forward, bootstrap, Holm) está em `research/validation_study.py`."""
+
+VALIDATION_SEED = 20261016
+"""Semente do bootstrap em blocos (frase de evidência do pipeline e `research/validation_study.py`)."""
+VALIDATION_BOOTSTRAP = 1000
+"""Reamostras do bootstrap da frase de evidência do pipeline (a validação completa usa 2.000)."""
 
 VALIDATION_PERIOD: tuple[str, str] = ("2021-01-01", TRAIN_PERIOD[1])
 """Parte final do treino usada para escolher parâmetros (laboratório de estratégias e previsão); o que vem antes
@@ -229,6 +260,28 @@ REGIME_VOL_MIN_HISTORY = 365
 REGIME_MIN_COVERAGE = 0.90
 """Fração mínima de dias com candle dentro de cada janela. Abaixo disso o regime fica DADOS_INCOMPLETOS; nada é
 preenchido com zero nem com preço repetido."""
+
+# ---------------------------------------------------------------------------------------------
+# Motor de backtest de referência (transformers/backtest_engine.py). Premissas explícitas e versionadas: mudar
+# qualquer uma delas exige mudar EXECUTION_MODEL_VERSION e documentar em docs/QUANT_ROADMAP_PROGRESS.md, e os
+# resultados de versões diferentes não são diretamente comparáveis.
+# ---------------------------------------------------------------------------------------------
+
+EXECUTION_MODEL_VERSION = "next-open-v1"
+"""Sinal no fechamento do candle diário de D; ordem executada na ABERTURA do candle seguinte (D+1), com taxa,
+meio-spread e slippage; sem alavancagem nem venda a descoberto; caixa sem rendimento. A abertura de D+1 é uma
+aproximação do preço alcançável, não uma garantia (ver README, "Motor de backtest")."""
+
+MAX_ORDER_DELAY_DAYS = 3
+"""Ordem sem preço válido de execução (candle ausente) fica pendente por até 3 dias de calendário depois do
+primeiro dia em que poderia ser executada; depois expira (registrada como EXPIRADA, nunca executada a um preço
+inventado)."""
+
+DELIST_RECOVERY = 0.0
+"""Fração do último preço recuperada quando um ativo em carteira para de negociar por mais de EPISODE_GAP_DAYS
+(deslistagem, suspensão longa ou troca de ativo sob o mesmo símbolo): 0 = perda total, premissa conservadora. O
+arquivo da Binance não diz se houve saída possível antes do fim da série; o último preço não é executável depois
+que o candle seguinte nunca existe."""
 
 SELECTION_REBALANCE_DAYS = 7
 """Backtest da seleção: a carteira simulada segue a recomendação a cada 7 dias (rodar todo dia trocaria de

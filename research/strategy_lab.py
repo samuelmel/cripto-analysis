@@ -16,6 +16,11 @@ sorteado, sementes fixas). Motor: o do pipeline (taxa de 0,1% por lado, posiçã
 
 Grava em data/research/: strategy_lab.parquet (resultados) e strategy_lab_grid.parquet (todos os parâmetros
 testados, só com treino e validação). Mostra tudo, inclusive o que perde.
+
+ATENÇÃO (Fase 2): este estudo ainda usa o motor LEGADO (`trade_simulator.run_portfolio`): execução ao fechamento do dia do sinal,
+rebalanceamento diário sem custo e só taxa. Seus números NÃO são comparáveis com os do pipeline, que usa o motor único
+(`src/transformers/backtest_engine.py`). Migração prevista para a Fase 3 (validação walk-forward); até lá, leia os
+resultados como históricos e exploratórios. Comparação dos motores: `research/engine_reconciliation.py`.
 """
 
 from __future__ import annotations

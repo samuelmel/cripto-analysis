@@ -146,3 +146,5 @@ docs/                # Metodologia, arquitetura e progresso técnico
 Consulte docs/ para detalhes metodológicos e decisões de
 implementação. O README mantém apenas as informações necessárias para
 entender, instalar e executar o projeto.
+
+Pesquisa quantitativa (dados point-in-time, motor de backtest de referência, validação estatística e a validação do COMPRAR por moeda): [docs/pesquisa_quantitativa.md](docs/pesquisa_quantitativa.md) e [docs/signal_validation.md](docs/signal_validation.md).

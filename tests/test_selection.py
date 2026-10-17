@@ -29,10 +29,15 @@ from src.transformers.selection import (
     regime_series,
     score_components,
 )
+from src.transformers.backtest_engine import ExecutionConfig, panel_from_candles
 from src.transformers.selection_backtest import (
     SELECTION_PERF_SCHEMA,
+    STRATEGY_HOLD_ALL,
+    STRATEGY_MOMENTUM,
     STRATEGY_SELECTION,
+    baseline_targets,
     evaluate_selection,
+    selection_targets,
     evidence,
     run_weighted,
 )
@@ -362,10 +367,11 @@ def test_evaluate_selection_produces_every_strategy_and_an_honest_verdict() -> N
     rng = np.random.default_rng(5)
     n = 900
     series = {s: list(100 * np.exp(np.cumsum(rng.normal(0.0008, 0.03, n)))) for s in ("BTC/USDT", "ETH/USDT", "SOL/USDT", "ADA/USDT")}
-    f = compute_features(market_from_candles(make_candles(series, "2026-10-15", quote_volume=80e6)))
+    candles = make_candles(series, "2026-10-15", quote_volume=80e6)
+    f = compute_features(market_from_candles(candles))
     periods = {"TREINO": (pd.Timestamp("2025-01-01", tz="UTC"), pd.Timestamp("2025-12-31", tz="UTC")),
                "TESTE": (pd.Timestamp("2026-01-01", tz="UTC"), pd.Timestamp("2026-12-31", tz="UTC"))}
-    perf, sel = evaluate_selection(f, regime_series(f), periods, 100.0, 7)
+    perf, sel = evaluate_selection(f, regime_series(f), periods, 100.0, 7, panel_from_candles(candles), ExecutionConfig())
     assert list(perf.columns) == list(SELECTION_PERF_SCHEMA)
     assert len(perf) == 6 * 2
     assert sel.variable.sum(axis=1).le(1.0 + 1e-9).all()  # nunca mais que 100% do orçamento
@@ -373,6 +379,28 @@ def test_evaluate_selection_produces_every_strategy_and_an_honest_verdict() -> N
     assert "Sharpe" in text and ("não superou" in text or "superou" in text)
     assert evidence(perf.iloc[0:0], "TESTE").startswith("Sem validação")
     assert STRATEGY_SELECTION in set(perf["strategy"])
+
+
+def test_references_and_selection_only_use_coins_eligible_on_the_day() -> None:
+    """Regressão (Fase 3): fora do universo point-in-time a moeda não entra no sorteio nem no N do peso igual.
+    Antes, a referência escolhia a moeda inelegível, o motor zerava o alvo e a referência ficava em caixa."""
+    rng = np.random.default_rng(9)
+    n = 400
+    series = {s: list(100 * np.exp(np.cumsum(rng.normal(mu, 0.02, n)))) for s, mu in
+              (("BTC/USDT", 0.001), ("ETH/USDT", 0.001), ("SOL/USDT", 0.004), ("ADA/USDT", 0.0005), ("XRP/USDT", 0.0005))}
+    f = compute_features(market_from_candles(make_candles(series, "2026-10-15", quote_volume=80e6)))
+    days = list(pd.date_range("2026-06-01", "2026-10-01", freq="7D", tz="UTC"))
+    eligible = pd.DataFrame(True, index=pd.date_range("2025-01-01", "2026-10-15", freq="D", tz="UTC"), columns=list(series))
+    eligible["SOL/USDT"] = False  # a mais forte, mas fora do universo
+    free = baseline_targets(f, "BTC/USDT", days, 3)
+    pit = baseline_targets(f, "BTC/USDT", days, 3, eligible)
+    assert free[STRATEGY_MOMENTUM]["SOL/USDT"].gt(0).any()            # o defeito: escolhida mesmo inelegível
+    assert pit[STRATEGY_MOMENTUM]["SOL/USDT"].eq(0).all()
+    assert pit[STRATEGY_MOMENTUM].sum(axis=1).round(9).eq(1.0).all()  # as 3 vagas vão para moedas compráveis
+    assert pit[STRATEGY_HOLD_ALL]["SOL/USDT"].eq(0).all()
+    assert pit[STRATEGY_HOLD_ALL].sum(axis=1).round(9).eq(1.0).all()  # 1/N com N = elegíveis, não 1/5
+    sel = selection_targets(f, regime_series(f), days, 100.0, eligible=eligible)
+    assert sel.variable["SOL/USDT"].eq(0).all() and sel.equal["SOL/USDT"].eq(0).all()
 
 
 # ------------------------------------------------------------------------------ contrato

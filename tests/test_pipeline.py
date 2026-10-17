@@ -49,7 +49,7 @@ def test_buy_stage_requires_statistical_evidence(workdir: Path) -> None:
     write_ohlcv(_base())
     none = pipeline.analyze(pd.Timestamp.now(tz="UTC"))
     assert not none["signals"]["stage"].eq(STAGE_BUY).any()  # sem a tabela de evidência, falha fechada
-    assert any("não foi publicada" in str(n) for n in none["recommendation"]["data_notes"].iloc[0])
+    assert none["recommendation"]["data_status"].iloc[0] == "OK"  # a falta da evidência não é falha de dados
     _publish_evidence(workdir, ("BTC/USDT", "SOL/USDT"))
     some = pipeline.analyze(pd.Timestamp.now(tz="UTC"))["signals"].set_index("symbol")
     assert some.loc["BTC/USDT", "stage"] == STAGE_BUY and some.loc["SOL/USDT", "stage"] == STAGE_BUY  # vale para qualquer moeda validada
@@ -71,6 +71,18 @@ def test_offline_pipeline_runs_and_publishes(workdir: Path, capsys: pytest.Captu
     assert len(signals) == len(UNIVERSE)
     assert signals.set_index("symbol").loc[list(RECOMMENDED), "stage"].eq(STAGE_BUY).all()
     assert signals["stage_reason"].isna().all()
+
+
+def test_each_run_records_the_fingerprint_of_the_data_it_used(workdir: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from src.loaders.market_store import read_dataset_manifests
+
+    write_ohlcv(_base())
+    assert pipeline.main(["--offline"]) == 0
+    assert pipeline.main(["--offline"]) == 0
+    runs = read_dataset_manifests()
+    assert runs["run_ts"].nunique() == 2
+    assert runs.groupby("symbol")["sha256"].nunique().eq(1).all()  # mesmos dados = mesmo hash
+    assert "SHA-256" in capsys.readouterr().out
 
 
 def test_offline_pipeline_with_stale_base_marks_everything_unavailable(workdir: Path) -> None:

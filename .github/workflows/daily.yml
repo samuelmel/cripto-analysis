@@ -53,3 +53,22 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: uv run python -m src.pipeline --notify
+
+      # Estado de auditoria desta execução: o runner é descartado no fim do job. Só dados públicos de mercado e
+      # metadados (registro de fontes, revisões de candles, fingerprint dos dados usados, snapshot dos sinais);
+      # nenhuma posição (não existem no runner) e nenhum segredo. Artefato privado do repositório, 90 dias.
+      # Não é a fonte de verdade dos preços (a Binance é: tudo é rebaixado a cada execução); serve para auditar
+      # falhas de coleta e revisões. Falhar aqui nunca derruba o job.
+      - name: Guardar o estado de auditoria da execução
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: auditoria-${{ github.run_id }}
+          path: |
+            data/market/source_log/
+            data/market/revisions/
+            data/market/dataset_manifest/
+            data/signals/history/
+          if-no-files-found: warn
+          retention-days: 90

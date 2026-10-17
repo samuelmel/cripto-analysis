@@ -231,7 +231,7 @@ function PerformanceTable({ rows, universe, period }: {
   return (
     <Table
       flush
-      caption={`Resultado da carteira no período ${label}, com taxa de 0,1% em cada compra e venda`}
+      caption={`Resultado da carteira no período ${label}, com taxa, spread e slippage em cada compra e venda`}
       columns={[
         { label }, { label: "Retorno total", numeric: true }, { label: "Por ano", numeric: true, narrow: "hide" },
         { label: "Pior queda", numeric: true }, { label: "Comprado", numeric: true, narrow: "hide" },
@@ -280,7 +280,7 @@ export function BacktestPanel({ performance, trades }: {
               <span>{verdict === null ? "Ainda não há dados suficientes para responder." : VERDICT_HEADLINE[verdict]}</span>
             </p>
             <Collapsible summary="Como foi feita a simulação" className="mt-1">
-              Carteira com Bitcoin e Ethereum em partes iguais, com taxa de 0,1% a cada compra e venda. A regra foi escolhida olhando só o
+              Carteira com Bitcoin e Ethereum em partes iguais: o sinal é calculado no fechamento do dia e a compra ou venda acontece na abertura do dia seguinte, com taxa de 0,1%, spread e slippage estimados. A regra foi escolhida olhando só o
               período de treino; o período de teste são anos que a escolha não viu (mas já foram consultados em outras análises, então
               não são prospectivos). Comprar e segurar significa comprar no começo e nunca vender. A <Term id="drawdown">pior queda</Term>{" "}
               é o que importa para aguentar a <Term id="tendencia">tendência</Term> sem desistir.
@@ -345,7 +345,7 @@ export function BacktestPanel({ performance, trades }: {
         <p className="border-t border-hairline px-3 py-2 text-[12px] text-muted">
           A regra erra muitas vezes com perdas pequenas e acerta algumas com ganhos enormes: é assim que seguir a tendência funciona. Limites: só
           moedas que existem hoje (as que sumiram não aparecem, o que favorece os resultados), uma única história de mercado, sem impostos e sem
-          diferença entre o preço do fechamento e o que se consegue pagar. O passado não garante o futuro.
+          diferença entre a abertura do dia seguinte (uma aproximação) e o que se consegue pagar. O passado não garante o futuro.
         </p>
       </Panel>
     </div>

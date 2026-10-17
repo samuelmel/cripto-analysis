@@ -1,5 +1,5 @@
 """Sinais de estratégia em formato largo (índice = dia, colunas = moedas), compartilhados pelo laboratório
-(`research/lab.py`) e pela camada de seleção (`selection.py`).
+(`research/lab.py`), pela camada de seleção (`selection.py`) e pela validação estatística (`strategy_catalog.py`).
 
 Puro (CLAUDE.md §1). Lookahead: canais de rompimento e médias de volume usam só dias anteriores (`shift(1)`);
 médias que incluem o fechamento de t são conhecidas no próprio fechamento de t.
@@ -87,3 +87,35 @@ def pullback_in_uptrend(close: pd.DataFrame, sma50: pd.DataFrame, sma200: pd.Dat
     mid = close.rolling(20).mean()
     z = (close - mid) / close.rolling(20).std(ddof=0).replace(0.0, np.nan)
     return (close.gt(sma200) & sma50.gt(sma200) & z.lt(enter_z)).astype(float)
+
+
+def bollinger_reversion(m: Market, n: int, k: float) -> pd.DataFrame:
+    """Compra ao fechar abaixo da banda inferior (média de `n` dias − k desvios); sai ao voltar à média."""
+    mid = m.close.rolling(n).mean()
+    lower = mid - k * m.close.rolling(n).std(ddof=0)
+    return latch(m.close.lt(lower), m.close.ge(mid))
+
+
+def rsi_oversold(m: Market, buy_below: float, sell_above: float) -> pd.DataFrame:
+    """Compra com RSI abaixo de `buy_below`; sai com RSI acima de `sell_above`."""
+    r = rsi(m.close)
+    return latch(r.lt(buy_below), r.gt(sell_above))
+
+
+def dip_in_uptrend(
+    px: pd.DataFrame, sma200: pd.DataFrame, z: pd.DataFrame, enter_z: float = -1.0, exit_z: float = 1.0
+) -> pd.DataFrame:
+    """Compra a queda (z < enter_z) com a moeda acima da SMA 200; sai com z >= exit_z ou 3% abaixo da SMA 200."""
+    pos = pd.DataFrame(0.0, index=px.index, columns=px.columns)
+    for c in px.columns:
+        inside = False
+        out: list[float] = []
+        for p, s2, zz in zip(px[c].to_numpy(), sma200[c].to_numpy(), z[c].to_numpy(), strict=True):
+            up = bool(p > s2) if not np.isnan(s2) else False
+            if not inside and up and zz < enter_z:
+                inside = True
+            elif inside and (zz >= exit_z or (not np.isnan(s2) and p < s2 * 0.97)):
+                inside = False
+            out.append(1.0 if inside else 0.0)
+        pos[c] = out
+    return pos

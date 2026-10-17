@@ -1,79 +1,139 @@
-"""Catálogo das estratégias e políticas que existem no código, com o estado da evidência.
+"""Catálogo das estratégias que o projeto já testou, como sinais 0/1 decididos no fechamento de D.
 
-Puro (CLAUDE.md §1): só dados. Serve para não confundir nomes de relatórios com o que está implementado, e para
-registrar, num lugar só, que **nenhuma estratégia foi confirmada como robusta** (conclusão histórica das Fases 2 a 5;
-os resultados são exploratórios, sem período prospectivo). Um teste confere que todo nome de estratégia usado pelos
-motores aparece aqui. Atualizar a evidência exige uma análise reproduzível e metodologicamente válida, registrada em
-`data/research/experiments.parquet`, e não a simples edição deste arquivo.
+Puro (CLAUDE.md §1). Reúne, com uma só interface, as regras do painel, do estudo de comparação
+(`research/strategy_comparison.py`) e do laboratório (`research/lab.py`), para a validação estatística avaliar TODAS
+na mesma família (testar muitas e reportar só a melhor é o vício que a correção para comparações múltiplas corrige).
+
+Cada estratégia fixa tem variações MODERADAS de parâmetro, declaradas aqui antes dos resultados (sensibilidade, não
+otimização). As de grade trazem todos os candidatos; o walk-forward escolhe entre eles só com a validação de cada
+dobra.
+
+Sem olhar para frente: médias e retornos usam só o passado e o próprio fechamento de D; canais de rompimento e
+médias de volume usam `shift(1)` (ver `strategies.py`). `tests/test_validation_protocol.py` confere que cortar os
+dados depois de D não muda nenhum sinal até D.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
-from .regime_policy import CASH, POLICY_HOLD_UP, POLICY_LEARNED, POLICY_MOMENTUM_UP, POLICY_PRIMARY, POLICY_VOL_FILTERED
-from .selection_backtest import (
-    STRATEGY_BTC,
-    STRATEGY_HOLD_ALL,
-    STRATEGY_MOMENTUM,
-    STRATEGY_SELECTION,
-    STRATEGY_SELECTION_EQUAL,
-    STRATEGY_SMA200,
+import pandas as pd
+
+from .panic_backtest import panic_trades
+from .strategies import (
+    Market,
+    bollinger_reversion,
+    daily,
+    dip_in_uptrend,
+    donchian_breakout,
+    rsi_oversold,
+    volume_breakout,
 )
-from .trade_simulator import STRATEGY_HOLD, STRATEGY_PANIC, STRATEGY_TREND
-
-assert STRATEGY_HOLD == STRATEGY_HOLD_ALL  # mesmo nome nos dois motores (ver o catálogo)
-
-KIND_PRODUCTION = "PRODUCAO"      # alimenta a recomendação ou o painel
-KIND_BASELINE = "BASELINE"        # referência simples de comparação
-KIND_RESEARCH = "PESQUISA"        # só em research/, sem efeito na produção
-KIND_LEGACY = "LEGADO"            # congelada, só para comparação histórica
-KINDS: tuple[str, ...] = (KIND_PRODUCTION, KIND_BASELINE, KIND_RESEARCH, KIND_LEGACY)
-
-NOT_CONFIRMED = "NAO_CONFIRMADA_ROBUSTA"
+from .trade_simulator import ExitRules, positions_from_trades, trend_positions, wide
 
 
 @dataclass(frozen=True)
-class StrategyEntry:
+class SignalSpec:
+    """Um sinal fixo com suas variações moderadas, ou uma grade de candidatos (`grid`)."""
+
     name: str
-    kind: str
-    engine: str          # onde é simulada
     description: str
-    evidence: str = NOT_CONFIRMED
-
-    def __post_init__(self) -> None:
-        if self.kind not in KINDS:
-            raise ValueError(f"tipo desconhecido: {self.kind!r}")
-
-
-ENGINE_PORTFOLIO = "trade_simulator.run_portfolio (posição 0/1 diária, só taxa)"
-ENGINE_WEIGHTS = "selection_backtest.run_weighted (pesos semanais, taxa + spread + slippage)"
-
-CATALOG: tuple[StrategyEntry, ...] = (
-    StrategyEntry(STRATEGY_TREND, KIND_PRODUCTION, ENGINE_PORTFOLIO, "Regra principal SMA 200 em BTC e ETH, com filtro do BTC e stop opcional"),
-    StrategyEntry(STRATEGY_PANIC, KIND_LEGACY, ENGINE_PORTFOLIO, "Regra antiga de comprar no pânico, congelada (perdeu dinheiro no backtest)"),
-    StrategyEntry(STRATEGY_SELECTION, KIND_PRODUCTION, ENGINE_WEIGHTS, "Seleção de oportunidades com aporte por volatilidade (recomendação diária)"),
-    StrategyEntry(STRATEGY_SELECTION_EQUAL, KIND_BASELINE, ENGINE_WEIGHTS, "A mesma seleção com peso igual: isola o efeito do dimensionamento"),
-    # Atenção: o MESMO nome existe nos dois motores (`trade_simulator.STRATEGY_HOLD` e `selection_backtest.STRATEGY_HOLD_ALL`)
-    # com simulações diferentes: posição 0/1 diária com só taxa, ou pesos semanais com spread e slippage. Os resultados
-    # dos dois não são comparáveis entre si.
-    StrategyEntry(STRATEGY_HOLD_ALL, KIND_BASELINE, f"{ENGINE_PORTFOLIO} e {ENGINE_WEIGHTS}", "Comprar e segurar, peso igual entre as moedas elegíveis (motores diferentes, mesmo nome)"),
-    StrategyEntry(STRATEGY_SMA200, KIND_BASELINE, ENGINE_WEIGHTS, "Moedas acima da SMA 200 com o BTC também acima, peso igual"),
-    StrategyEntry(STRATEGY_MOMENTUM, KIND_BASELINE, ENGINE_WEIGHTS, "As 3 de maior retorno em 90 dias, peso igual"),
-    StrategyEntry(STRATEGY_BTC, KIND_BASELINE, ENGINE_WEIGHTS, "Só Bitcoin, comprado e segurado"),
-    StrategyEntry(CASH, KIND_RESEARCH, ENGINE_WEIGHTS, "Nenhuma posição (opção das políticas por regime)"),
-    StrategyEntry(POLICY_PRIMARY, KIND_RESEARCH, ENGINE_WEIGHTS, "Tendência SMA 200 só no regime ALTA; caixa nos demais (primária da Fase 5)"),
-    StrategyEntry(POLICY_MOMENTUM_UP, KIND_RESEARCH, ENGINE_WEIGHTS, "Momento em ALTA, tendência em MISTO, caixa nos demais"),
-    StrategyEntry(POLICY_VOL_FILTERED, KIND_RESEARCH, ENGINE_WEIGHTS, "Tendência em ALTA com volatilidade normal; caixa nos demais"),
-    StrategyEntry(POLICY_HOLD_UP, KIND_RESEARCH, ENGINE_WEIGHTS, "Comprar e segurar em ALTA; caixa nos demais"),
-    StrategyEntry(POLICY_LEARNED, KIND_RESEARCH, ENGINE_WEIGHTS, "Melhor candidata por regime, aprendida só com o passado a cada ano"),
-)
-
-BY_NAME: dict[str, StrategyEntry] = {e.name: e for e in CATALOG}
-if len(BY_NAME) != len(CATALOG):
-    raise ValueError("nomes repetidos no catálogo de estratégias")
+    signal: pd.DataFrame | None                         # None nas estratégias de grade
+    params: Mapping[str, object] = field(default_factory=dict)
+    variants: Mapping[str, pd.DataFrame] = field(default_factory=dict)
+    grid: Mapping[str, pd.DataFrame] = field(default_factory=dict)
+    requires_fng: bool = False
 
 
-def confirmed_robust() -> tuple[str, ...]:
-    """Estratégias com evidência confirmada como robusta. Vazio hoje, de propósito."""
-    return tuple(e.name for e in CATALOG if e.evidence != NOT_CONFIRMED)
+def trend_signal(
+    history: pd.DataFrame,
+    sma_days: int = 200,
+    stop_loss: float | None = -0.20,
+    btc_filter: bool = True,
+    regime_symbol: str = "BTC/USDT",
+) -> pd.DataFrame:
+    """Tendência: moeda acima da própria SMA de `sma_days` (e, com `btc_filter`, BTC acima da sua), com o STOP de
+    `trade_simulator.trend_positions`. Com 200 dias, filtro e STOP de −20% é a regra do painel."""
+    px = wide(history, "close")
+    above = px.gt(px.rolling(sma_days, min_periods=sma_days).mean())
+    if btc_filter:
+        btc = above[regime_symbol] if regime_symbol in above.columns else pd.Series(False, index=above.index)
+        above = above & btc.to_numpy()[:, None]
+    stacked = pd.Series(above.stack(), name="uptrend")
+    long = stacked.rename_axis(["timestamp", "symbol"]).reset_index()
+    h = history[["symbol", "timestamp", "close"]].merge(long, on=["symbol", "timestamp"], how="left")
+    h["uptrend"] = h["uptrend"].fillna(False).astype(bool)
+    return trend_positions(h, ExitRules(stop_loss=stop_loss)).reindex_like(px).fillna(0.0)
+
+
+def _cross(px: pd.DataFrame, fast: int, slow: int) -> pd.DataFrame:
+    f = px.rolling(fast, min_periods=fast).mean()
+    s = px.rolling(slow, min_periods=slow).mean()
+    return f.gt(s).astype(float)
+
+
+def _momentum(px: pd.DataFrame, days: int) -> pd.DataFrame:
+    return (px / px.shift(days) - 1.0).gt(0).astype(float)
+
+
+def _dip(px: pd.DataFrame, history: pd.DataFrame, enter_z: float) -> pd.DataFrame:
+    return dip_in_uptrend(px, wide(history, "sma_200"), wide(history, "zscore_90"), enter_z=enter_z)
+
+
+def _label(params: Mapping[str, float]) -> str:
+    return ", ".join(f"{k}={v:g}" for k, v in params.items())
+
+
+GRID_PARAMS: dict[str, list[dict[str, float]]] = {  # os mesmos candidatos de research/lab.py (GRIDS)
+    "DONCHIAN": [{"n": n} for n in (20, 55, 100)],
+    "BOLLINGER": [{"n": n, "k": k} for n in (20, 50) for k in (1.5, 2.0, 2.5)],
+    "RSI_SOBREVENDIDO": [{"buy_below": b, "sell_above": s} for b in (20, 25, 30, 35) for s in (50, 70)],
+    "ROMPIMENTO_VOLUME": [{"n": n, "k": k} for n in (20, 55) for k in (1.0, 1.5, 2.0)],
+}
+
+
+def core_signals(history: pd.DataFrame, market: Market) -> list[SignalSpec]:
+    """Todas as estratégias de sinal 0/1 por moeda já testadas no projeto (universo de poucas moedas)."""
+    px = wide(history, "close")
+    m = daily(market)
+    m = Market(*(f.reindex(index=px.index, columns=px.columns) for f in (m.close, m.high, m.low, m.volume)))
+
+    def grid(fn_name: str) -> dict[str, pd.DataFrame]:
+        out: dict[str, pd.DataFrame] = {}
+        for p in GRID_PARAMS[fn_name]:
+            if fn_name == "DONCHIAN":
+                sig = donchian_breakout(m, int(p["n"]))
+            elif fn_name == "BOLLINGER":
+                sig = bollinger_reversion(m, int(p["n"]), p["k"])
+            elif fn_name == "RSI_SOBREVENDIDO":
+                sig = rsi_oversold(m, p["buy_below"], p["sell_above"])
+            else:
+                sig = volume_breakout(m, int(p["n"]), p["k"])
+            out[_label(p)] = sig.reindex_like(px).fillna(0.0)
+        return out
+
+    panic = positions_from_trades(panic_trades(history), pd.DatetimeIndex(px.index), px.columns)
+    return [
+        SignalSpec("TENDENCIA", "regra do painel: SMA 200 + BTC acima da SMA 200 + STOP de −20%", trend_signal(history),
+                   {"sma": 200, "btc_filter": True, "stop": -0.20},
+                   {"sma150": trend_signal(history, 150), "sma250": trend_signal(history, 250),
+                    "sem_stop": trend_signal(history, 200, None), "stop15": trend_signal(history, 200, -0.15),
+                    "stop25": trend_signal(history, 200, -0.25)}),
+        SignalSpec("TENDENCIA_SEM_FILTRO", "fechamento acima da própria SMA 200, sem filtro do BTC e sem STOP",
+                   trend_signal(history, 200, None, btc_filter=False), {"sma": 200},
+                   {"sma150": trend_signal(history, 150, None, False), "sma250": trend_signal(history, 250, None, False)}),
+        SignalSpec("TENDENCIA_BTC_SEM_STOP", "SMA 200 + filtro do BTC, sem STOP", trend_signal(history, 200, None),
+                   {"sma": 200, "btc_filter": True},
+                   {"sma150": trend_signal(history, 150, None), "sma250": trend_signal(history, 250, None)}),
+        SignalSpec("CRUZAMENTO_50_200", "SMA 50 acima da SMA 200", _cross(px, 50, 200), {"fast": 50, "slow": 200},
+                   {"40_200": _cross(px, 40, 200), "60_200": _cross(px, 60, 200), "50_150": _cross(px, 50, 150),
+                    "50_250": _cross(px, 50, 250)}),
+        SignalSpec("MOMENTO_90D", "retorno de 90 dias positivo", _momentum(px, 90), {"days": 90},
+                   {"60d": _momentum(px, 60), "120d": _momentum(px, 120)}),
+        SignalSpec("QUEDA_NA_ALTA", "compra a queda (z < −1) acima da SMA 200", _dip(px, history, -1.0), {"enter_z": -1.0},
+                   {"z075": _dip(px, history, -0.75), "z125": _dip(px, history, -1.25)}),
+        SignalSpec("PANICO", "regra antiga (z-score, RSI e Fear & Greed < 25), só referência", panic, requires_fng=True),
+        *[SignalSpec(name, f"grade de {len(GRID_PARAMS[name])} candidatos (research/lab.py)", None, grid=grid(name))
+          for name in GRID_PARAMS],
+    ]

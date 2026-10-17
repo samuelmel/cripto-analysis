@@ -1,17 +1,19 @@
-"""GET JSON com timeout, tentativas limitadas, backoff exponencial e respeito ao limite da API.
+"""GET (JSON ou bytes) com timeout, tentativas limitadas, backoff exponencial e respeito ao limite da API.
 
 Stdlib, síncrono; usado só dentro de `fetch`. Garantias:
     - cada tentativa tem timeout (padrão 30 s) e são no máximo `retries` tentativas;
     - entre tentativas espera 2^n s (teto de 30 s); em 429/418 a espera é o `Retry-After` da resposta
       e, se ele passar de `MAX_RETRY_AFTER` (ban longo), desiste na hora em vez de insistir;
     - `min_interval` espaça as chamadas ao mesmo host (cada fonte declara o seu limite);
-    - corpo que não é JSON vira ExtractorError;
+    - corpo que não é JSON vira ExtractorError (`get_json`);
+    - `get_bytes(..., missing_ok=True)` devolve None em HTTP 404 (arquivo que não existe na fonte);
     - a mensagem de erro leva só a URL sem parâmetros e o status, nunca cabeçalhos (chaves de API).
 """
 
 from __future__ import annotations
 
 import json
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -26,15 +28,19 @@ MAX_BACKOFF = 30.0
 MAX_RETRY_AFTER = 60.0
 
 _last_call: dict[str, float] = {}
+_throttle_lock = threading.Lock()  # downloads em massa usam várias threads
 
 
 def _throttle(host: str, min_interval: float) -> None:
     """Espera o que faltar para respeitar `min_interval` desde a última chamada ao mesmo host."""
-    if min_interval > 0:
+    if min_interval <= 0:
+        _last_call[host] = time.monotonic()
+        return
+    with _throttle_lock:
         wait = _last_call.get(host, float("-inf")) + min_interval - time.monotonic()
         if wait > 0:
             time.sleep(wait)
-    _last_call[host] = time.monotonic()
+        _last_call[host] = time.monotonic()
 
 
 def _retry_after(exc: urllib.error.HTTPError) -> float | None:
@@ -45,14 +51,35 @@ def _retry_after(exc: urllib.error.HTTPError) -> float | None:
         return None
 
 
-def _get_bytes(
+def get_json(
     url: str,
-    params: dict[str, str | int] | None,
-    headers: dict[str, str] | None,
-    retries: int,
-    timeout: float,
-    min_interval: float,
-) -> bytes:
+    params: dict[str, str | int] | None = None,
+    headers: dict[str, str] | None = None,
+    *,
+    retries: int = 5,
+    timeout: float = 30.0,
+    min_interval: float = 0.0,
+) -> Any:
+    body = get_bytes(url, params, headers, retries=retries, timeout=timeout, min_interval=min_interval)
+    if body is None:  # inalcançável: sem missing_ok, 404 já vira ExtractorError
+        raise ExtractorError(f"GET {url} falhou: resposta vazia")
+    try:
+        return json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ExtractorError(f"GET {url} falhou: resposta não é JSON válido") from exc
+
+
+def get_bytes(
+    url: str,
+    params: dict[str, str | int] | None = None,
+    headers: dict[str, str] | None = None,
+    *,
+    retries: int = 5,
+    timeout: float = 30.0,
+    min_interval: float = 0.0,
+    missing_ok: bool = False,
+) -> bytes | None:
+    """Corpo bruto da resposta. Com `missing_ok`, HTTP 404 devolve None em vez de erro (sem nova tentativa)."""
     query = f"?{urllib.parse.urlencode(params)}" if params else ""
     request = urllib.request.Request(url + query, headers={"User-Agent": USER_AGENT, **(headers or {})})
     host = urllib.parse.urlsplit(url).netloc
@@ -64,6 +91,8 @@ def _get_bytes(
                 body: bytes = resp.read()
             return body
         except urllib.error.HTTPError as exc:
+            if exc.code == 404 and missing_ok:
+                return None
             if exc.code not in RETRYABLE_STATUS or attempt == retries:
                 raise ExtractorError(f"GET {url} falhou: HTTP {exc.code}") from exc
             asked = _retry_after(exc) if exc.code in (418, 429) else None
@@ -78,22 +107,6 @@ def _get_bytes(
     raise ExtractorError(f"GET {url} falhou após {retries} tentativas")
 
 
-def get_json(
-    url: str,
-    params: dict[str, str | int] | None = None,
-    headers: dict[str, str] | None = None,
-    *,
-    retries: int = 5,
-    timeout: float = 30.0,
-    min_interval: float = 0.0,
-) -> Any:
-    body = _get_bytes(url, params, headers, retries, timeout, min_interval)
-    try:
-        return json.loads(body.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ExtractorError(f"GET {url} falhou: resposta não é JSON válido") from exc
-
-
 def get_text(
     url: str,
     params: dict[str, str | int] | None = None,
@@ -104,7 +117,9 @@ def get_text(
     min_interval: float = 0.0,
 ) -> str:
     """Como `get_json`, para respostas de texto (ex.: listagem XML do bucket público de dados da Binance)."""
-    body = _get_bytes(url, params, headers, retries, timeout, min_interval)
+    body = get_bytes(url, params, headers, retries=retries, timeout=timeout, min_interval=min_interval)
+    if body is None:  # inalcançável: sem missing_ok, 404 já vira ExtractorError
+        raise ExtractorError(f"GET {url} falhou: resposta vazia")
     try:
         return body.decode("utf-8")
     except UnicodeDecodeError as exc:

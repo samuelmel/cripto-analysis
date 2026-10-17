@@ -10,6 +10,11 @@ moeda (colunas), decidida no fechamento do dia. O motor de carteira é o do pipe
 
 Lookahead: as bandas e os canais de rompimento usam só dias anteriores (`shift(1)`); as médias que incluem o
 fechamento de t são conhecidas no próprio fechamento de t.
+
+ATENÇÃO (Fase 2): este estudo ainda usa o motor LEGADO (`trade_simulator.run_portfolio`): execução ao fechamento do dia do sinal,
+rebalanceamento diário sem custo e só taxa. Seus números NÃO são comparáveis com os do pipeline, que usa o motor único
+(`src/transformers/backtest_engine.py`). Migração prevista para a Fase 3 (validação walk-forward); até lá, leia os
+resultados como históricos e exploratórios. Comparação dos motores: `research/engine_reconciliation.py`.
 """
 
 from __future__ import annotations
@@ -23,30 +28,19 @@ from src.transformers.strategies import (  # noqa: F401  (reexportados: o labora
     RSI_PERIOD,
     VOLUME_WINDOW,
     Market,
+    bollinger_reversion,
     donchian_breakout,
     latch,
     market_from_candles,
     rsi,
+    rsi_oversold,
     volume_breakout,
 )
 from src.transformers.trade_simulator import PortfolioRun, run_portfolio
 
 # ---------------------------------------------------------------------------------------------
-# Sinais (os compartilhados com a seleção moram em src/transformers/strategies.py)
+# Sinais (moram em src/transformers/strategies.py, compartilhados com a seleção e a validação)
 # ---------------------------------------------------------------------------------------------
-
-def bollinger_reversion(m: Market, n: int, k: float) -> pd.DataFrame:
-    """Compra ao fechar abaixo da banda inferior (média de `n` dias − k desvios); sai ao voltar à média."""
-    mid = m.close.rolling(n).mean()
-    lower = mid - k * m.close.rolling(n).std(ddof=0)
-    return latch(m.close.lt(lower), m.close.ge(mid))
-
-
-def rsi_oversold(m: Market, buy_below: float, sell_above: float) -> pd.DataFrame:
-    """Compra com RSI abaixo de `buy_below`; sai com RSI acima de `sell_above`."""
-    r = rsi(m.close)
-    return latch(r.lt(buy_below), r.gt(sell_above))
-
 
 Signal = Callable[..., pd.DataFrame]
 

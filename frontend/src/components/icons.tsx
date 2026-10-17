@@ -3,6 +3,7 @@ import {
   CurrencyBtc,
   Eye,
   HandCoins,
+  Prohibit,
   ShieldWarning,
   TrendDown,
   WarningCircle,
@@ -17,6 +18,7 @@ export const REASON_ICON: Record<ExitReason, Icon> = {
   STOP: ShieldWarning,
   TENDENCIA: TrendDown,
   MERCADO: CurrencyBtc,
+  DESLISTAGEM: Prohibit,
 };
 
 export const STAGE_ICON: Record<Stage, Icon | null> = {

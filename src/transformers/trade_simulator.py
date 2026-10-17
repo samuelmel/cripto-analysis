@@ -1,4 +1,11 @@
-"""Backtest da regra de tendência: operações individuais e carteira (com taxa) contra comprar e segurar.
+"""Regra de tendência: sinais (posições 0/1), regras de saída e os motores LEGADOS de operações e de carteira.
+
+LEGADO desde a Fase 2: `backtest`, `run_portfolio`, `evaluate_portfolio` e `performance_summary` usam as premissas
+antigas (execução ao fechamento do dia do sinal, rebalanceamento diário sem custo, só taxa) e ficam só para
+reproduzir resultados anteriores (`tests/test_legacy_engines.py`) e para o laboratório de `research/` até a Fase 3.
+Resultados novos usam o motor único: `backtest_engine.py` + `portfolio_backtest.py`. Continuam vigentes aqui:
+`trend_positions` (o sinal), `ExitRules` e `simulate` (aconselhamento das posições reais do usuário, que não é
+backtest: o preço de compra é o que ele pagou).
 
 Puro e vetorizado (CLAUDE.md §1). Dois níveis:
 
@@ -104,7 +111,8 @@ def trend_entries(history: pd.DataFrame, symbols: tuple[str, ...]) -> pd.DataFra
 
 
 def backtest(history: pd.DataFrame, symbols: tuple[str, ...], rules: ExitRules = ExitRules()) -> pd.DataFrame:
-    """Operações da regra de tendência nas moedas `symbols`, desde o primeiro dia com SMA 200."""
+    """LEGADO (entrada e saída ao fechamento do dia do sinal, sem custos). Use `portfolio_backtest.trend_trades`.
+    Operações da regra de tendência nas moedas `symbols`, desde o primeiro dia com SMA 200."""
     return simulate(trend_entries(history, symbols), history, rules)
 
 
@@ -266,7 +274,8 @@ def run_portfolio(
     end: pd.Timestamp,
     fee: float,
 ) -> PortfolioRun:
-    """Aplica a metodologia da carteira (posição de t vale para t+1, taxa sobre a mudança) em [start, end]."""
+    """LEGADO (rebalanceamento diário sem custo, só taxa; perde o movimento através de candle ausente). Use
+    `backtest_engine.run_backtest`. Aplica a metodologia antiga da carteira em [start, end]."""
     p = positions.where(valid).loc[start:end]
     r = returns.loc[start:end]
     v = valid.loc[start:end]
@@ -318,7 +327,8 @@ def performance_summary(
     fee: float,
     rules: ExitRules = ExitRules(),
 ) -> pd.DataFrame:
-    """Tendência x comprar e segurar x pânico (regra antiga), por universo e período (PERFORMANCE_SCHEMA).
+    """LEGADO (motor `run_portfolio`). Use `portfolio_backtest.performance_summary`.
+    Tendência x comprar e segurar x pânico (regra antiga), por universo e período (PERFORMANCE_SCHEMA).
 
     `universes`: nome -> moedas da carteira. `periods`: nome -> (início, fim) inclusive.
     """

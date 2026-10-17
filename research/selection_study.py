@@ -31,6 +31,11 @@ Seções do resultado:
 Limitações: viés de sobrevivência (o universo são moedas que existem hoje: LUNA, FTT e outras que quebraram não
 estão na amostra, o que favorece qualquer estratégia de comprar altcoins); spread e slippage estimados, não
 medidos; execução no fechamento; uma única história de mercado; sem impostos.
+
+ATENÇÃO (Fase 2): este estudo ainda usa o motor LEGADO (`selection_backtest.run_weighted`): execução ao fechamento do dia do sinal,
+exposição que podia passar de 100% com a banda. Seus números NÃO são comparáveis com os do pipeline, que usa o motor único
+(`src/transformers/backtest_engine.py`). Migração prevista para a Fase 3 (validação walk-forward); até lá, leia os
+resultados como históricos e exploratórios. Comparação dos motores: `research/engine_reconciliation.py`.
 """
 
 from __future__ import annotations

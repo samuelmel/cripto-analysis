@@ -5,7 +5,7 @@ Auditoria de 16/10/2026 sobre a branch `main` (HEAD de partida `012a432`). Cada 
 Prioridades: **P0** crítico (resultado incorreto, vazamento, perda de dados, segredo exposto) · **P1** alto (metodologia, bugs que afetam resultados) · **P2** médio (incompleto, frágil, difícil de manter) · **P3** baixo (documentação e arrumação).
 
 > [!IMPORTANT]
-> **Nenhum P0 foi encontrado.** Não há segredo rastreado (varredura de padrões de token e chave em todos os arquivos versionados; `.env` existe só localmente e está no `.gitignore`; o conteúdo não foi lido), não há vazamento temporal no classificador de regimes nem nas políticas (testes de truncamento do futuro com mutação), e nenhuma perda de dados. Foram encontrados e **corrigidos dois P1** (motor de pesos; texto "fora da amostra") e vários P2. A conclusão histórica **"nenhuma estratégia foi confirmada como robusta" permanece** e agora está registrada em código (`strategy_catalog.confirmed_robust() == ()`).
+> **Nenhum P0 foi encontrado.** Não há segredo rastreado (varredura de padrões de token e chave em todos os arquivos versionados; `.env` existe só localmente e está no `.gitignore`; o conteúdo não foi lido), não há vazamento temporal no classificador de regimes nem nas políticas (testes de truncamento do futuro com mutação), e nenhuma perda de dados. Foram encontrados e **corrigidos dois P1** (motor de pesos; texto "fora da amostra") e vários P2. A conclusão histórica **"nenhuma estratégia foi confirmada como robusta" permanece** e agora está registrada em código (`strategy_evidence_catalog.confirmed_robust() == ()`).
 
 ## Estado do repositório na partida
 
@@ -84,7 +84,7 @@ A F3 **não existia como descrita**. Estado do que há, verificado:
 | Múltiplas hipóteses | `holm_adjust` | **V**, só na família da Fase 5 | P2 |
 | Walk-forward e separação cronológica | `chronological_split`, `year_windows`; P5 anual; `selection_study` anual | **P**: descritivo; sem período prospectivo | P2 |
 | Registro de experimentos e fingerprints | `loaders/experiment_log.py`, `data_fingerprint`, `experiment_id`, `results_digest` | **V** (append-only, conflito recusado, reprodução confirmada). **Só** a Fase 5 grava nele | P2 |
-| Catálogo de estratégias | `transformers/strategy_catalog.py` | **A → V**: todo nome usado pelos motores está listado; teste falha se surgir um nome fora do catálogo | P2 |
+| Catálogo de estratégias | `transformers/strategy_evidence_catalog.py` | **A → V**: todo nome usado pelos motores está listado; teste falha se surgir um nome fora do catálogo | P2 |
 | Classificação da qualidade da evidência | `policy_evaluation.classify_evidence` | **A → V**: `INSUFICIENTE`, `SEM_EVIDENCIA`, `INDICIO_EXPLORATORIO`, `CONFIRMADO_PROSPECTIVO` (este último exige período prospectivo, que não existe) | P2 |
 | "Fora da amostra" | `evidence()` e `recommendation.py` chamavam o teste de 2023+ de "fora da amostra" | **Defeito de texto (P1)**: o período já foi consultado em várias fases | **P1** | **Corrigido**: "período de teste (…; já consultado antes, não é prospectivo)" |
 

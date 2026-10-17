@@ -31,7 +31,6 @@ from src import config  # noqa: E402
 from src.loaders.experiment_log import NEW, append_experiment  # noqa: E402
 from src.loaders.market_store import read_ohlcv  # noqa: E402
 from src.loaders.parquet_loader import write_parquet  # noqa: E402
-from src.transformers.backtest_engine import ENGINE_VERSION  # noqa: E402
 from src.transformers.data_quality import clean_candles  # noqa: E402
 from src.transformers.policy_evaluation import data_fingerprint, experiment_id, results_digest  # noqa: E402
 from src.transformers.signal_validation import (  # noqa: E402
@@ -52,6 +51,9 @@ REGISTRY_PATH = EVIDENCE_DIR / "validation_registry.parquet"
 FRONTEND_COPY = Path("frontend/public/signal_evidence.parquet")
 STATUS_HOLDOUT_DONE = "TESTE_FINAL_AVALIADO"
 CLASSIFIER = "sma200+btc-regime:v1"
+ENGINE_LABEL = "engine-3"
+"""Rótulo gravado na configuração do experimento c50af63e6e99f77f (o núcleo de lag que o carregava foi removido no merge;
+a validação calcula os retornos por conta própria e não usa o motor de backtest). Mantido para o ID continuar o mesmo."""
 LIMITATIONS = (
     "Pares renomeados/migrados são símbolos distintos; sem data nem motivo oficial de deslistagem (último candle); "
     "avalia retorno em horizonte fixo, sem stop; moeda deslistada sai ao último preço; spread e slippage estimados; "
@@ -106,7 +108,7 @@ def cmd_run(allow_second: bool) -> int:
     cfg = {
         "horizons": list(rules.horizons), "development_end": rules.development_end, "holdout_start": rules.holdout_start,
         "alpha": rules.alpha, "seed": rules.seed, "null_draws": rules.null_draws, "resamples": rules.resamples,
-        "n_min": n_min, "holdout_min_signals": rules.holdout_min_signals, "engine": ENGINE_VERSION,
+        "n_min": n_min, "holdout_min_signals": rules.holdout_min_signals, "engine": ENGINE_LABEL,
         "classifier": CLASSIFIER,
         "pit": {**{k: v for k, v in vars(rules.pit).items() if k != "excluded"}, "excluded": sorted(rules.pit.excluded)},
     }

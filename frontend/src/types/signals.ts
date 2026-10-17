@@ -21,7 +21,8 @@ export type Stage = (typeof STAGES)[number];
 export const ALERTS = ["COMPRAR AGORA", "VENDER AGORA", "NO RADAR", "SAIU DO RADAR"] as const;
 export type Alert = (typeof ALERTS)[number];
 
-export const EXIT_REASONS = ["STOP", "TENDENCIA", "MERCADO"] as const;
+/** DESLISTAGEM: só no backtest (portfolio_backtest.EXIT_DELISTED), quando a moeda para de negociar com posição aberta. */
+export const EXIT_REASONS = ["STOP", "TENDENCIA", "MERCADO", "DESLISTAGEM"] as const;
 export type ExitReason = (typeof EXIT_REASONS)[number];
 
 export const STRATEGIES = ["TENDENCIA", "COMPRAR_E_SEGURAR", "PANICO"] as const;

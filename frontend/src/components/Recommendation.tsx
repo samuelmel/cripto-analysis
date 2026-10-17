@@ -300,7 +300,7 @@ export function SelectionView({ signals, rec, perf }: {
         )}
         <p className="border-t border-hairline px-3 py-2 text-[12px] text-muted">
           Limites: só entram moedas que existem hoje (as que quebraram não aparecem, o que favorece comprar altcoins); spread e slippage são
-          estimados; execução no fechamento; sem impostos; o período de teste já foi consultado antes (não é prospectivo). O estudo completo
+          estimados; execução na abertura do dia seguinte (aproximação, não garantia); moeda que para de negociar com posição aberta conta como perda total; sem impostos; o período de teste já foi consultado antes (não é prospectivo). O estudo completo
           é gerado por research/selection_study.py.
         </p>
       </Panel>

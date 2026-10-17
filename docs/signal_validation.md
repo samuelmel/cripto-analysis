@@ -12,6 +12,8 @@ ranking, sem a palavra COMPRAR.
 
 ## Execução e custos
 
+> Esta validação calcula os próprios retornos futuros (entrada no fechamento seguinte, custos de `config.py`) e não usa o motor de backtest de carteira; o motor de referência do projeto é `src/transformers/backtest_engine.py` (execução na abertura seguinte).
+
 - O sinal é conhecido no fechamento do dia `t`. A entrada simulada é no **fechamento de `t+1`**; a saída, no
   fechamento de `t+1+h`, com `h` em {7, 30} dias.
 - Custo por lado = `FEE_PER_SIDE` + meia-largura do spread (faixa pelo volume médio de 30 dias, `SPREAD_TIERS`) +
