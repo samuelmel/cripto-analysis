@@ -82,7 +82,7 @@ def cmd_counts() -> int:
     counts = count_independent(prepare(candles, ValidationRules()), ValidationRules())
     write_parquet(counts.astype({"symbol": "string"}), COUNTS_PATH)
     dev = counts[counts["period"].eq("DESENVOLVIMENTO")]
-    print(f"{dev['symbol'].nunique()} moedas no universo point-in-time em algum dia · dados até {candles['timestamp'].max():%Y-%m-%d}")
+    print(f"{counts['symbol'].nunique()} pares na base, {dev.loc[dev['n_events'].gt(0), 'symbol'].nunique()} com algum sinal · dados até {candles['timestamp'].max():%Y-%m-%d}")
     for h in config.VALIDATION_HORIZONS:
         d = dev[dev["horizon"].eq(h)]["n_independent"]
         row = {f">={k}": int((d >= k).sum()) for k in (1, 3, 5, 8, 10, 12, 15, 20, 25, 30, 40)}

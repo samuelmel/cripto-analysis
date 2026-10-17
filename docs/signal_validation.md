@@ -87,6 +87,23 @@ moeda e horizonte, sem calcular nenhum retorno, e antes de rodar qualquer estat�
 a data da escolha entram em `config.py` e neste documento em commit próprio, que precede o primeiro cálculo de
 retorno.
 
+### Valor fixado
+
+`N_MIN = 12` (2026-10-16), escolhido vendo **somente** `evidence/independent_counts.parquet`, antes de qualquer retorno.
+Moedas com sinais independentes no desenvolvimento (de 683 pares históricos, 126 tiveram algum sinal):
+
+| Mínimo de sinais | 7 dias | 30 dias |
+|---|---|---|
+| >= 8 | 30 | 20 |
+| >= 10 | 27 | 16 |
+| **>= 12** | **20** | **11** |
+| >= 15 | 15 | 7 |
+| >= 20 | 8 | 1 |
+
+Com menos de ~12 observações, o bootstrap em blocos (bloco 3) e o valor-p da referência aleatória deixam de ser
+confiáveis; 12 mantém a família de Holm pequena sem deixar quase nenhuma moeda avaliável. No teste final, só 6 moedas
+têm >= 8 sinais em 7 dias e 0 em 30 dias, por isso o mínimo do hold-out é 5 (`HOLDOUT_MIN_SIGNALS`).
+
 ## Registro e reprodutibilidade
 
 - Cada execução grava no registro Parquet versionado `evidence/validation_registry.parquet`: combinações candidatas

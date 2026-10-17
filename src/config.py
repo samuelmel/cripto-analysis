@@ -269,3 +269,9 @@ VALIDATION_BOOTSTRAP_RESAMPLES = 2_000
 """Reamostragens do bootstrap em blocos do intervalo de confiança."""
 HOLDOUT_MIN_SIGNALS = 5
 """Sinais independentes mínimos no hold-out para ele poder revogar (ou confirmar) uma moeda validada."""
+
+VALIDATION_MIN_INDEPENDENT = 12
+"""N_MIN: sinais independentes mínimos, por horizonte, no desenvolvimento. Fixado em 2026-10-16 vendo SÓ as contagens
+(sem nenhum retorno): no desenvolvimento, 20 moedas têm >= 12 sinais independentes em 7 dias e 11 em 30 dias (15 ou
+mais: 15 e 7 moedas). Abaixo de ~12 observações o bootstrap em blocos (bloco 3) e o valor-p da referência aleatória
+deixam de ser confiáveis; 12 mantém a família de Holm pequena sem deixar quase nenhuma moeda avaliável."""
