@@ -59,3 +59,34 @@ mercado.
 
 Número de pares com quebra, de quebras por motivo, de segmentos criados, de sinais (e sinais independentes) que antes
 tinham a janela de retorno atravessando uma quebra e deixaram de existir ou mudaram, e se o veredito de cada teste mudou.
+
+
+## Resultado da aplicação (2026-10-17, `continuidade-v1`)
+
+Base: 683 pares → 697 instrumentos. O critério foi aplicado como escrito, sem ajuste depois de ver os resultados.
+
+| | |
+|---|---|
+| Pares com quebra | 14 (um por par) |
+| Por motivo | 11 só lacuna; 3 lacuna + salto para cima (LUNA, COCOS, DREP) |
+| Segmentos novos | 14 |
+| Janelas de referência (dias aleatórios) que atravessavam uma quebra | 4 em 7 dias e 19 em 30 dias (de 82 mil), agora separadas |
+| Sinais cuja janela de retorno atravessava uma quebra | 0 nos dois horizontes |
+| Sinais independentes de desenvolvimento | 7 dias: 729 → 726; 30 dias: 504 → 503 |
+| Moedas com algum sinal | 126 → 126 |
+
+Os 3 sinais de 7 dias e o 1 de 30 dias que sumiram são de moedas cujo segmento novo ainda não tem 200 dias de SMA. O defeito
+estava na **referência aleatória** (dias de entrada de 19 janelas que atravessavam a emenda do LUNA e de outros pares),
+não nos sinais. Lista completa das quebras: `evidence/continuity_report.parquet`.
+
+### Os vereditos mudaram?
+
+| Teste | Antes | Depois | Mudou? |
+|---|---|---|---|
+| Por moeda (`c50af63e6e99f77f` → `3fd73c32c408cd76`) | nenhuma validada; 11 `NAO_VALIDADA` | nenhuma validada; as mesmas 11 `NAO_VALIDADA` | **não** (0 moedas com status diferente) |
+| Agregado (`e1c394add0e9d0ba` → `c1bcc31eed147488`) | `NAO_DEMONSTRADO` (30 dias: −97,8 pp, artefato) | `NAO_DEMONSTRADO` (7 dias: +0,6 pp, p Holm 0,59; 30 dias: +0,1 pp, IC −7,0 a +7,7 pp, p Holm 0,59) | **não**; o número de 30 dias passou a ser plausível |
+
+O teste final por moeda foi calculado uma terceira vez (`--allow-second-holdout`); como nenhuma moeda foi validada, não
+decidiu nada. As linhas antigas do registro foram mantidas. A evidência de produção (`evidence/signal_evidence.parquet`) **não foi
+substituída**; os resultados refeitos estão em `evidence/continuidade_v1/`. Como o status de todas as moedas é o mesmo, trocar
+não mudaria o que aparece no Telegram nem no painel.

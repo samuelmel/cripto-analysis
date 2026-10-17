@@ -104,3 +104,17 @@ Nada muda no produto: continua sem moeda validada e sem COMPRAR. Pendência téc
 regra de dados: a limpeza (`clean_candles`) deveria descartar janelas de retorno que atravessam lacuna ou salto de preço
 incompatível com mercado (caso LUNA), em vez de tratar o par como contínuo. Isso muda os dois testes (por moeda e agregado)
 e precisa de novo registro.
+
+
+## Refeito com a base corrigida (2026-10-17, `continuidade-v1`)
+
+Experimento `c1bcc31eed147488` (dados fea05e374077). Mesmas regras; ver `docs/data_continuity.md`.
+
+| Horizonte | Sinais | Excesso médio | IC 95% | p ajustado (Holm) |
+|---|---|---|---|---|
+| 7 dias | 726 | +0,6 pp | −1,8 a +2,9 pp | 0,59 |
+| 30 dias | 503 | +0,1 pp | −7,0 a +7,7 pp | 0,59 |
+
+**Veredito: `NAO_DEMONSTRADO`, igual ao anterior.** O −97,8 pp de 30 dias desapareceu (era a emenda do LUNA); o resultado oficial
+agora coincide com a variante `SEM_LUNA_POSHOC` de antes. O teste final não foi calculado. O resultado anterior (`e1c394add0e9d0ba`)
+continua no registro.

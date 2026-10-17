@@ -59,3 +59,29 @@ O teste final só contradiz: se, no teste final, a redução média de qualquer 
   o nível absoluto da queda máxima (o intervalo é da **diferença** pareada).
 - Reduzir queda máxima de um ativo isolado não é reduzir o risco de uma carteira.
 - A referência é comprar e segurar a mesma moeda, não o BTC nem uma carteira.
+
+
+## Resultado da execução de 2026-10-17
+
+Experimento `003fdcf36afb11d6` (dados fea05e374077, base `continuidade-v1`, semente 20261016, 2000 reamostragens de blocos de
+60 dias). 47 moedas tinham pelo menos 365 dias no desenvolvimento. Veredito: **`REDUZ`** (nas duas métricas, p ajustado 0,002 e
+limite inferior do IC > 0). O teste final (24 moedas) não contradisse: as reduções médias foram positivas.
+
+| Métrica (média entre as moedas) | Comprar e segurar | SMA 200 | Redução | IC 95% | Moedas em que reduziu |
+|---|---|---|---|---|---|
+| Queda máxima | 80,0% | 64,9% | **15,1 pp** | 3,6 a 22,7 pp | 91% |
+| Volatilidade anualizada | 121,8% | 92,4% | **29,4 pp** | 20,5 a 42,5 pp | 100% |
+
+Teste final (2025+): redução de 19,9 pp na queda máxima e 38,9 pp na volatilidade.
+
+### O que esse resultado não diz
+
+- **A regra reduz menos risco do que apenas ficar menos tempo exposto.** Ela fica posicionada em 47% dos dias. O controle
+  "mesma exposição" (a moeda multiplicada por 0,47, o resto em caixa) tem queda máxima média de 49,5% e volatilidade de 58,0%,
+  melhor que a regra (64,9% e 92,4%). A redução vem sobretudo de estar fora do mercado, não de escolher bem os dias; a regra
+  deixa passar parte da queda antes de sair (atraso de dois fechamentos e SMA 200 lenta).
+- **Custo em retorno.** O retorno total médio da regra foi maior (+805% contra +556%), puxado por poucas moedas com ganhos
+  enormes; a **mediana** por moeda foi menor (+100% contra +118%). Em BTC: queda máxima 76,6% → 55,1% e retorno +1.388% → +1.065%;
+  em ETH: 79,3% → 59,8% e retorno +1.083% → +1.469%.
+- A queda máxima ainda é alta: a regra cortou 15 pontos, mas a média continua em 65%.
+- Poucos ciclos (2017 a 2024) e o IC da queda máxima é largo (3,6 a 22,7 pp): a redução é real na amostra, o tamanho é incerto.
