@@ -28,3 +28,17 @@ def read_signal_evidence(path: Path = EVIDENCE_PATH) -> pd.DataFrame:
     except (OSError, KeyError, ValueError) as exc:
         logger.error("evidência do COMPRAR ilegível (%s); nenhuma moeda será validada: %s", path, exc)
         return empty_evidence()
+
+
+EXIT_RULES_PATH = Path("evidence/exit_rules.parquet")
+
+
+def read_exit_rules(path: Path = EXIT_RULES_PATH) -> pd.DataFrame:
+    """O que cada regra de saída fez no backtest (`research/exit_rules_study.py`). Ausente: tabela vazia (sem texto histórico)."""
+    if not path.is_file():
+        return pd.DataFrame()
+    try:
+        return pd.read_parquet(path)
+    except (OSError, ValueError) as exc:
+        logger.error("tabela das regras de saída ilegível (%s): %s", path, exc)
+        return pd.DataFrame()

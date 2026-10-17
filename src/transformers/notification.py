@@ -321,6 +321,41 @@ def format_report(
     return split_message("\n\n".join(out))
 
 
+POSITION_DISCLAIMER = (
+    "Recomendação por regra, não previsão nem garantia. Nenhuma ordem é executada pelo sistema: a decisão é sua."
+)
+
+
+def _pct(x: float | None) -> str:
+    return "—" if x is None or not math.isfinite(float(x)) else f"{float(x):+.1f}%".replace(".", ",")
+
+
+def format_position_changes(changes: pd.DataFrame, *, now: pd.Timestamp) -> list[str]:
+    """Aviso das posições cujo estado MUDOU (SEGURAR, ATENÇÃO, VENDER). Vazio se não houve mudança: nada se repete todo dia.
+
+    `changes`: saída de `position_log.pending_changes`. Cada posição traz a regra que disparou, os números de hoje e o que
+    a regra fez no backtest. Só dados calculados pelo pipeline; nenhum segredo entra aqui."""
+    if changes.empty:
+        return []
+    local = now.tz_convert(FORTALEZA)
+    blocks = ["📍 SUAS POSIÇÕES — MUDANÇA DE ESTADO", f"{local:%d/%m/%Y %H:%M} (Fortaleza)"]
+    for r in changes.to_dict("records"):
+        name = str(r["symbol"]).split("/")[0]
+        before = r["prev_state"] if r["prev_state"] is not None and not pd.isna(r["prev_state"]) else "nova posição"
+        lines = [f"{name}: {before} → {r['state']}"]
+        if r["rule"] is not None and not pd.isna(r["rule"]):
+            lines.append(f"Regra: {r['rule']} — {r['detail']}.")
+        lines.append(
+            f"Resultado atual {_pct(r['return_pct'])} · pior ponto desde a entrada {_pct(r['drawdown_entry_pct'])} · "
+            f"queda desde o topo {_pct(r['drawdown_peak_pct'])}."
+        )
+        if r["rule_evidence"] is not None and not pd.isna(r["rule_evidence"]):
+            lines.append(f"Histórico da regra: {r['rule_evidence']}.")
+        blocks.append("\n".join(lines))
+    blocks.append(POSITION_DISCLAIMER)
+    return split_message("\n\n".join(blocks))
+
+
 def data_notes(available: pd.DataFrame, source_errors: pd.DataFrame | None) -> list[str]:
     """Limitações dos dados da execução, em frases curtas (para o resumo e o Telegram)."""
     notes: list[str] = []

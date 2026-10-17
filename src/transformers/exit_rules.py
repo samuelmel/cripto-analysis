@@ -276,8 +276,9 @@ def position_state(
     ret = last / entry_price - 1.0
     peak = float(max(closes.max(), entry_price))
     drawdown_from_peak = last / peak - 1.0
-    if params.stop is not None and ret <= -params.stop + STOP_TOLERANCE:
-        return PositionState(STATE_SELL, EXIT_STOP, f"perda de {ret:.1%} sobre a entrada (limite -{params.stop:.0%})")
+    worst = float(closes.min()) / entry_price - 1.0
+    if params.stop is not None and worst <= -params.stop + STOP_TOLERANCE:  # o STOP é permanente: uma vez atingido, vale
+        return PositionState(STATE_SELL, EXIT_STOP, f"chegou a {worst:.1%} sobre a entrada (limite -{params.stop:.0%})")
     if params.trailing is not None and drawdown_from_peak <= -params.trailing + STOP_TOLERANCE:
         return PositionState(STATE_SELL, EXIT_TRAILING, f"queda de {drawdown_from_peak:.1%} desde o topo (limite -{params.trailing:.0%})")
     if params.trend and np.isfinite(sma) and last < sma:

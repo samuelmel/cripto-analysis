@@ -53,7 +53,7 @@ from .config import (
 from .extractors import MARKET_SYMBOL, BaseExtractor, BinanceAdapter, CoinGeckoMarketAdapter, ExtractorError, FearGreedAdapter
 from .extractors.binance_adapter import DEFAULT_HOST as BINANCE_DEFAULT_HOST
 from .notifiers import TelegramError, send_messages, settings_from_env
-from .loaders.evidence_store import read_signal_evidence
+from .loaders.evidence_store import read_exit_rules, read_signal_evidence
 from .loaders.history_store import read_previous, write_snapshot
 from .loaders.market_store import (
     MixedSourceError,
@@ -67,12 +67,14 @@ from .loaders.market_store import (
     write_ohlcv,
 )
 from .loaders.parquet_loader import write_daily_signals, write_parquet
+from .loaders.position_log_store import append_notifications, append_state_log, read_notifications, read_state_log
 from .loaders.positions_store import read_positions
+from .loaders.signal_log_store import append_signal_log
 from .loaders.source_log import read_source_log, write_source_log
 from .transformers.anomaly_detector import STAGE_BUY, STAGE_WATCH, SignalRules, classify_history, detect
 from .transformers.forecast import forecast_table
 from .transformers.allocation import allocate
-from .transformers.notification import data_notes, format_error, format_report, redact, validate_messages
+from .transformers.notification import data_notes, format_error, format_position_changes, format_report, redact, validate_messages
 from .transformers.recommendation import build_recommendation, validate_recommendation
 from .transformers.regimes import classify_market_regimes
 from .transformers.selection import REGIME_UNAVAILABLE, assess, compute_features, features_on, regime_series
@@ -84,6 +86,8 @@ from .transformers.data_quality import audit_candles, availability, clean_candle
 from .transformers.dataset import combined_fingerprint, dataset_manifest
 from .transformers.daily_alerts import ALERT_BUY, ALERT_EXIT, ALERT_SELL, ALERT_WATCH, compare_with_previous
 from .transformers.position_advisor import ACTION_SELL, ACTION_UNAVAILABLE, advise, realized
+from .transformers.position_log import acknowledgements, new_state_rows, pending_changes
+from .transformers.signal_registry import build_rows
 from .transformers.universe import select_universe
 from .transformers.backtest_engine import ExecutionConfig, MarketPanel, panel_from_candles
 from .transformers.costs import CostModel
@@ -179,10 +183,12 @@ def update_base(now: datetime, *, rebuild: bool = False, binance_host: str = BIN
 
 
 def analyze(
-    today: pd.Timestamp, *, budget: float = BUDGET_BRL, source_errors: pd.DataFrame | None = None
+    today: pd.Timestamp, *, budget: float = BUDGET_BRL, source_errors: pd.DataFrame | None = None, record_state: bool = False
 ) -> dict[str, pd.DataFrame]:
     """Análise completa sobre a base local. Não acessa a rede. `today` é a data e hora da análise (injetada);
-    `budget` é o orçamento total da simulação; `source_errors` são as falhas de coleta desta execução."""
+    `budget` é o orçamento total da simulação; `source_errors` são as falhas de coleta desta execução. `record_state`: grava o
+    registro de sinais e o histórico de estados em data/state (só o GitHub Actions faz isso, para o PC e o runner não
+    divergirem); sem isso, o estado de hoje é calculado em memória e nada é gravado."""
     raw = read_ohlcv(list(UNIVERSE))
     if raw.empty:
         raise ExtractorError("base local vazia: rode sem --offline para baixar o histórico")
@@ -244,7 +250,7 @@ def analyze(
         bt.history, bt.panel, {"PRINCIPAIS": RECOMMENDED, "TODAS": bt.symbols}, PERIODS, bt.portfolio_cfg,
         eligible=bt.eligible,
     )
-    positions = _publish_positions(history, available)
+    positions = _publish_positions(history, available, read_exit_rules())
     # Só prevê moedas com dado confiável hoje; sem dado, não há previsão (nunca uma antiga apresentada como atual).
     usable = tuple(s for s in RECOMMENDED if s in set(available.loc[available["available"], "symbol"]))
     forecast = forecast_table(wide(history, "close"), usable, VALIDATION, TEST, FORECAST_SEED)
@@ -261,12 +267,24 @@ def analyze(
     write_parquet(recommendation, PUBLIC_DIR / "recommendation.parquet")
     if not signal_evidence.empty:
         write_parquet(signal_evidence, PUBLIC_DIR / "signal_evidence.parquet")
+    # Estado persistente (branch `state`): registro imutável de sinais e histórico de estados das posições.
+    state_log = read_state_log()
+    today_rows = new_state_rows(positions, state_log, day)
+    if record_state:
+        append_signal_log(build_rows(signals, signal_evidence, run_ts=pd.Timestamp(today), code_version=_code_version()))
+        append_state_log(today_rows)
+        state_log = read_state_log()
+    elif not today_rows.empty:
+        state_log = pd.concat([state_log, today_rows], ignore_index=True) if not state_log.empty else today_rows
+    changes = pending_changes(state_log, read_notifications())
+    write_parquet(state_log, PUBLIC_DIR / "position_states.parquet")
     write_daily_signals(signals)  # por último: o estado final da execução (CLAUDE.md §3)
     dropped = pd.DataFrame({"symbol": list(selection.dropped), "reason": list(selection.dropped.values())})
     return {
         "signals": signals, "backtest": trades, "performance": performance, "positions": positions, "forecast": forecast,
         "availability": available, "issues": issues, "dropped": dropped, "recommendation": recommendation,
         "selection_backtest": selection_perf, "market_regimes": market_regimes, "dataset": dataset,
+        "position_changes": changes,
     }
 
 
@@ -305,9 +323,14 @@ def backtest_inputs(raw: pd.DataFrame, fng: pd.DataFrame) -> BacktestInputs:
 
 
 
-def _publish_positions(history: pd.DataFrame, available: pd.DataFrame) -> pd.DataFrame:
+def _code_version() -> str:
+    """Versão do código desta execução: o commit do GitHub Actions, ou "local"."""
+    return os.environ.get("GITHUB_SHA", "local")[:12] or "local"
+
+
+def _publish_positions(history: pd.DataFrame, available: pd.DataFrame, rule_table: pd.DataFrame | None = None) -> pd.DataFrame:
     stored = read_positions()
-    positions = advise(stored[~stored["closed"]], history, available=available)
+    positions = advise(stored[~stored["closed"]], history, available=available, rule_table=rule_table)
     write_parquet(positions, PUBLIC_DIR / "positions.parquet")
     write_parquet(realized(stored[stored["closed"]]), PUBLIC_DIR / "closed_positions.parquet")
     return positions
@@ -321,7 +344,7 @@ def refresh_positions(now: datetime) -> pd.DataFrame:
     selection = select_universe(UNIVERSE, raw)
     candles = clean_candles(raw[raw["symbol"].isin(selection.kept)])
     history = classify_history(candles, read_fng())
-    return _publish_positions(history, availability(history, selection.kept, pd.Timestamp(now)))
+    return _publish_positions(history, availability(history, selection.kept, pd.Timestamp(now)), read_exit_rules())
 
 
 def report(result: dict[str, pd.DataFrame], source_errors: pd.DataFrame | None = None) -> str:
@@ -386,10 +409,13 @@ def _secrets() -> list[str]:
     return [v for name in SECRET_ENV if (v := os.environ.get(name, "").strip())]
 
 
-def _notify(result: dict[str, pd.DataFrame], now: datetime, *, dry_run: bool) -> int:
-    """Resumo do dia no Telegram (ou, com dry_run, só gerado, validado e impresso). 0 = ok, 1 = mensagem inválida,
-    2 = sem credenciais ou envio falhou (o job deve ficar vermelho)."""
+def _notify(result: dict[str, pd.DataFrame], now: datetime, *, dry_run: bool, record_state: bool = False) -> int:
+    """Resumo do dia no Telegram mais, só quando o estado de alguma posição mudou, o aviso das posições (ou, com dry_run, só
+    gerado, validado e impresso). 0 = ok, 1 = mensagem inválida, 2 = sem credenciais ou envio falhou (o job deve ficar
+    vermelho). A mudança só é marcada como avisada depois do envio: se falhar, é reenviada na próxima execução."""
     texts = format_report(result["signals"], result["recommendation"], now=pd.Timestamp(now), recommended=RECOMMENDED)
+    changes = result.get("position_changes", pd.DataFrame())
+    texts += format_position_changes(changes, now=pd.Timestamp(now))
     problems = validate_messages(texts, _secrets())
     if problems:
         logger.error("mensagem do Telegram inválida: %s", "; ".join(problems))
@@ -409,6 +435,8 @@ def _notify(result: dict[str, pd.DataFrame], now: datetime, *, dry_run: bool) ->
     except TelegramError as exc:
         logger.error("notificação falhou: %s", exc)
         return 2
+    if record_state:
+        append_notifications(acknowledgements(changes, pd.Timestamp(now)))
     logger.info("resumo enviado ao Telegram (%d mensagem(ns))", len(texts))
     return 0
 
@@ -430,6 +458,7 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--offline", action="store_true", help="só reanalisa a base local")
     mode.add_argument("--rebuild", action="store_true", help="baixa todo o histórico de novo")
     parser.add_argument("--notify", action="store_true", help="envia o resumo pelo Telegram")
+    parser.add_argument("--record-state", action="store_true", help="grava o registro de sinais e o histórico de estados em data/state (GitHub Actions)")
     parser.add_argument("--dry-run", action="store_true", help="gera e valida a mensagem do Telegram sem enviar")
     parser.add_argument(
         "--budget", type=float, default=BUDGET_BRL,
@@ -449,7 +478,7 @@ def main(argv: list[str] | None = None) -> int:
             log = update_base(now, rebuild=args.rebuild, binance_host=os.environ.get("BINANCE_API_HOST", "").strip() or BINANCE_DEFAULT_HOST)
             failures = log[log["status"].eq("erro")]
         stage = "análise"
-        result = analyze(pd.Timestamp(now), budget=args.budget, source_errors=failures)
+        result = analyze(pd.Timestamp(now), budget=args.budget, source_errors=failures, record_state=args.record_state)
     except ExtractorError as exc:
         logger.error("pipeline falhou: %s", exc)
         if args.notify and not args.dry_run:
@@ -462,7 +491,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(report(result, failures))
     if args.notify or args.dry_run:
-        return _notify(result, now, dry_run=args.dry_run)
+        return _notify(result, now, dry_run=args.dry_run, record_state=args.record_state)
     return 0
 
 

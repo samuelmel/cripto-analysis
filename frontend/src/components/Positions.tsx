@@ -2,7 +2,7 @@ import { Check, CurrencyDollar, Plus, Receipt, ShieldWarning, Tag, Trash, TrendD
 import { useState, type FormEvent, type ReactNode } from "react";
 import { ApiError, addPurchase, deletePosition, registerSale } from "../data/api";
 import { REASON_TEXT, coinName, fmt, parseAmount, signTone, toInput, todayIso } from "../data/analytics";
-import type { ClosedPosition, DailySignal, Position } from "../types/signals";
+import type { Action, ClosedPosition, DailySignal, Position, PositionStateRow } from "../types/signals";
 import { CoinLabel } from "./CoinLabel";
 import { REASON_ICON } from "./icons";
 import { Badge, Button, Field, TEXT_TONE, Table, cell, inputClass, numCell } from "./ui";
@@ -102,6 +102,13 @@ function Fact({ icon, label, value }: { readonly icon: ReactNode; readonly label
 
 type CardMode = "view" | "sell" | "delete";
 
+const STATE_TEXT: Readonly<Record<Action, string>> = { VENDER: "Vender", ATENÇÃO: "Atenção", SEGURAR: "Segurar", INDISPONÍVEL: "Sem dados" };
+
+function StateBadge({ action }: { readonly action: Action }) {
+  const tone = action === "VENDER" ? "critical" : action === "ATENÇÃO" || action === "INDISPONÍVEL" ? "warning" : "good";
+  return <Badge tone={tone}>{STATE_TEXT[action]}</Badge>;
+}
+
 function PositionCard({ p, onChanged }: { readonly p: Position; readonly onChanged: () => Promise<void> }) {
   const [mode, setMode] = useState<CardMode>("view");
   const [salePrice, setSalePrice] = useState<string>(p.last_close === null ? "" : toInput(p.last_close));
@@ -137,7 +144,7 @@ function PositionCard({ p, onChanged }: { readonly p: Position; readonly onChang
     <article className="rounded-md border border-hairline bg-surface p-3" aria-label={`Posição em ${coinName(p.symbol)}`}>
       <div className="flex items-start justify-between gap-4">
         <CoinLabel symbol={p.symbol} detailed size={28} />
-        {sell ? <Badge tone="critical">Vender</Badge> : p.action === "INDISPONÍVEL" ? <Badge tone="warning">Sem dados</Badge> : <Badge tone="good">Segurar</Badge>}
+        <StateBadge action={p.action} />
       </div>
       <p className="mt-1 text-[12px] text-muted">{fmt.num(p.qty, 4)} unidades compradas em {fmt.day(p.entry_ts)}</p>
 
@@ -151,13 +158,23 @@ function PositionCard({ p, onChanged }: { readonly p: Position; readonly onChang
             ? `Sem dados confiáveis hoje: ${p.data_note ?? "motivo desconhecido"}. Não dá para recomendar vender nem segurar.`
             : sell && p.reason !== null
             ? `${REASON_TEXT[p.reason].replace(/^./, (c) => c.toUpperCase())} (desde ${fmt.day(p.signal_ts)}).`
+            : p.action === "ATENÇÃO"
+            ? `Nenhuma regra de venda disparou, mas uma está perto: ${p.state_detail ?? "veja a regra abaixo"}.`
             : "Nenhuma regra de venda disparou. A moeda segue em tendência de alta: pode continuar com ela."}
         </span>
       </p>
+      {p.state_rule !== null && p.action !== "INDISPONÍVEL" && (
+        <p className="mt-1 text-[12px] text-muted">
+          Regra {p.state_rule}{p.state_detail !== null ? `: ${p.state_detail}` : ""}.
+          {p.rule_evidence !== null && <> No histórico: {p.rule_evidence}.</>}
+        </p>
+      )}
 
       <dl className="mt-2">
         <Fact icon={<CurrencyDollar size={16} aria-hidden />} label="Você pagou" value={fmt.price(p.entry_price)} />
         <Fact icon={<Tag size={16} aria-hidden />} label="Preço hoje" value={fmt.price(p.last_close)} />
+        <Fact icon={<TrendDown size={16} aria-hidden />} label="Pior ponto desde a compra" value={fmt.pct(p.drawdown_entry_pct)} />
+        <Fact icon={<TrendDown size={16} aria-hidden />} label="Queda desde o topo" value={fmt.pct(p.drawdown_peak_pct)} />
         <Fact
           icon={<TrendDown size={16} aria-hidden />}
           label="Vender se fechar o dia abaixo de"
@@ -215,9 +232,10 @@ function PositionCard({ p, onChanged }: { readonly p: Position; readonly onChang
 
 /* ---------- seção completa ---------- */
 
-export function PositionsSection({ positions, closed, coins, onChanged }: {
+export function PositionsSection({ positions, closed, states, coins, onChanged }: {
   readonly positions: readonly Position[];
   readonly closed: readonly ClosedPosition[];
+  readonly states: readonly PositionStateRow[];
   readonly coins: readonly DailySignal[];
   readonly onChanged: () => Promise<void>;
 }) {
@@ -246,6 +264,8 @@ export function PositionsSection({ positions, closed, coins, onChanged }: {
         </div>
       )}
 
+      <StateHistory states={states} open={positions} />
+
       {closed.length > 0 && (
         <>
           <h3 className="mt-4 text-[13px] font-medium">Vendas que você registrou</h3>
@@ -271,6 +291,40 @@ export function PositionsSection({ positions, closed, coins, onChanged }: {
           </div>
         </>
       )}
+    </>
+  );
+}
+
+
+/* ---------- histórico de estados ---------- */
+
+/** Mudanças de estado das posições abertas, da mais recente para a mais antiga. */
+function StateHistory({ states, open }: { readonly states: readonly PositionStateRow[]; readonly open: readonly Position[] }) {
+  const ids = new Set(open.map((p) => p.position_id));
+  const changes = states.filter((s) => s.changed && ids.has(s.position_id)).sort((a, b) => b.day.getTime() - a.day.getTime());
+  if (changes.length === 0) return null;
+  return (
+    <>
+      <h3 className="mt-4 text-[13px] font-medium">Histórico de estados das suas posições</h3>
+      <div className="mt-2">
+        <Table
+          maxHeight="max-h-56"
+          caption="Cada vez que o estado de uma posição mudou, com a regra"
+          columns={[{ label: "Dia" }, { label: "Moeda" }, { label: "Mudou" }, { label: "Regra" }, { label: "Resultado", numeric: true }]}
+        >
+          {changes.map((c) => (
+            <tr key={`${c.position_id}:${c.day.toISOString()}`} className="border-b border-hairline">
+              <td className={cell}>{fmt.day(c.day)}</td>
+              <td className={cell}><CoinLabel symbol={c.symbol} size={20} /></td>
+              <td className={cell}>
+                {c.prev_state === null ? "nova posição" : STATE_TEXT[c.prev_state]} → <StateBadge action={c.state} />
+              </td>
+              <td className={`${cell} whitespace-normal text-muted`}>{c.rule === null ? "—" : `${c.rule}${c.detail === null ? "" : `: ${c.detail}`}`}</td>
+              <td className={`${numCell} ${TEXT_TONE[signTone(c.return_pct)]}`}>{fmt.pct(c.return_pct)}</td>
+            </tr>
+          ))}
+        </Table>
+      </div>
     </>
   );
 }

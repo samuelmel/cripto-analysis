@@ -12,6 +12,7 @@
  *   SourceEvent   loaders.source_log.SOURCE_LOG_SCHEMA (sources.parquet)
  *   LabResult     research/strategy_lab.RESULT_SCHEMA (strategy_lab.parquet, opcional)
  *   Position      position_advisor.POSITION_SCHEMA (positions.parquet)
+ *   PositionStateRow position_log.POSITION_STATE_LOG_SCHEMA (position_states.parquet, opcional: histórico de estados)
  *   SignalEvidence signal_validation.EVIDENCE_SCHEMA (signal_evidence.parquet, opcional: evidência estatística do COMPRAR)
  */
 
@@ -37,7 +38,7 @@ export type Portfolio = (typeof PORTFOLIOS)[number];
 export const TRADE_STATUSES = ["FECHADA", "ABERTA"] as const;
 export type TradeStatus = (typeof TRADE_STATUSES)[number];
 
-export const ACTIONS = ["VENDER", "SEGURAR", "INDISPONÍVEL"] as const;
+export const ACTIONS = ["VENDER", "ATENÇÃO", "SEGURAR", "INDISPONÍVEL"] as const;
 export type Action = (typeof ACTIONS)[number];
 
 export const OPPORTUNITIES = ["BOA_RELATIVA", "MODERADA", "AGUARDAR", "EVITAR"] as const;
@@ -319,6 +320,28 @@ export interface Position {
   readonly sell_below_price: number | null;
   readonly above_sma_pct: number | null;
   readonly data_note: string | null;
+  readonly state_rule: string | null;
+  readonly state_detail: string | null;
+  readonly rule_evidence: string | null;
+  readonly drawdown_entry_pct: number | null;
+  readonly drawdown_peak_pct: number | null;
+}
+
+/** position_log.POSITION_STATE_LOG_SCHEMA (position_states.parquet, opcional): histórico diário do estado de cada posição */
+export interface PositionStateRow {
+  readonly day: Date;
+  readonly position_id: string;
+  readonly symbol: string;
+  readonly state: Action;
+  readonly prev_state: Action | null;
+  readonly rule: string | null;
+  readonly detail: string | null;
+  readonly return_pct: number | null;
+  readonly drawdown_entry_pct: number | null;
+  readonly drawdown_peak_pct: number | null;
+  readonly last_close: number | null;
+  readonly changed: boolean;
+  readonly rule_evidence: string | null;
 }
 
 /** position_advisor.CLOSED_SCHEMA (closed_positions.parquet) */
@@ -391,4 +414,5 @@ export interface Dashboard {
   readonly positions: readonly Position[];
   readonly closed: readonly ClosedPosition[];
   readonly evidence: readonly SignalEvidence[];
+  readonly positionStates: readonly PositionStateRow[];
 }

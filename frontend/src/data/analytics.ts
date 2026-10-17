@@ -197,6 +197,7 @@ export function todayVerdict(signals: readonly DailySignal[], positions: readonl
 
   const details = [
     ...positions.filter((p) => p.action === "INDISPONÍVEL").map((p) => `${coinName(p.symbol)}: sem dados confiáveis para avaliar a sua posição (${p.data_note ?? "motivo desconhecido"}).`),
+    ...positions.filter((p) => p.action === "ATENÇÃO").map((p) => `Atenção com ${coinName(p.symbol)}: ${p.state_detail ?? "uma regra de venda está perto de disparar"}.`),
     ...toSell.map((p) => `Venda ${coinName(p.symbol)}: ${p.reason === null ? "a regra de saída disparou" : REASON_TEXT[p.reason]}.`),
     ...turnedUp.map((s) => `${coinName(s.symbol)} entrou em tendência de alta hoje: o preço passou da média de 200 dias.`),
     ...turnedDown.map((s) => `${coinName(s.symbol)} saiu da tendência de alta hoje. Quem tem deve vender.`),

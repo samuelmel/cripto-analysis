@@ -1,4 +1,4 @@
-"""Suas posições (compras reais) em data/positions/positions.parquet."""
+"""Suas posições (compras reais) em data/state/positions.parquet (branch `state`, ver `state_store`)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ from pathlib import Path
 import pandas as pd
 
 from .parquet_loader import write_parquet
+from .state_store import positions_path
 
-POSITIONS_PATH = Path("data/positions/positions.parquet")
+POSITIONS_PATH = positions_path()
 
 POSITIONS_SCHEMA: dict[str, str] = {
     "position_id": "string",

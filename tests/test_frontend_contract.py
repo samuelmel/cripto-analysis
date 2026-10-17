@@ -15,6 +15,7 @@ from src.transformers.anomaly_detector import HISTORY_SCHEMA
 from src.transformers.forecast import FORECAST_SCHEMA
 from src.transformers.position_advisor import CLOSED_SCHEMA, POSITION_SCHEMA
 from src.transformers.recommendation import RECOMMENDATION_SCHEMA, SIGNALS_SCHEMA
+from src.transformers.position_log import POSITION_STATE_LOG_SCHEMA
 from src.transformers.regimes import REGIME_SCHEMA
 from src.transformers.selection_backtest import SELECTION_PERF_SCHEMA
 from src.transformers.signal_validation import EVIDENCE_SCHEMA
@@ -38,6 +39,7 @@ CONTRACTS: dict[str, tuple[dict[str, str], str]] = {
     "ClosedPosition": (CLOSED_SCHEMA, "parseClosed"),
     "MarketRegime": (REGIME_SCHEMA, "parseMarketRegime"),
     "SignalEvidence": (EVIDENCE_SCHEMA, "parseEvidence"),
+    "PositionStateRow": (POSITION_STATE_LOG_SCHEMA, "parsePositionState"),
 }
 
 

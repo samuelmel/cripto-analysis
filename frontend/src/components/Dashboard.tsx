@@ -180,7 +180,7 @@ function Ready({ data, view, onView, onChanged, now }: {
   readonly onChanged: () => Promise<void>;
   readonly now: Date;
 }) {
-  const { signals, recommendation, selectionPerf, history, trades, forecast, sources, positions, closed } = data;
+  const { signals, recommendation, selectionPerf, history, trades, forecast, sources, positions, closed, positionStates } = data;
   const first = signals[0];
   const [selected, setSelected] = useState<string>(positions[0]?.symbol ?? "BTC/USDT");
 
@@ -233,6 +233,7 @@ function Ready({ data, view, onView, onChanged, now }: {
           forecast={forecast}
           positions={positions}
           closed={closed}
+          positionStates={positionStates}
           onDetails={() => {
             onView("selecao");
             window.scrollTo({ top: 0 });

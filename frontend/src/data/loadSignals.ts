@@ -29,6 +29,7 @@ import {
   type MarketRegime,
   type Performance,
   type Position,
+  type PositionStateRow,
   type Recommendation,
   type SelectionPerf,
   type SignalEvidence,
@@ -327,6 +328,27 @@ const parsePosition = (r: Row): Position => ({
   sell_below_price: numOrNull(r, "sell_below_price"),
   above_sma_pct: numOrNull(r, "above_sma_pct"),
   data_note: strOrNull(r, "data_note"),
+  state_rule: strOrNull(r, "state_rule"),
+  state_detail: strOrNull(r, "state_detail"),
+  rule_evidence: strOrNull(r, "rule_evidence"),
+  drawdown_entry_pct: numOrNull(r, "drawdown_entry_pct"),
+  drawdown_peak_pct: numOrNull(r, "drawdown_peak_pct"),
+});
+
+const parsePositionState = (r: Row): PositionStateRow => ({
+  day: date(r, "day"),
+  position_id: str(r, "position_id"),
+  symbol: str(r, "symbol"),
+  state: oneOf(ACTIONS, r, "state"),
+  prev_state: oneOfOrNull(ACTIONS, r, "prev_state"),
+  rule: strOrNull(r, "rule"),
+  detail: strOrNull(r, "detail"),
+  return_pct: numOrNull(r, "return_pct"),
+  drawdown_entry_pct: numOrNull(r, "drawdown_entry_pct"),
+  drawdown_peak_pct: numOrNull(r, "drawdown_peak_pct"),
+  last_close: numOrNull(r, "last_close"),
+  changed: bool(r, "changed"),
+  rule_evidence: strOrNull(r, "rule_evidence"),
 });
 
 const parseClosed = (r: Row): ClosedPosition => ({
@@ -353,7 +375,7 @@ async function optionalRows(url: string): Promise<readonly Row[]> {
 
 /** Leitura: baixa e valida tudo que o pipeline publicou (a escrita fica em api.ts). */
 export async function loadDashboard(base = ""): Promise<Dashboard> {
-  const [signals, recs, selectionPerf, marketRegimes, history, trades, performance, forecast, sources, lab, positions, closed, evidence] = await Promise.all([
+  const [signals, recs, selectionPerf, marketRegimes, history, trades, performance, forecast, sources, lab, positions, closed, evidence, positionStates] = await Promise.all([
     fetchRows(`${base}/daily_signals.parquet`),
     fetchRows(`${base}/recommendation.parquet`),
     optionalRows(`${base}/selection_backtest.parquet`),
@@ -367,6 +389,7 @@ export async function loadDashboard(base = ""): Promise<Dashboard> {
     fetchRows(`${base}/positions.parquet`),
     fetchRows(`${base}/closed_positions.parquet`),
     optionalRows(`${base}/signal_evidence.parquet`),
+    optionalRows(`${base}/position_states.parquet`),
   ]);
   const parsed = signals.map(parseSignal);
   const first = recs[0];
@@ -388,5 +411,6 @@ export async function loadDashboard(base = ""): Promise<Dashboard> {
     positions: positions.map(parsePosition),
     closed: closed.map(parseClosed),
     evidence: evidence.map(parseEvidence),
+    positionStates: positionStates.map(parsePositionState),
   };
 }

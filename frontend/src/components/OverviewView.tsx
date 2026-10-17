@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { coinName, fmt, type SignalView, type Verdict } from "../data/analytics";
 import { RECOMMENDED_SYMBOLS, coinFullName } from "../data/coins";
-import type { ClosedPosition, DailySignal, Forecast, HistoryPoint, Position, Recommendation, Trade } from "../types/signals";
+import type { ClosedPosition, DailySignal, Forecast, HistoryPoint, Position, PositionStateRow, Recommendation, Trade } from "../types/signals";
 import { CoinLogo } from "./CoinLabel";
 import { CoreTable, ForecastMini } from "./Overview";
 import { PositionsSection } from "./Positions";
@@ -42,6 +42,7 @@ export function OverviewView(props: {
   readonly forecast: readonly Forecast[];
   readonly positions: readonly Position[];
   readonly closed: readonly ClosedPosition[];
+  readonly positionStates: readonly PositionStateRow[];
   readonly onDetails: () => void;
   readonly onChanged: () => Promise<void>;
 }) {
@@ -119,7 +120,7 @@ export function OverviewView(props: {
           bodyClassName="scroll-thin max-h-[340px] overflow-auto p-3"
         >
           {side === "posicoes" && (
-            <PositionsSection positions={props.positions} closed={props.closed} coins={props.coinsByName} onChanged={props.onChanged} />
+            <PositionsSection positions={props.positions} closed={props.closed} states={props.positionStates} coins={props.coinsByName} onChanged={props.onChanged} />
           )}
           {side === "previsao" &&
             (props.forecast.length === 0 ? (

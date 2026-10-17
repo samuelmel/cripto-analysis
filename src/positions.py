@@ -6,6 +6,10 @@ Uso (da raiz do projeto):
     uv run python -m src.positions list
     uv run python -m src.positions close <id> 95000                    vendeu a 95000
     uv run python -m src.positions remove <id>                         apaga um registro errado
+
+As posições ficam em `data/state/positions.parquet`, um worktree da branch `state` (ver `src/state_sync.py`). Cada
+comando que altera algo traz a branch antes e envia o resultado depois, para o GitHub Actions avisar mesmo com o PC
+desligado. Use `--no-sync` para trabalhar só localmente.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ import pandas as pd
 
 from .config import UNIVERSE
 from .loaders.positions_store import POSITIONS_SCHEMA, read_positions, write_positions
+from . import state_sync
 from .pipeline import refresh_positions
 
 
@@ -90,17 +95,19 @@ def show() -> str:
 def main(argv: list[str] | None = None) -> int:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     parser = argparse.ArgumentParser(description="Registro das suas posições")
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--no-sync", action="store_true", help="não traz nem envia a branch `state` (só local)")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    p_add = sub.add_parser("add", help="registra uma compra")
+    p_add = sub.add_parser("add", help="registra uma compra", parents=[common])
     p_add.add_argument("symbol")
     p_add.add_argument("price", type=float)
     p_add.add_argument("qty", type=float)
     p_add.add_argument("--date", help="AAAA-MM-DD (padrão: hoje)")
-    p_close = sub.add_parser("close", help="registra a venda")
+    p_close = sub.add_parser("close", help="registra a venda", parents=[common])
     p_close.add_argument("position_id")
     p_close.add_argument("price", type=float)
     p_close.add_argument("--date")
-    p_rm = sub.add_parser("remove", help="apaga um registro")
+    p_rm = sub.add_parser("remove", help="apaga um registro", parents=[common])
     p_rm.add_argument("position_id")
     sub.add_parser("list", help="lista as posições")
     args = parser.parse_args(argv)
@@ -108,6 +115,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "list":
         print(show())
         return 0
+    sync = not bool(getattr(args, "no_sync", False))
+    if sync:
+        try:
+            state_sync.init()
+            state_sync.pull()
+        except state_sync.StateSyncError as exc:
+            print(f"aviso: não consegui sincronizar o estado antes de alterar: {exc}")
+            return 1
     if args.cmd == "add":
         print(f"posição registrada: {add(args.symbol, args.price, args.qty, args.date)}")
     elif args.cmd == "close":
@@ -117,6 +132,13 @@ def main(argv: list[str] | None = None) -> int:
         remove(args.position_id)
         print(f"posição {args.position_id} removida.")
 
+    if sync:
+        try:
+            sent = state_sync.push(f"posições: {args.cmd}")
+        except state_sync.StateSyncError as exc:
+            print(f"erro ao enviar o estado (a alteração ficou só neste computador): {exc}")
+            return 1
+        print("estado enviado à branch `state`." if sent else "estado já estava em dia no GitHub.")
     refresh_positions(datetime.now(timezone.utc))  # atualiza as posições no painel com a base local, sem rede
     print(show())
     return 0

@@ -17,10 +17,14 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from .. import config
+
+from .exit_rules import STATE_SELL, STATE_WATCH, ExitParams, position_state
 from .trade_simulator import EXIT_REGIME, EXIT_STOP, EXIT_TREND, STOP_TOLERANCE, ExitRules
 
 ACTION_SELL = "VENDER"
 ACTION_HOLD = "SEGURAR"
+ACTION_WATCH = "ATENÇÃO"   # nenhuma regra disparou, mas alguma está a metade do caminho (docs/exit_rules.md)
 ACTION_UNAVAILABLE = "INDISPONÍVEL"  # sem dado confiável hoje: nem vender nem segurar com base em dado velho
 
 POSITION_SCHEMA: dict[str, str] = {
@@ -42,6 +46,11 @@ POSITION_SCHEMA: dict[str, str] = {
     "sell_below_price": "float64",  # SMA 200 atual: vender se fechar abaixo
     "above_sma_pct": "float64",     # quanto o último fechamento está acima (+) ou abaixo (−) da SMA 200
     "data_note": "string",          # motivo do INDISPONÍVEL; nulo nos demais casos
+    "state_rule": "string",         # regra que disparou (VENDER) ou que chamou atenção (ATENÇÃO)
+    "state_detail": "string",       # a explicação em uma frase, com os números de hoje
+    "rule_evidence": "string",      # o que essa regra fez no histórico (disparos, queda depois da venda)
+    "drawdown_entry_pct": "float64",  # pior ponto desde a entrada, sobre o preço pago (0 ou negativo)
+    "drawdown_peak_pct": "float64",   # queda do fechamento atual desde o maior fechamento depois da entrada
 }
 
 
@@ -100,8 +109,13 @@ def advise(
     history: pd.DataFrame,
     rules: ExitRules = ExitRules(),
     available: pd.DataFrame | None = None,
+    rule_table: pd.DataFrame | None = None,
+    trailing: float | None = None,
 ) -> pd.DataFrame:
     """`positions`: position_id, symbol, entry_ts, entry_price, qty (apenas posições abertas).
+
+    `rule_table`: `evidence/exit_rules.parquet` (o que cada regra fez no backtest), usado no texto `rule_evidence`.
+    `trailing`: queda desde o topo que dispara VENDER; None (padrão, nenhum valor foi adotado no backtest) = só ATENÇÃO.
 
     `available`: saída de `data_quality.availability` (symbol, available, reason); None = tudo disponível.
     """
@@ -163,5 +177,86 @@ def advise(
             "data_note": note.where(blocked),
         }
     )
+    out = _with_states(out, path, history, rules, trailing, rule_table, blocked)
     out = out[list(POSITION_SCHEMA)].astype(POSITION_SCHEMA)
     return out.sort_values(["action", "return_pct"], ascending=[False, True], ignore_index=True)
+
+
+def rule_evidence_text(rule: str | None, table: pd.DataFrame | None) -> str | None:
+    """Uma frase com o que a regra fez no backtest (disparos, retorno médio, o que o preço fez 30 dias depois da venda)."""
+    if rule is None or table is None or table.empty:
+        return None
+    row = table[table["rule"].eq(rule)]
+    if row.empty:
+        return None
+    r = row.iloc[0]
+    n = int(r["n"]) if pd.notna(r["n"]) else 0
+    parts = [f"{rule}: {n} disparos no backtest"]
+    if pd.notna(r["share_fell_after"]):
+        parts.append(f"em {float(r['share_fell_after']):.0%} o preço caiu nos 30 dias seguintes à venda")
+    if pd.notna(r["mean_return"]):
+        parts.append(f"retorno médio da operação {float(r['mean_return']):+.1%}")
+    if not bool(r["adopted"]):
+        parts.append("regra não adotada: só aviso")
+    return "; ".join(parts)
+
+
+def _with_states(
+    out: pd.DataFrame,
+    path: pd.DataFrame,
+    history: pd.DataFrame,
+    rules: ExitRules,
+    trailing: float | None,
+    rule_table: pd.DataFrame | None,
+    blocked: "pd.Series[bool]",
+) -> pd.DataFrame:
+    """Acrescenta SEGURAR / ATENÇÃO / VENDER com a regra, os drawdowns e a evidência histórica da regra."""
+    params = ExitParams(stop=None if rules.stop_loss is None else -rules.stop_loss, trailing=trailing)
+    btc = history[history["symbol"].eq(config.REGIME_SYMBOL)].sort_values("timestamp")
+    btc_close = float(btc["close"].iloc[-1]) if not btc.empty else float("nan")
+    btc_sma = float(btc["sma_200"].iloc[-1]) if not btc.empty else float("nan")
+    paths = {str(k): g.sort_values("timestamp")["close"].to_numpy(dtype="float64") for k, g in path.groupby("position_id")}
+    blocked_by_id = dict(zip(out["position_id"], blocked.reindex(out.index).fillna(False).astype(bool), strict=False))
+    actions: list[str] = []
+    rules_out: list[str | None] = []
+    details: list[str] = []
+    evidence: list[str | None] = []
+    dd_entry: list[float] = []
+    dd_peak: list[float] = []
+
+    def num(value: object) -> float:
+        return float(value) if isinstance(value, (int, float, np.integer, np.floating)) and np.isfinite(value) else float("nan")
+
+    for r in out.to_dict("records"):
+        last = num(r["last_close"])
+        closes = paths.get(str(r["position_id"]), np.array([last]))
+        closes = closes[np.isfinite(closes)] if len(closes) else np.array([last])
+        entry = num(r["entry_price"])
+        peak = max(float(closes.max()), entry)
+        dd_entry.append(min(float(closes.min()) / entry - 1.0, 0.0) * 100.0)
+        dd_peak.append((last / peak - 1.0) * 100.0 if np.isfinite(last) else float("nan"))
+        if r["action"] == ACTION_UNAVAILABLE and blocked_by_id.get(r["position_id"], False):
+            actions.append(ACTION_UNAVAILABLE)
+            rules_out.append(None)
+            details.append(str(r["data_note"]) if pd.notna(r["data_note"]) else "sem dado confiável hoje")
+            evidence.append(None)
+            continue
+        st = position_state(
+            entry_price=entry, closes_since_entry=closes.tolist(), sma=num(r["sell_below_price"]),
+            btc_close=btc_close, btc_sma=btc_sma, params=params,
+        )
+        sell = r["action"] == ACTION_SELL or st.state == STATE_SELL
+        state = ACTION_SELL if sell else (ACTION_WATCH if st.state == STATE_WATCH else ACTION_HOLD)
+        rule = (str(r["reason"]) if pd.notna(r["reason"]) else st.rule) if sell else st.rule
+        actions.append(state)
+        rules_out.append(rule)
+        details.append(st.detail if st.state == STATE_SELL or not sell else f"regra {rule} ativa")
+        evidence.append(rule_evidence_text(rule, rule_table))
+    return out.assign(
+        action=pd.Series(actions, index=out.index),
+        state_rule=pd.Series(rules_out, index=out.index, dtype="string"),
+        state_detail=pd.Series(details, index=out.index, dtype="string"),
+        rule_evidence=pd.Series(evidence, index=out.index, dtype="string"),
+        drawdown_entry_pct=pd.Series(dd_entry, index=out.index),
+        drawdown_peak_pct=pd.Series(dd_peak, index=out.index),
+    )
