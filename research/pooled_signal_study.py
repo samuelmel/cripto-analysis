@@ -58,7 +58,8 @@ def main() -> int:
     for h in rules.horizons:
         sig = pooled_signals(prep, h, "DESENVOLVIMENTO", rules)
         seed = stable_seed(rules.seed, "POOLED", h)
-        variants = {"TODAS": set(), "SEM_BTC_ETH": {"BTC/USDT", "ETH/USDT"}, "SEM_5_MAIS_FREQUENTES": top_by_signals(sig, 5)}
+        variants = {"TODAS": set(), "SEM_BTC_ETH": {"BTC/USDT", "ETH/USDT"}, "SEM_5_MAIS_FREQUENTES": top_by_signals(sig, 5),
+                    "SEM_LUNA_POSHOC": {"LUNA/USDT"}}  # criada depois de ver o resultado: ver docs/pooled_validation.md
         for name, excluded in variants.items():
             s = sensitivity(sig, excluded, seed, rules.resamples) if excluded else pooled_stats(sig, seed, rules.resamples)
             rows.append({"horizon": h, "variant": name, "n_signals": s.n_signals, "n_coins": s.n_coins,

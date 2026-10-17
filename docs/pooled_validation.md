@@ -59,3 +59,48 @@ não passar, o hold-out **não é calculado** (não se gasta o teste final para 
 - Mesmo agregado, o resultado vale para o período de desenvolvimento (2017 a 2024), que contém poucos ciclos de mercado;
   as janelas de 30 dias não eliminam a dependência de regime.
 - Um resultado positivo diria que a regra tem vantagem **média** no conjunto, não que cada moeda a tenha.
+
+## Resultado da execução de 2026-10-17
+
+Experimento `e1c394add0e9d0ba` (dados 11fac7c853b7, código e7be451, semente 20261016; reproduzido em segunda execução com
+resultado idêntico). 126 moedas, desenvolvimento, sinais independentes por moeda.
+
+| Horizonte | Sinais | Janelas de 30 dias | Excesso médio | IC 95% | p ajustado (Holm) | Mediana | Moedas com excesso > 0 |
+|---|---|---|---|---|---|---|---|
+| 7 dias | 729 | 49 | +0,6 pp | −1,8 a +3,0 pp | 0,58 | −1,0 pp | 48% |
+| 30 dias | 504 | 47 | **−97,8 pp (artefato, ver abaixo)** | −195 a −22 pp | 0,98 | −6,8 pp | 41% |
+
+**Veredito: `NAO_DEMONSTRADO`.** Em 7 dias o excesso é indistinguível de zero (p ajustado 0,58). Como o critério exigia os
+dois horizontes, o teste final **não foi calculado**. A mediana do excesso é negativa nos dois horizontes: a média, quando
+positiva, vem de poucos ganhos grandes.
+
+### Defeito de dados descoberto na leitura do resultado
+
+O excesso de −97,8 pp em 30 dias **não é um resultado econômico**. Vem de um único par, `LUNA/USDT`: o par continua o
+mesmo depois do colapso de maio de 2022, com o preço passando de centavos de milésimo para dólares. A média dos retornos de
+30 dias de dias aleatórios desse par é de +12.339% (a referência), e os 4 sinais dele contribuem −123 pp cada, o que
+sozinho explica quase toda a soma. É a limitação já escrita ("pares renomeados ou migrados contam como pares distintos"),
+só que aqui ela quebra a estatística. A leitura correta do horizonte de 30 dias é a variante **posterior ao resultado**
+(`SEM_LUNA_POSHOC`, criada depois de ver o número, só descritiva): excesso **+0,0 pp**, IC 95% de −7,1 a +7,6 pp, valor-p 0,49.
+
+O veredito **não** foi alterado por isso: o protocolo foi aplicado como escrito, e o resultado oficial continua sendo o da
+tabela. Mesmo sem LUNA o teste não passaria, porque o horizonte de 7 dias já falha.
+
+### Leitura
+
+- Juntando 126 moedas e 729 sinais (contra 12 a 30 por moeda no teste individual), **não aparece vantagem da regra SMA 200
+  sobre entrar em um dia qualquer da mesma moeda**. O IC de 7 dias (−1,8 a +3,0 pp) exclui ganhos grandes, mas não
+  descarta um efeito pequeno positivo ou negativo.
+- Os sinais são menos numerosos do que parecem: 729 sinais caem em 49 janelas de calendário, porque muitas moedas ligam no
+  mesmo mês. O erro padrão considera isso.
+- Não demonstrado **não** é demonstrado que a regra falha. A regra tem outro papel (ficar fora em tendência de baixa, com o
+  stop de 20%), que esse teste não mede.
+- Sensibilidades (`evidence/pooled_signal_sensitivity.parquet`): sem BTC e ETH e sem as 5 moedas com mais sinais, o
+  quadro de 7 dias não muda (+0,7 e +1,0 pp, ICs incluindo zero).
+
+### Consequência e pendência
+
+Nada muda no produto: continua sem moeda validada e sem COMPRAR. Pendência técnica, não tratada aqui por exigir mudança de
+regra de dados: a limpeza (`clean_candles`) deveria descartar janelas de retorno que atravessam lacuna ou salto de preço
+incompatível com mercado (caso LUNA), em vez de tratar o par como contínuo. Isso muda os dois testes (por moeda e agregado)
+e precisa de novo registro.
