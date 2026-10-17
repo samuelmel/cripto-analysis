@@ -107,6 +107,10 @@ class Prepared:
     events: pd.DataFrame                  # True no primeiro dia de um episódio de alta, com a moeda no universo
     eligible: pd.DataFrame                # dia elegível para a referência aleatória (no universo, SMA 200 existe)
     forward: dict[int, pd.DataFrame]      # horizonte -> retorno líquido de entrar em t+1 e sair em t+1+h
+    priced: pd.DataFrame | None = None    # fechamentos (deslistada: último preço adiante), para simular saídas
+    sma: pd.DataFrame | None = None       # SMA 200 de cada moeda
+    cost: pd.DataFrame | None = None      # custo por lado (taxa + spread + slippage)
+    last_candle: pd.Series | None = None  # último dia com candle de cada moeda
 
 
 def stable_seed(base: int, *parts: object) -> int:
@@ -163,7 +167,7 @@ def prepare(candles: pd.DataFrame, rules: ValidationRules = ValidationRules()) -
     for h in rules.horizons:
         exit_ = priced.shift(-(1 + h))
         forward[h] = ((1.0 - entry_cost) ** 2 * exit_ / entry - 1.0).replace([np.inf, -np.inf], np.nan)
-    return Prepared(events, eligible, forward)
+    return Prepared(events, eligible, forward, priced, sma, cost, last_candle)
 
 
 def _window(index: pd.Index, period: str, h: int, rules: ValidationRules) -> pd.Series:
