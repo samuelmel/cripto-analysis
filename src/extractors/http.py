@@ -45,15 +45,14 @@ def _retry_after(exc: urllib.error.HTTPError) -> float | None:
         return None
 
 
-def get_json(
+def _get_bytes(
     url: str,
-    params: dict[str, str | int] | None = None,
-    headers: dict[str, str] | None = None,
-    *,
-    retries: int = 5,
-    timeout: float = 30.0,
-    min_interval: float = 0.0,
-) -> Any:
+    params: dict[str, str | int] | None,
+    headers: dict[str, str] | None,
+    retries: int,
+    timeout: float,
+    min_interval: float,
+) -> bytes:
     query = f"?{urllib.parse.urlencode(params)}" if params else ""
     request = urllib.request.Request(url + query, headers={"User-Agent": USER_AGENT, **(headers or {})})
     host = urllib.parse.urlsplit(url).netloc
@@ -62,11 +61,8 @@ def get_json(
         _throttle(host, min_interval)
         try:
             with urllib.request.urlopen(request, timeout=timeout) as resp:
-                body = resp.read()
-            try:
-                return json.loads(body.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise ExtractorError(f"GET {url} falhou: resposta não é JSON válido") from exc
+                body: bytes = resp.read()
+            return body
         except urllib.error.HTTPError as exc:
             if exc.code not in RETRYABLE_STATUS or attempt == retries:
                 raise ExtractorError(f"GET {url} falhou: HTTP {exc.code}") from exc
@@ -80,3 +76,36 @@ def get_json(
                 raise ExtractorError(f"GET {url} falhou: {exc}") from exc
         time.sleep(wait)
     raise ExtractorError(f"GET {url} falhou após {retries} tentativas")
+
+
+def get_json(
+    url: str,
+    params: dict[str, str | int] | None = None,
+    headers: dict[str, str] | None = None,
+    *,
+    retries: int = 5,
+    timeout: float = 30.0,
+    min_interval: float = 0.0,
+) -> Any:
+    body = _get_bytes(url, params, headers, retries, timeout, min_interval)
+    try:
+        return json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ExtractorError(f"GET {url} falhou: resposta não é JSON válido") from exc
+
+
+def get_text(
+    url: str,
+    params: dict[str, str | int] | None = None,
+    headers: dict[str, str] | None = None,
+    *,
+    retries: int = 5,
+    timeout: float = 30.0,
+    min_interval: float = 0.0,
+) -> str:
+    """Como `get_json`, para respostas de texto (ex.: listagem XML do bucket público de dados da Binance)."""
+    body = _get_bytes(url, params, headers, retries, timeout, min_interval)
+    try:
+        return body.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ExtractorError(f"GET {url} falhou: resposta não é UTF-8") from exc

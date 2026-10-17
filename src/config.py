@@ -236,3 +236,36 @@ moeda por ruído e pagaria mais custo)."""
 REBALANCE_BAND = 0.05
 """Backtest: moeda que continua na carteira só é reajustada se o peso-alvo mudar mais de 5 pontos percentuais
 (entradas e saídas sempre são executadas). Evita pagar custo por ajustes pequenos."""
+
+# ---------------------------------------------------------------------------------------------
+# Validação estatística do COMPRAR (transformers/signal_validation.py, docs/signal_validation.md). Regras fixadas
+# ANTES de olhar qualquer resultado de retorno.
+# ---------------------------------------------------------------------------------------------
+
+PIT_EXCLUDED_BASES: tuple[str, ...] = (
+    # stablecoins e paridades de moeda fiduciária (não há tendência de cripto a seguir)
+    "USDC", "BUSD", "TUSD", "USDP", "USDS", "FDUSD", "DAI", "UST", "USTC", "PYUSD", "USD1", "XUSD", "BFUSD", "AEUR",
+    "EURI", "EUR", "GBP", "AUD", "TRY", "BRL", "RUB", "UAH", "ZAR", "NGN", "PLN", "RON", "ARS", "JPY", "CZK", "MXN",
+    "COP", "IDR", "BIDR", "IDRT", "VAI", "SUSD", "USDSB", "USDT",
+    # duplicatas e derivativos de BTC/ETH, ouro tokenizado
+    "WBTC", "WETH", "STETH", "WBETH", "BETH", "PAXG", "XAUT",
+)
+"""Bases fora do universo point-in-time (a lista de `EXCLUDED_BASES` mais fiduciárias e variantes de stablecoin)."""
+
+HOLDOUT_START = "2025-01-01"
+"""Início do teste final. Nada antes dele pode ser escolhido com dados dele; nada nele escolhe nada."""
+DEVELOPMENT_END = "2024-12-31"
+"""Último dia do período de desenvolvimento (inclui o 2023+ antigo, já consumido)."""
+
+VALIDATION_HORIZONS: tuple[int, ...] = (7, 30)
+"""Horizontes (dias) do retorno depois da entrada simulada."""
+VALIDATION_ALPHA = 0.05
+"""Nível do teste, com correção de Holm sobre a família de combinações (moeda, horizonte) testadas."""
+VALIDATION_SEED = 20261016
+"""Semente-base: a semente de cada (moeda, horizonte) deriva dela de forma estável."""
+VALIDATION_NULL_DRAWS = 20_000
+"""Sorteios da referência aleatória (dias de entrada aleatórios da mesma moeda)."""
+VALIDATION_BOOTSTRAP_RESAMPLES = 2_000
+"""Reamostragens do bootstrap em blocos do intervalo de confiança."""
+HOLDOUT_MIN_SIGNALS = 5
+"""Sinais independentes mínimos no hold-out para ele poder revogar (ou confirmar) uma moeda validada."""
