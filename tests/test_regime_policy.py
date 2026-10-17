@@ -210,7 +210,7 @@ def test_switching_with_an_open_position_pays_the_exit_cost_at_the_next_rebalanc
     assert (first_cash - switch).days < 7  # a troca só vale no próximo dia de rebalanceamento
     assert baseline.exposure.loc[:first_cash].max() > 0
     pd.testing.assert_series_equal(policy.daily.loc[:first_cash], baseline.daily.loc[:first_cash])  # igual até a troca
-    after = first_cash + ONE_DAY
+    after = first_cash + 2 * ONE_DAY  # decide em first_cash, executa no fechamento seguinte, paga no dia após
     assert policy.daily.loc[after] < 0 and policy.exposure.loc[after] == 0.0  # só o custo de sair, e fica em caixa
     assert policy.cost > 0 and policy.turnover > 0 and result.switches[POLICY_PRIMARY] >= 1
     assert (policy.daily.loc[after + ONE_DAY:] == 0).all()

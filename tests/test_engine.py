@@ -8,7 +8,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.transformers.selection_backtest import ENGINE_VERSION, run_weighted
+from functools import partial
+
+from src.transformers.backtest_engine import ENGINE_VERSION
+from src.transformers.selection_backtest import run_weighted as _run_weighted
+
+run_weighted = partial(_run_weighted, execution_lag=0)  # temporização legada (mesmo fechamento), testada aqui
 
 DAYS = pd.date_range("2025-01-01", periods=40, freq="D", tz="UTC")
 COINS = [f"C{i:02d}/USDT" for i in range(11)]
@@ -32,7 +37,7 @@ def equal(n: int) -> dict[str, float]:
 
 
 def test_engine_version_is_declared() -> None:
-    assert ENGINE_VERSION == "weights-2"
+    assert ENGINE_VERSION == "engine-3"
 
 
 def test_a_new_entry_inside_the_band_no_longer_pushes_exposure_above_the_target() -> None:

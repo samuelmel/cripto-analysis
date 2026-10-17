@@ -27,6 +27,7 @@ from .regime_policy import (
     policy_targets,
     random_dropout,
 )
+from .backtest_engine import WeightedRun
 from .selection import SelectionRules, regime_series
 from .selection_backtest import (
     STRATEGY_BTC,
@@ -34,7 +35,6 @@ from .selection_backtest import (
     STRATEGY_MOMENTUM,
     STRATEGY_SELECTION,
     STRATEGY_SMA200,
-    WeightedRun,
     baseline_targets,
     market_returns,
     rebalance_days,

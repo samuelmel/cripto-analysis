@@ -4,7 +4,8 @@ Puro (CLAUDE.md §1). A seleção de cada dia de rebalanceamento é a MESMA fun�
 + `allocation.allocate`, com o orçamento configurado, arredondamento e ordem mínima), então o teste mede o que o
 painel recomenda, não uma versão simplificada.
 
-Motor (`run_weighted`): pesos-alvo decididos no fechamento do dia t passam a valer no retorno de t+1; entre
+Motor (`backtest_engine.simulate_weights`, via `run_weighted`): pesos-alvo decididos no fechamento do dia t são executados
+no fechamento de t+1 e passam a valer no retorno de t+2 (sem executar no preço do próprio sinal); entre
 rebalanceamentos os pesos flutuam com os preços (sem rebalanceamento implícito); moeda que continua na carteira
 só é reajustada se o alvo mudar mais que config.REBALANCE_BAND; o custo de cada troca é
 |mudança de peso| × (taxa + spread estimado + slippage) da moeda, cobrado no dia em que a nova posição começa a
@@ -22,7 +23,7 @@ Todas são rebalanceadas a cada `every` dias (a regra SMA 200 aqui fica semanal;
 original, continua em performance.parquet).
 
 Limitações: o universo são as moedas que existem hoje (viés de sobrevivência); spread e slippage são hipóteses
-(config.SPREAD_TIERS, config.SLIPPAGE), não medidas; execução no fechamento; sem impostos.
+(config.SPREAD_TIERS, config.SLIPPAGE), não medidas; execução no fechamento seguinte ao sinal; sem impostos.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ import pandas as pd
 
 from .. import config
 from .allocation import AllocationRules, allocate
+from .backtest_engine import EXECUTION_LAG, WeightedRun, simulate_weights
 from .selection import (
     REGIME_DEFENSIVE,
     SelectionRules,
@@ -71,21 +73,6 @@ SELECTION_PERF_SCHEMA: dict[str, str] = {
 }
 
 
-ENGINE_VERSION = "weights-2"
-"""1: faixa de tolerância sem limite de exposição (podia passar de 100% ou deixar caixa parado). 2: com guarda de
-exposição (ver `run_weighted`). Entra na configuração dos experimentos de pesquisa."""
-
-
-@dataclass(frozen=True)
-class WeightedRun:
-    daily: pd.Series        # retorno diário da carteira, líquido de custos
-    exposure: pd.Series     # soma dos pesos carregados em cada dia
-    turnover: float         # soma de |mudança de peso| nos rebalanceamentos
-    cost: float             # custos totais, fração do capital
-    n_trades: int
-    stale_weight_days: float = 0.0  # Σ peso × dias em que a moeda carregada não tinha preço (retorno tratado como 0)
-
-
 def run_weighted(
     targets: pd.DataFrame,
     returns: pd.DataFrame,
@@ -94,64 +81,11 @@ def run_weighted(
     end: pd.Timestamp,
     band: float = config.REBALANCE_BAND,
     guard_exposure: bool = True,
+    execution_lag: int = EXECUTION_LAG,
 ) -> WeightedRun:
-    """Simula pesos-alvo (`targets`: linhas = dias de rebalanceamento, valores = fração do capital) em [start, end].
-
-    `band`: moeda mantida (peso atual e alvo > 0) só é reajustada se |alvo − atual| > band.
-
-    `guard_exposure` (padrão, `ENGINE_VERSION` 2): a faixa não pode produzir uma carteira com exposição total acima
-    da exposição-alvo (alavancagem implícita: moedas mantidas ficam acima do alvo enquanto a nova entra no alvo) nem
-    mais de `band` abaixo dela (caixa parado: o dinheiro de uma moeda que saiu não era reinvestido). Nesses casos o
-    rebalanceamento vai direto aos alvos. `False` reproduz o motor da versão 1, só para comparação.
-
-    Dia sem preço de uma moeda carregada: o retorno é tratado como 0 (o preço fica parado) e o peso exposto é somado
-    em `stale_weight_days`. Não há perda por deslistagem: é viés de sobrevivência, sinalizado, não corrigido.
-    """
-    days = returns.loc[start:end].index
-    cols = list(returns.columns)
-    if len(days) == 0:
-        empty = pd.Series(dtype="float64")
-        return WeightedRun(empty, empty, 0.0, 0.0, 0)
-    raw = returns.reindex(index=days, columns=cols).to_numpy(dtype="float64")
-    missing = np.isnan(raw)
-    r = np.where(missing, 0.0, raw)
-    stale = 0.0
-    c = cost_per_side.reindex(index=days, columns=cols).ffill().fillna(0.0).to_numpy(dtype="float64")
-    t = targets.reindex(columns=cols).fillna(0.0)
-    plan = {pd.Timestamp(d): row for d, row in zip(t.index, t.to_numpy(dtype="float64"), strict=True)}
-
-    w = np.zeros(len(cols))
-    pending = 0.0
-    out = np.zeros(len(days))
-    exposure = np.zeros(len(days))
-    turnover = cost = 0.0
-    trades = 0
-    for i, day in enumerate(days):
-        gross = float(w @ r[i])
-        stale += float(w @ missing[i])
-        out[i] = (1.0 - pending) * (1.0 + gross) - 1.0
-        exposure[i] = float(w.sum())
-        cost += pending
-        pending = 0.0
-        growth = 1.0 + gross
-        if growth > 0:
-            w = w * (1.0 + r[i]) / growth
-        target = plan.get(pd.Timestamp(day))
-        if target is not None:
-            keep = (w > 1e-12) & (target > 1e-12) & (np.abs(target - w) <= band)
-            goal = target
-            target = np.where(keep, w, goal)
-            if guard_exposure:
-                over = float(target.sum()) > float(goal.sum()) + 1e-12
-                idle = float(goal.sum()) - float(target.sum()) > band + 1e-12
-                if over or idle:
-                    target = goal
-            delta = np.abs(target - w)
-            turnover += float(delta.sum())
-            pending = float((delta * c[i]).sum())
-            trades += int(((w <= 1e-12) & (target > 1e-12)).sum())
-            w = target.copy()
-    return WeightedRun(pd.Series(out, index=days), pd.Series(exposure, index=days), turnover, cost, trades, stale)
+    """Pesos-alvo de seleção/pesquisa no motor único (`backtest_engine.simulate_weights`): execução no fechamento
+    seguinte ao sinal (`execution_lag=1`), custos por moeda vindos de `config.py`. Detalhes no motor."""
+    return simulate_weights(targets, returns, cost_per_side, start, end, band, guard_exposure, execution_lag)
 
 
 def rebalance_days(features: pd.DataFrame, every: int) -> pd.DatetimeIndex:

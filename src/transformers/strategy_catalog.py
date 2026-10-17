@@ -46,8 +46,8 @@ class StrategyEntry:
             raise ValueError(f"tipo desconhecido: {self.kind!r}")
 
 
-ENGINE_PORTFOLIO = "trade_simulator.run_portfolio (posição 0/1 diária, só taxa)"
-ENGINE_WEIGHTS = "selection_backtest.run_weighted (pesos semanais, taxa + spread + slippage)"
+ENGINE_PORTFOLIO = "trade_simulator.run_portfolio (posição 0/1 diária, só taxa) sobre backtest_engine.simulate_weights"
+ENGINE_WEIGHTS = "selection_backtest.run_weighted (pesos semanais, taxa + spread + slippage) sobre backtest_engine.simulate_weights"
 
 CATALOG: tuple[StrategyEntry, ...] = (
     StrategyEntry(STRATEGY_TREND, KIND_PRODUCTION, ENGINE_PORTFOLIO, "Regra principal SMA 200 em BTC e ETH, com filtro do BTC e stop opcional"),
