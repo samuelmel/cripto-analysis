@@ -120,3 +120,27 @@ têm >= 8 sinais em 7 dias e 0 em 30 dias, por isso o mínimo do hold-out é 5 (
 - Em dias seguidos de alta, a moeda mostra COMPRAR enquanto durar o episódio; a evidência mede a entrada no
   primeiro dia.
 - Os retornos de dias vizinhos são correlacionados; por isso blocos e sinais independentes.
+
+## Resultado da execução de 2026-10-16
+
+Experimento `c50af63e6e99f77f` (dados 11fac7c853b7, semente 20261016, `N_MIN = 12`, motor `engine-3`). Reproduzido em
+dois processos com resultado idêntico (`research/signal_evidence_study.py run` devolve "reproduzido").
+
+- Base: 683 pares `*USDT` da Binance (inclusive deslistados); 126 tiveram algum sinal; 252 combinações (moeda, horizonte)
+  com pelo menos um sinal (candidatas); **31 testadas** (família de Holm, com `N_MIN` sinais independentes).
+- **Nenhuma moeda foi validada.** 11 ficaram `NAO_VALIDADA` (sinais suficientes, sem efeito): ADA, BNB, BTC, ETC, ETH, LINK,
+  LTC, SOL, TRX, VET e XRP. As outras 672 ficaram `SEM_EVIDENCIA` (poucos sinais). Todos os valores-p ajustados por Holm
+  deram 1,0 e todos os limites inferiores do IC de 95% do excesso ficaram negativos (o maior: −0,02 ponto percentual).
+- BTC e ETH, que eram as únicas moedas com COMPRAR, não passaram (excesso em 7 dias: +0,7 e −1,9 pontos percentuais;
+  em 30 dias: −4,2 e −4,7 pontos percentuais, com IC incluindo zero). SOL teve o maior excesso pontual em 30 dias
+  (+24 pontos percentuais), com IC de 95% de −18 a +67 pontos percentuais e valor-p bruto 0,033 (o menor da família de 31), que após Holm vira 1,0.
+- O teste final só podia revogar moedas validadas; como não houve nenhuma, ele não decidiu nada.
+- Consequência no produto: nenhuma moeda mostra COMPRAR no Telegram e no painel. O ranking de seleção continua igual.
+
+Correção feita durante a execução: o primeiro ID de experimento dependia da ordem de um `frozenset` (varia entre
+processos). Foi corrigido (lista ordenada) e o registro foi recriado; os resultados das duas execuções são idênticos
+(comparação de quadro a quadro) e o teste final não foi reavaliado com regras diferentes.
+
+Leitura honesta: a ausência de validação **não** prova que o sinal não funciona. Com 12 a 30 sinais independentes por
+moeda e retornos de 30 dias muito dispersos em cripto, o estudo tem pouco poder para detectar vantagens modestas.
+O que se pode afirmar é que não há evidência de que a regra SMA 200 supere entrar em dia aleatório, em nenhuma moeda.

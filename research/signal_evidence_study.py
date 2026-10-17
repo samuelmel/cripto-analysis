@@ -107,7 +107,8 @@ def cmd_run(allow_second: bool) -> int:
         "horizons": list(rules.horizons), "development_end": rules.development_end, "holdout_start": rules.holdout_start,
         "alpha": rules.alpha, "seed": rules.seed, "null_draws": rules.null_draws, "resamples": rules.resamples,
         "n_min": n_min, "holdout_min_signals": rules.holdout_min_signals, "engine": ENGINE_VERSION,
-        "classifier": CLASSIFIER, "pit": repr(rules.pit),
+        "classifier": CLASSIFIER,
+        "pit": {**{k: v for k, v in vars(rules.pit).items() if k != "excluded"}, "excluded": sorted(rules.pit.excluded)},
     }
     exp_id = experiment_id(cfg, fingerprint)
     registry = pd.read_parquet(REGISTRY_PATH) if REGISTRY_PATH.is_file() else pd.DataFrame()
