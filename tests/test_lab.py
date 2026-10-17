@@ -79,21 +79,21 @@ def test_engine_matches_a_hand_computed_portfolio() -> None:
     returns = frame({"A": [np.nan, 0.10, -0.05, 0.02]})
     valid = frame({"A": [True, True, True, True]})
     positions = frame({"A": [0.0, 1.0, 1.0, 0.0]})  # compra no fechamento do dia 1, vende no do dia 3
-    run = run_portfolio(positions, returns, valid, returns.index[0], returns.index[-1], FEE, execution_lag=0)
+    run = run_portfolio(positions, returns, valid, returns.index[0], returns.index[-1], FEE)
     assert np.isnan(run.held["A"].iloc[0])
     # dia 2: a compra decidida no dia 1 rende -5% e paga a taxa; dia 3: rende +2%; a venda decidida no dia 3
     # só paga a taxa no dia 4, fora da janela.
-    assert run.daily.iloc[2] == pytest.approx((1 - FEE) * (1 - 0.05) - 1)  # motor único: custo multiplicativo
+    assert run.daily.iloc[2] == pytest.approx(-0.05 - FEE)
     assert run.daily.iloc[3] == pytest.approx(0.02)
-    metrics = evaluate_portfolio(positions, returns, valid, returns.index[0], returns.index[-1], FEE, execution_lag=0)
-    assert metrics["total"] == pytest.approx(((1 - FEE) * (1 - 0.05) * 1.02 - 1) * 100.0)
+    metrics = evaluate_portfolio(positions, returns, valid, returns.index[0], returns.index[-1], FEE)
+    assert metrics["total"] == pytest.approx(((1 - 0.05 - FEE) * 1.02 - 1) * 100.0)
 
 
 def test_trade_stats_for_one_winning_trade() -> None:
     returns = frame({"A": [0.0, 0.0, 0.5, 0.2, 0.0, 0.0]})
     valid = frame({"A": [True] * 6})
     positions = frame({"A": [0.0, 1.0, 1.0, 0.0, 0.0, 0.0]})
-    run = run_portfolio(positions, returns, valid, returns.index[0], returns.index[-1], FEE, execution_lag=0)
+    run = run_portfolio(positions, returns, valid, returns.index[0], returns.index[-1], FEE)
     trades = lab.trade_returns(run, FEE)
     assert len(trades) == 1
     assert trades.iloc[0] == pytest.approx(1.5 * 1.2 * (1 - FEE) ** 2 - 1)
@@ -106,7 +106,7 @@ def test_open_trade_pays_only_the_entry_fee() -> None:
     returns = frame({"A": [0.0, 0.0, 0.1, 0.1]})
     valid = frame({"A": [True] * 4})
     positions = frame({"A": [0.0, 1.0, 1.0, 1.0]})
-    run = run_portfolio(positions, returns, valid, returns.index[0], returns.index[-1], FEE, execution_lag=0)
+    run = run_portfolio(positions, returns, valid, returns.index[0], returns.index[-1], FEE)
     assert lab.trade_returns(run, FEE).iloc[0] == pytest.approx(1.1 * 1.1 * (1 - FEE) - 1)
 
 
@@ -138,7 +138,7 @@ def test_random_reference_keeps_exposure_and_uses_fixed_seeds() -> None:
     assert not a.equals(c)
     # A exposição decidida é a mesma em todos os sorteios; o tempo comprado medido só varia pelo dia perdido no
     # deslocamento "decide em t, rende em t+1" (no máximo ~1 dia em 400).
-    assert a["invested"].max() - a["invested"].min() < 1.0  # até 2 dias em 400 (decisão em t, execução em t+1)
+    assert a["invested"].max() - a["invested"].min() < 0.5
     assert abs(a["invested"].mean() - 100 * positions.mean().mean()) < 0.5
 
 

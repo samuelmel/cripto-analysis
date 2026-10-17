@@ -15,9 +15,8 @@ Regra de saída (`ExitRules`), a primeira que ocorrer:
     TENDENCIA   fechou abaixo da SMA 200 da própria moeda
     MERCADO     o BTC fechou abaixo da SMA 200 (filtro de regime)
 
-Metodologia da carteira (motor único, `backtest_engine`): a posição decidida no fechamento do dia t é executada no
-fechamento de t+1 e rende a partir de t+2; a taxa incide sobre a mudança de peso (cobrada no dia em que a nova
-posição começa a render);
+Metodologia da carteira: a posição decidida no fechamento do dia t vale para o retorno de t+1;
+a taxa incide sobre a mudança de posição (cobrada no dia em que a nova posição começa a render);
 todas as estratégias só começam quando a SMA 200 da moeda existe.
 """
 
@@ -28,7 +27,6 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .backtest_engine import EXECUTION_LAG, simulate_weights
 from .panic_backtest import panic_trades
 
 EXIT_STOP = "STOP"
@@ -267,26 +265,18 @@ def run_portfolio(
     start: pd.Timestamp,
     end: pd.Timestamp,
     fee: float,
-    execution_lag: int = EXECUTION_LAG,
 ) -> PortfolioRun:
-    """Carteira de peso igual entre as moedas com dados, no motor único (`backtest_engine.simulate_weights`).
-
-    A posição (0/1) decidida no fechamento de t é executada no fechamento de t + `execution_lag` (padrão 1: o
-    fechamento seguinte ao sinal) e rende a partir do dia seguinte. O peso-alvo é 1/N das moedas com dados em cada
-    dia; o custo (`fee` por lado) incide sobre toda mudança de peso, inclusive o ajuste de deriva.
-    """
-    p = positions.where(valid)
-    n_valid = valid.sum(axis=1).replace(0, np.nan)
-    targets = p.fillna(0.0).div(n_valid, axis=0).fillna(0.0)
-    cost = pd.DataFrame(fee, index=returns.index, columns=returns.columns)
-    run = simulate_weights(targets, returns, cost, start, end, band=0.0, execution_lag=execution_lag)
-    pw, rw, v = p.loc[start:end], returns.loc[start:end], valid.loc[start:end]
-    held = p.shift(1 + execution_lag).loc[start:end]  # decide em t, executa em t+lag, rende a partir do dia seguinte
-    turnover = pw.diff().abs().fillna(0.0)
-    fee_drag = p.diff().abs().fillna(0.0).shift(1 + execution_lag).fillna(0.0).loc[start:end] * fee
-    daily = held * rw - fee_drag
-    fee_cost = run.cost_daily if run.cost_daily is not None else pd.Series(dtype="float64")
-    return PortfolioRun(run.daily, held, daily.where(v), fee_cost, turnover, v, rw)
+    """Aplica a metodologia da carteira (posição de t vale para t+1, taxa sobre a mudança) em [start, end]."""
+    p = positions.where(valid).loc[start:end]
+    r = returns.loc[start:end]
+    v = valid.loc[start:end]
+    held = p.shift(1)  # decide no fechamento de t, ganha o retorno de t+1
+    turnover = p.diff().abs().fillna(0.0)
+    fee_drag = turnover.shift(1).fillna(0.0) * fee
+    daily = held * r - fee_drag
+    port = daily.where(v).mean(axis=1, skipna=True).fillna(0.0)
+    cost = fee_drag.where(v).mean(axis=1, skipna=True).fillna(0.0)
+    return PortfolioRun(port, held, daily.where(v), cost, turnover, v, r)
 
 
 def summarize_returns(port: pd.Series, invested_pct: float) -> dict[str, float | pd.Timestamp]:
@@ -312,10 +302,9 @@ def evaluate_portfolio(
     start: pd.Timestamp,
     end: pd.Timestamp,
     fee: float,
-    execution_lag: int = EXECUTION_LAG,
 ) -> dict[str, float | pd.Timestamp]:
     """Métricas da carteira de peso igual entre as moedas com dados, no período [start, end]."""
-    run = run_portfolio(positions, returns, valid, start, end, fee, execution_lag)
+    run = run_portfolio(positions, returns, valid, start, end, fee)
     if run.daily.empty:
         nan = float("nan")
         return {"start": start, "end": end, "total": nan, "annual": nan, "drawdown": nan, "sharpe": nan, "invested": nan}
@@ -328,7 +317,6 @@ def performance_summary(
     periods: dict[str, tuple[pd.Timestamp, pd.Timestamp]],
     fee: float,
     rules: ExitRules = ExitRules(),
-    execution_lag: int = EXECUTION_LAG,
 ) -> pd.DataFrame:
     """Tendência x comprar e segurar x pânico (regra antiga), por universo e período (PERFORMANCE_SCHEMA).
 
@@ -347,7 +335,7 @@ def performance_summary(
         cols = [s for s in symbols if s in closes.columns]
         for strategy, positions in strategies.items():
             for period, (start, end) in periods.items():
-                m = evaluate_portfolio(positions[cols], returns[cols], valid[cols], start, end, fee, execution_lag)
+                m = evaluate_portfolio(positions[cols], returns[cols], valid[cols], start, end, fee)
                 rows.append(
                     {
                         "universe": universe, "strategy": strategy, "period": period,

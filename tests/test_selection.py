@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from functools import partial
-
 from dataclasses import replace
 from typing import Any
 
@@ -36,13 +34,12 @@ from src.transformers.selection_backtest import (
     STRATEGY_SELECTION,
     evaluate_selection,
     evidence,
+    run_weighted,
 )
-from src.transformers.selection_backtest import run_weighted as _run_weighted
 from src.transformers.strategies import market_from_candles
 from tests.helpers import make_candles, ramp
 
 RULES = SelectionRules()
-run_weighted = partial(_run_weighted, execution_lag=0)  # temporização legada (mesmo fechamento), testada aqui
 
 
 def feature_row(**over: Any) -> dict[str, Any]:
