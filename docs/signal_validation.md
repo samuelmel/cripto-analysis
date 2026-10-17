@@ -144,3 +144,16 @@ processos). Foi corrigido (lista ordenada) e o registro foi recriado; os resulta
 Leitura honesta: a ausência de validação **não** prova que o sinal não funciona. Com 12 a 30 sinais independentes por
 moeda e retornos de 30 dias muito dispersos em cripto, o estudo tem pouco poder para detectar vantagens modestas.
 O que se pode afirmar é que não há evidência de que a regra SMA 200 supere entrar em dia aleatório, em nenhuma moeda.
+
+## Registro de transparência
+
+- **O teste final (hold-out) foi calculado duas vezes** com as mesmas regras, os mesmos dados e a mesma semente. A
+  primeira execução gravou um ID de experimento instável (dependia da ordem de um `frozenset`, que varia entre
+  processos); corrigido o ID, o registro foi recriado e o estudo rodou de novo. Os quadros de resultado das duas execuções
+  foram comparados linha a linha e são **idênticos**. Nenhuma regra, limiar ou N_MIN mudou entre elas, e como nenhuma
+  moeda foi validada o hold-out não decidiu nada. Ainda assim, ele não é mais "avaliado uma única vez" no sentido estrito.
+- **Origem dos candles sem checksum.** O histórico dos 683 pares (inclusive deslistados) veio da API pública de klines
+  (`data-api.binance.vision`), não dos ZIPs mensais do bucket `data.binance.vision`. Os ZIPs trazem um arquivo
+  `.CHECKSUM` (SHA-256) que permitiria verificar a integridade; a API de klines **não** oferece checksum. Por isso não há
+  verificação de integridade além da validação de formato e da limpeza de `clean_candles`. O `data_fingerprint` do
+  experimento identifica os dados usados, mas não prova que a Binance os serviu corretamente.

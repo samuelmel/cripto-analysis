@@ -39,7 +39,7 @@ TOKEN = "123456:ABC-DEF-segredo"
 def coin(symbol: str, **over: Any) -> dict[str, Any]:
     """Uma linha de daily_signals (só as colunas que o formatador lê)."""
     row: dict[str, Any] = {
-        "symbol": symbol, "timestamp": LAST, "alert": pd.NA, "panic": False, "selected": False, "candidate_rank": pd.NA,
+        "symbol": symbol, "timestamp": LAST, "alert": pd.NA, "stage": "NEUTRO", "uptrend": False, "panic": False, "selected": False, "candidate_rank": pd.NA,
         "opportunity": "AGUARDAR", "score": 40.0, "allocation_brl": 0.0, "allocation_note": pd.NA,
         "reasons": [], "risks": [], "blockers": ["mercado defensivo: Bitcoin abaixo da média"],
     }
@@ -153,7 +153,9 @@ def test_report_fits_telegram_and_never_lists_dozens_of_coins() -> None:
     rows = [coin(f"C{i:03d}/USDT") for i in range(300)] + [pick("SOL/USDT", 1, 40.0)]
     texts = format_report(signals(*rows), rec(total=40.0), now=NOW, recommended=RECOMMENDED)
     assert all(0 < len(t) <= TELEGRAM_LIMIT for t in texts)
-    assert "C001" not in "".join(texts)
+    opportunities = "\n\n".join(texts).split("Regra SMA 200 por moeda")[0]
+    assert "C001" not in opportunities  # a lista de oportunidades nunca traz dezenas de moedas
+    assert "e mais" in "".join(texts)  # o estado da regra limita a lista e avisa quantas ficaram de fora
 
 
 def test_data_notes_summarize_failures_and_unavailable_coins() -> None:
@@ -441,3 +443,22 @@ def test_dry_run_never_sends_an_error_alert(workdir: Path, monkeypatch: pytest.M
     monkeypatch.setattr(pipeline, "analyze", lambda today, **kw: (_ for _ in ()).throw(ExtractorError("x")))
     assert pipeline.main(["--offline", "--dry-run", "--notify"]) == 1
     assert sent == []
+
+
+def test_rule_state_is_separate_from_buy_and_says_no_coin_has_evidence() -> None:
+    sig = signals(
+        coin("BTC/USDT", uptrend=True), coin("ETH/USDT", uptrend=True), coin("SOL/USDT"), coin("TON/USDT", stage="INDISPONÍVEL"),
+    )
+    text = report(sig, rec())
+    assert "Nenhuma moeda tem evidência estatística validada: não há sinal de COMPRAR." in text
+    assert "Regra ativa, sem evidência estatística: BTC, ETH" in text
+    assert "Regra inativa: SOL" in text and "Sem dado confiável hoje: TON" in text
+    assert "COMPRAR (evidência validada)" not in text
+
+
+def test_validated_coins_are_the_only_ones_listed_as_buy() -> None:
+    sig = signals(coin("BTC/USDT", stage="COMPRAR", uptrend=True), coin("ETH/USDT", uptrend=True))
+    text = report(sig, rec())
+    assert "COMPRAR (evidência validada): BTC" in text
+    assert "Regra ativa, sem evidência estatística: ETH" in text
+    assert "Nenhuma moeda tem evidência" not in text

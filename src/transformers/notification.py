@@ -202,6 +202,42 @@ def _main_blockers(signals: pd.DataFrame, limit: int = 3) -> list[str]:
     return [f"{k} ({v} de {len(signals)} moedas)" for k, v in ranked]
 
 
+_MAX_LISTED = 40
+STAGE_BUY_LABEL = "COMPRAR"
+STAGE_UNAVAILABLE_LABEL = "INDISPONÍVEL"
+
+
+def _tickers(symbols: Sequence[str]) -> str:
+    names = sorted(str(s).split("/")[0] for s in symbols)
+    extra = len(names) - _MAX_LISTED
+    return ", ".join(names[:_MAX_LISTED]) + (f" e mais {extra}" if extra > 0 else "")
+
+
+def _rule_state(signals: pd.DataFrame) -> str:
+    """Estado da regra SMA 200 de cada moeda, separado do COMPRAR. COMPRAR só existe para moeda com evidência
+    estatística validada (o pipeline já rebaixou as demais); a regra ativa nas outras é só descrição."""
+    stage = signals["stage"].astype(str)
+    buy = signals.loc[stage.eq(STAGE_BUY_LABEL), "symbol"].tolist()
+    nodata = signals.loc[stage.eq(STAGE_UNAVAILABLE_LABEL), "symbol"].tolist()
+    rest = signals[~stage.isin([STAGE_BUY_LABEL, STAGE_UNAVAILABLE_LABEL])]
+    active = rest.loc[rest["uptrend"].fillna(False).astype(bool), "symbol"].tolist()
+    inactive = rest.loc[~rest["uptrend"].fillna(False).astype(bool), "symbol"].tolist()
+    lines = ["Regra SMA 200 por moeda (separada do COMPRAR)"]
+    lines.append(
+        f"Moedas com evidência estatística validada: {_tickers(buy)}." if buy
+        else "Nenhuma moeda tem evidência estatística validada: não há sinal de COMPRAR."
+    )
+    if buy:
+        lines.append(f"COMPRAR (evidência validada): {_tickers(buy)}")
+    if active:
+        lines.append(f"Regra ativa, sem evidência estatística: {_tickers(active)}")
+    if inactive:
+        lines.append(f"Regra inativa: {_tickers(inactive)}")
+    if nodata:
+        lines.append(f"Sem dado confiável hoje: {_tickers(nodata)}")
+    return "\n".join(lines)
+
+
 def format_report(
     signals: pd.DataFrame,
     recommendation: pd.DataFrame,
@@ -279,6 +315,7 @@ def format_report(
     if alerts:
         out.append("Alertas\n" + "\n".join(f"- {a}" for a in alerts))
 
+    out.append(_rule_state(signals))
     out.append(f"Validação histórica: {rec['evidence']}")
     out.append(IMPORTANT + " Detalhes de cada moeda e do backtest no painel.")
     return split_message("\n\n".join(out))
