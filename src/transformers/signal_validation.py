@@ -22,8 +22,8 @@ import numpy as np
 import pandas as pd
 
 from .. import config
-from .policy_evaluation import block_indices, holm_adjust
 from .selection import SelectionRules, cost_per_side
+from .stats import block_indices, holm_adjust
 from .universe_pit import PitRules, membership
 
 STATUS_VALIDATED = "VALIDADA"
