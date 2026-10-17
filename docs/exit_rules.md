@@ -61,3 +61,24 @@ com a participação de disparos seguidos de queda; não é previsão.
 - `SEGURAR`: o resto.
 
 O estado é uma recomendação por regra, não uma previsão. Nenhuma ordem real é executada.
+
+## Resultado (desenvolvimento, execução de 2026-10-16)
+
+950 operações em 126 moedas do universo point-in-time (entrada até 2024-12-31). Referência `STOP -20% + TENDENCIA + MERCADO`:
+
+| Regra | Disparos | Retorno médio da operação | Mediana | Preço 30 dias depois da venda (média) | Disparos seguidos de queda |
+|---|---|---|---|---|---|
+| `TENDENCIA` | 642 | +1,0% | −4,0% | +4,7% | 53% |
+| `MERCADO` | 225 | +59,1% | −4,1% | −5,9% | 66% |
+| `STOP` (−20%) | 61 | −25,0% | −25,0% | +9,4% | 49% |
+| ainda abertas no fim de 2024 | 22 | +53,2% | +39,0% | — | — |
+
+Leitura: o `STOP` não evitou queda posterior na maioria dos casos (49% de quedas depois da venda, com rebote médio de +9,4%):
+ele limita a perda por operação, não melhora o retorno. Já `TENDENCIA` e `MERCADO` saem antes de quedas em 53% e 66% dos casos.
+O retorno médio por operação (+14,3%) vem de poucos ganhos enormes; a mediana é negativa.
+
+**Trailing: nenhum valor da grade foi adotado.** Em todos os `x` a diferença média contra a referência foi negativa (de −14,0
+pontos percentuais com `x = 10%` a −1,9 com `x = 40%`), com `p ajustado = 1,0`; só `x = 40%` tem IC que encosta em zero
+(−7,1 a +1,1). O trailing corta justamente os ganhos grandes que sustentam a média. Como nenhum trailing foi adotado, o
+teste final **não** foi avaliado nesta etapa. Consequência: a proteção de lucro fica só como `ATENÇÃO` informativa (queda de
+10% desde o topo, metade de 20%), sem disparar `VENDER`.
