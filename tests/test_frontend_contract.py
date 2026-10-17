@@ -17,6 +17,7 @@ from src.transformers.position_advisor import CLOSED_SCHEMA, POSITION_SCHEMA
 from src.transformers.recommendation import RECOMMENDATION_SCHEMA, SIGNALS_SCHEMA
 from src.transformers.regimes import REGIME_SCHEMA
 from src.transformers.selection_backtest import SELECTION_PERF_SCHEMA
+from src.transformers.signal_validation import EVIDENCE_SCHEMA
 from src.transformers.trade_simulator import PERFORMANCE_SCHEMA, TRADE_SCHEMA
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -36,6 +37,7 @@ CONTRACTS: dict[str, tuple[dict[str, str], str]] = {
     "Position": (POSITION_SCHEMA, "parsePosition"),
     "ClosedPosition": (CLOSED_SCHEMA, "parseClosed"),
     "MarketRegime": (REGIME_SCHEMA, "parseMarketRegime"),
+    "SignalEvidence": (EVIDENCE_SCHEMA, "parseEvidence"),
 }
 
 

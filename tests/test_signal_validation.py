@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.transformers.policy_evaluation import holm_adjust
 from src.transformers.signal_validation import (
     HOLDOUT_CONFIRMED,
     HOLDOUT_INSUFFICIENT,
@@ -26,6 +25,7 @@ from src.transformers.signal_validation import (
     prepare,
     stable_seed,
 )
+from src.transformers.stats import holm_adjust
 from src.transformers.universe_pit import PitRules, candidate_symbols, membership, universe_on
 from tests.helpers import make_candles
 

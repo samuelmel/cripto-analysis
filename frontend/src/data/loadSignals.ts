@@ -3,6 +3,8 @@ import {
   ALERTS,
   DATA_STATUSES,
   DECISIONS,
+  EVIDENCE_STATUSES,
+  HOLDOUT_STATES,
   OPPORTUNITIES,
   REGIMES,
   SELECTION_STRATEGIES,
@@ -29,6 +31,7 @@ import {
   type Position,
   type Recommendation,
   type SelectionPerf,
+  type SignalEvidence,
   type SourceEvent,
   type Trade,
 } from "../types/signals";
@@ -287,6 +290,25 @@ const parseLab = (r: Row): LabResult => ({
   random_sims: numOrNull(r, "random_sims"),
 });
 
+const parseEvidence = (r: Row): SignalEvidence => ({
+  symbol: str(r, "symbol"),
+  status: oneOf(EVIDENCE_STATUSES, r, "status"),
+  holdout: oneOf(HOLDOUT_STATES, r, "holdout"),
+  n_independent_7: numOrNull(r, "n_independent_7"),
+  n_independent_30: numOrNull(r, "n_independent_30"),
+  excess_7: numOrNull(r, "excess_7"),
+  excess_30: numOrNull(r, "excess_30"),
+  ci_low_7: numOrNull(r, "ci_low_7"),
+  ci_low_30: numOrNull(r, "ci_low_30"),
+  p_holm_7: numOrNull(r, "p_holm_7"),
+  p_holm_30: numOrNull(r, "p_holm_30"),
+  holdout_n_7: numOrNull(r, "holdout_n_7"),
+  holdout_n_30: numOrNull(r, "holdout_n_30"),
+  holdout_excess_7: numOrNull(r, "holdout_excess_7"),
+  holdout_excess_30: numOrNull(r, "holdout_excess_30"),
+  reason: str(r, "reason"),
+});
+
 const parsePosition = (r: Row): Position => ({
   position_id: str(r, "position_id"),
   symbol: str(r, "symbol"),
@@ -331,7 +353,7 @@ async function optionalRows(url: string): Promise<readonly Row[]> {
 
 /** Leitura: baixa e valida tudo que o pipeline publicou (a escrita fica em api.ts). */
 export async function loadDashboard(base = ""): Promise<Dashboard> {
-  const [signals, recs, selectionPerf, marketRegimes, history, trades, performance, forecast, sources, lab, positions, closed] = await Promise.all([
+  const [signals, recs, selectionPerf, marketRegimes, history, trades, performance, forecast, sources, lab, positions, closed, evidence] = await Promise.all([
     fetchRows(`${base}/daily_signals.parquet`),
     fetchRows(`${base}/recommendation.parquet`),
     optionalRows(`${base}/selection_backtest.parquet`),
@@ -344,6 +366,7 @@ export async function loadDashboard(base = ""): Promise<Dashboard> {
     optionalRows(`${base}/strategy_lab.parquet`),
     fetchRows(`${base}/positions.parquet`),
     fetchRows(`${base}/closed_positions.parquet`),
+    optionalRows(`${base}/signal_evidence.parquet`),
   ]);
   const parsed = signals.map(parseSignal);
   const first = recs[0];
@@ -364,5 +387,6 @@ export async function loadDashboard(base = ""): Promise<Dashboard> {
     lab: lab.map(parseLab),
     positions: positions.map(parsePosition),
     closed: closed.map(parseClosed),
+    evidence: evidence.map(parseEvidence),
   };
 }

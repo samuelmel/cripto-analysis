@@ -19,7 +19,6 @@ from .policy_evaluation import (
     EVIDENCE_LEVELS,
     SharpeComparison,
     classify_evidence,
-    holm_adjust,
     metrics,
     paired_sharpe_bootstrap,
     slice_window,
@@ -29,6 +28,7 @@ from .regime_policy import FIXED_POLICIES, LEARNABLE, MIN_TRAIN_DAYS, POLICY_LEA
 from .regimes import CLASSIFIER_VERSION, RegimeRules, classify_market_regimes
 from .selection import compute_features
 from .backtest_engine import ENGINE_VERSION
+from .stats import holm_adjust
 from .selection_backtest import STRATEGY_BTC, STRATEGY_HOLD_ALL, STRATEGY_MOMENTUM, STRATEGY_SMA200
 from .strategies import market_from_candles
 

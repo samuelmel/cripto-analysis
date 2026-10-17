@@ -12,6 +12,7 @@
  *   SourceEvent   loaders.source_log.SOURCE_LOG_SCHEMA (sources.parquet)
  *   LabResult     research/strategy_lab.RESULT_SCHEMA (strategy_lab.parquet, opcional)
  *   Position      position_advisor.POSITION_SCHEMA (positions.parquet)
+ *   SignalEvidence signal_validation.EVIDENCE_SCHEMA (signal_evidence.parquet, opcional: evidência estatística do COMPRAR)
  */
 
 export const STAGES = ["COMPRAR", "PREPARAR", "NEUTRO", "INDISPONÍVEL"] as const;
@@ -53,6 +54,13 @@ export type MarketVolRegime = (typeof MARKET_VOL_REGIMES)[number];
 
 export const REGIME_STATUSES = ["OK", "SEM_CANDLE", "DADO_INVALIDO", "HISTORICO_INSUFICIENTE", "DADOS_INCOMPLETOS"] as const;
 export type RegimeStatus = (typeof REGIME_STATUSES)[number];
+
+/** Evidência estatística do sinal COMPRAR por moeda (transformers/signal_validation.py). Só VALIDADA mostra COMPRAR. */
+export const EVIDENCE_STATUSES = ["VALIDADA", "NAO_VALIDADA", "SEM_EVIDENCIA", "REVOGADA", "NAO_AVALIADA"] as const;
+export type EvidenceStatus = (typeof EVIDENCE_STATUSES)[number];
+
+export const HOLDOUT_STATES = ["CONFIRMADA", "INSUFICIENTE", "REFUTADA", "NAO_APLICA"] as const;
+export type HoldoutState = (typeof HOLDOUT_STATES)[number];
 
 export const DECISIONS = ["NAO_INVESTIR", "APORTE_PEQUENO", "APORTE_PARCIAL", "APORTE_AMPLO"] as const;
 export type Decision = (typeof DECISIONS)[number];
@@ -349,6 +357,25 @@ export interface MarketRegime {
   readonly data_fingerprint: string;
 }
 
+export interface SignalEvidence {
+  readonly symbol: string;
+  readonly status: EvidenceStatus;
+  readonly holdout: HoldoutState;
+  readonly n_independent_7: number | null;
+  readonly n_independent_30: number | null;
+  readonly excess_7: number | null;
+  readonly excess_30: number | null;
+  readonly ci_low_7: number | null;
+  readonly ci_low_30: number | null;
+  readonly p_holm_7: number | null;
+  readonly p_holm_30: number | null;
+  readonly holdout_n_7: number | null;
+  readonly holdout_n_30: number | null;
+  readonly holdout_excess_7: number | null;
+  readonly holdout_excess_30: number | null;
+  readonly reason: string;
+}
+
 export interface Dashboard {
   readonly signals: readonly DailySignal[];
   readonly recommendation: Recommendation;
@@ -362,4 +389,5 @@ export interface Dashboard {
   readonly lab: readonly LabResult[];
   readonly positions: readonly Position[];
   readonly closed: readonly ClosedPosition[];
+  readonly evidence: readonly SignalEvidence[];
 }

@@ -20,6 +20,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from .stats import block_indices, holm_adjust
+
 DAYS_PER_YEAR = 365
 MIN_DAYS = 252
 """Amostra mínima (dias) para Sharpe, Sortino, volatilidade e retorno anualizado; abaixo disso, NaN."""
@@ -94,14 +96,6 @@ def effective_sample_size(x: np.ndarray, max_lag: int = 20) -> float:
     return float(min(max(n / max(1.0 + 2.0 * total, 1.0), 1.0), n))
 
 
-def block_indices(n: int, block: int, resamples: int, rng: np.random.Generator) -> np.ndarray:
-    """Índices (resamples × n) de um bootstrap em blocos circulares de tamanho `block`."""
-    blocks = math.ceil(n / block)
-    starts = rng.integers(0, n, size=(resamples, blocks))
-    idx = (starts[:, :, None] + np.arange(block)[None, None, :]) % n
-    return idx.reshape(resamples, blocks * block)[:, :n]
-
-
 def _sharpe_rows(x: np.ndarray) -> np.ndarray:
     sd = x.std(axis=1, ddof=1)
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -174,18 +168,6 @@ def classify_evidence(comparison: SharpeComparison, p_holm: float, prospective: 
     if prospective and math.isfinite(p_holm) and p_holm < 0.05:
         return EVIDENCE_CONFIRMED
     return EVIDENCE_HINT
-
-
-def holm_adjust(p_values: Sequence[float]) -> list[float]:
-    """Valores-p ajustados pelo método de Holm (controla a taxa de erro por família). NaN permanece NaN."""
-    valid = [(p, i) for i, p in enumerate(p_values) if math.isfinite(p)]
-    m = len(valid)
-    out = [NAN] * len(p_values)
-    running = 0.0
-    for rank, (p, i) in enumerate(sorted(valid)):
-        running = max(running, min(1.0, (m - rank) * p))
-        out[i] = running
-    return out
 
 
 # ---------------------------------------------------------------------------------------------

@@ -1,14 +1,15 @@
 import { useState } from "react";
 import type { Dashboard } from "../types/signals";
 import { GlossaryList } from "./Glossary";
-import { LabPanel } from "./Research";
+import { EvidencePanel, LabPanel } from "./Research";
 import { RegimesPanel } from "./Regimes";
 import { BacktestPanel, HowItWorks } from "./Sections";
 import { Panel, Segmented } from "./ui";
 
-type Part = "regra" | "lab" | "regimes" | "como" | "glossario";
+type Part = "regra" | "evidencia" | "lab" | "regimes" | "como" | "glossario";
 const PARTS: Readonly<Record<Part, string>> = {
   regra: "Regra de tendência",
+  evidencia: "Evidência do COMPRAR",
   lab: "Laboratório",
   regimes: "Regimes (experimental)",
   como: "Como funciona",
@@ -22,6 +23,16 @@ export function ResearchView({ data }: { readonly data: Dashboard }) {
     <div className="space-y-3">
       <Segmented label="Análise" value={part} options={PARTS} onChange={setPart} />
       {part === "regra" && <BacktestPanel performance={data.performance} trades={data.trades} />}
+      {part === "evidencia" && (
+        <Panel
+          id="evidencia"
+          title="Evidência estatística do COMPRAR"
+          note="só moedas validadas mostram COMPRAR; as demais ficam no ranking"
+          bodyClassName="p-0"
+        >
+          <EvidencePanel rows={data.evidence} />
+        </Panel>
+      )}
       {part === "lab" && (
         <Panel
           id="laboratorio"

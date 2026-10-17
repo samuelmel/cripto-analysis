@@ -15,7 +15,9 @@ from src.extractors import ExtractorError
 from src.loaders.market_store import MixedSourceError, read_ohlcv, write_ohlcv
 from src.loaders.source_log import read_source_log
 from src.transformers.anomaly_detector import STAGE_BUY, STAGE_UNAVAILABLE
+from src.loaders.parquet_loader import write_parquet
 from src.transformers.recommendation import validate_recommendation
+from src.transformers.signal_validation import EVIDENCE_SCHEMA
 from tests.helpers import make_candles, ramp
 
 PUBLISHED = ("daily_signals", "history", "backtest", "performance", "forecast", "sources", "positions", "closed_positions")
@@ -36,8 +38,28 @@ def workdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+def _publish_evidence(workdir: Path, validated: tuple[str, ...]) -> None:
+    rows = [{"symbol": s, "status": "VALIDADA" if s in validated else "NAO_VALIDADA", "holdout": "NAO_APLICA", "reason": "teste"}
+            for s in UNIVERSE]
+    frame = pd.DataFrame(rows).reindex(columns=list(EVIDENCE_SCHEMA)).astype(EVIDENCE_SCHEMA)
+    write_parquet(frame, workdir / "evidence" / "signal_evidence.parquet")
+
+
+def test_buy_stage_requires_statistical_evidence(workdir: Path) -> None:
+    write_ohlcv(_base())
+    none = pipeline.analyze(pd.Timestamp.now(tz="UTC"))
+    assert not none["signals"]["stage"].eq(STAGE_BUY).any()  # sem a tabela de evidência, falha fechada
+    assert any("não foi publicada" in str(n) for n in none["recommendation"]["data_notes"].iloc[0])
+    _publish_evidence(workdir, ("BTC/USDT", "SOL/USDT"))
+    some = pipeline.analyze(pd.Timestamp.now(tz="UTC"))["signals"].set_index("symbol")
+    assert some.loc["BTC/USDT", "stage"] == STAGE_BUY and some.loc["SOL/USDT", "stage"] == STAGE_BUY  # vale para qualquer moeda validada
+    assert some.loc["ETH/USDT", "stage"] != STAGE_BUY  # não validada: só ranking
+    assert some["stage"].eq(STAGE_BUY).sum() == 2
+
+
 def test_offline_pipeline_runs_and_publishes(workdir: Path, capsys: pytest.CaptureFixture[str]) -> None:
     write_ohlcv(_base())
+    _publish_evidence(workdir, tuple(RECOMMENDED))
 
     assert pipeline.main(["--offline"]) == 0
 

@@ -48,6 +48,7 @@ from .config import (
 from .extractors import MARKET_SYMBOL, BaseExtractor, BinanceAdapter, CoinGeckoMarketAdapter, ExtractorError, FearGreedAdapter
 from .extractors.binance_adapter import DEFAULT_HOST as BINANCE_DEFAULT_HOST
 from .notifiers import TelegramError, send_messages, settings_from_env
+from .loaders.evidence_store import read_signal_evidence
 from .loaders.history_store import read_previous, write_snapshot
 from .loaders.market_store import (
     MixedSourceError,
@@ -62,7 +63,7 @@ from .loaders.market_store import (
 from .loaders.parquet_loader import write_daily_signals, write_parquet
 from .loaders.positions_store import read_positions
 from .loaders.source_log import read_source_log, write_source_log
-from .transformers.anomaly_detector import classify_history, detect
+from .transformers.anomaly_detector import STAGE_BUY, STAGE_WATCH, SignalRules, classify_history, detect
 from .transformers.forecast import forecast_table
 from .transformers.allocation import allocate
 from .transformers.notification import data_notes, format_error, format_report, redact, validate_messages
@@ -70,6 +71,7 @@ from .transformers.recommendation import build_recommendation, validate_recommen
 from .transformers.regimes import classify_market_regimes
 from .transformers.selection import REGIME_UNAVAILABLE, assess, compute_features, features_on, regime_series
 from .transformers.selection_backtest import evaluate_selection, evidence
+from .transformers.signal_validation import apply_evidence_to_stage, validated_symbols
 from .transformers.strategies import market_from_candles
 from .transformers.data_quality import audit_candles, availability, clean_candles, mark_unavailable
 from .transformers.daily_alerts import ALERT_BUY, ALERT_EXIT, ALERT_SELL, ALERT_WATCH, compare_with_previous
@@ -181,9 +183,13 @@ def analyze(
     candles = clean_candles(kept)
     fng = read_fng()
 
-    history = classify_history(candles, fng)
+    # COMPRAR e PREPARAR só aparecem para moedas com evidência estatística (evidence/signal_evidence.parquet). A regra
+    # vale para todas as moedas analisadas; sem a tabela, nenhuma moeda é validada.
+    signal_evidence = read_signal_evidence()
+    signal_rules = SignalRules(recommended=tuple(selection.kept))
+    history = apply_evidence_to_stage(classify_history(candles, fng, signal_rules), signal_evidence, (STAGE_BUY, STAGE_WATCH))
     available = availability(history, selection.kept, today)
-    snapshot = mark_unavailable(detect(candles, read_coingecko(), fng, history=history), available)
+    snapshot = mark_unavailable(detect(candles, read_coingecko(), fng, rules=signal_rules, history=history), available)
     day = pd.Timestamp(snapshot["timestamp"].max())
     # O dia anterior vem do próprio histórico recalculado: o alerta segue a regra atual mesmo que
     # os snapshots antigos em data/signals tenham sido gerados por uma regra diferente.
@@ -210,7 +216,7 @@ def analyze(
         run_ts=pd.Timestamp(today), regime=regime, regime_filter=REGIME_FILTER, regime_symbol=REGIME_SYMBOL,
         excluded=[f"{s.split('/')[0]}: {why}" for s, why in selection.dropped.items()],
         evidence=evidence(selection_perf, "TESTE"),
-        data_notes=data_notes(available, source_errors),
+        data_notes=data_notes(available, source_errors) + _evidence_notes(signal_evidence),
     )
     problems = validate_recommendation(signals, recommendation)
     if problems:
@@ -234,6 +240,8 @@ def analyze(
     write_parquet(market_regimes, PUBLIC_DIR / "market_regimes.parquet")
     write_parquet(read_source_log(), PUBLIC_DIR / "sources.parquet")
     write_parquet(recommendation, PUBLIC_DIR / "recommendation.parquet")
+    if not signal_evidence.empty:
+        write_parquet(signal_evidence, PUBLIC_DIR / "signal_evidence.parquet")
     write_daily_signals(signals)  # por último: o estado final da execução (CLAUDE.md §3)
     dropped = pd.DataFrame({"symbol": list(selection.dropped), "reason": list(selection.dropped.values())})
     return {
@@ -241,6 +249,14 @@ def analyze(
         "availability": available, "issues": issues, "dropped": dropped, "recommendation": recommendation,
         "selection_backtest": selection_perf, "market_regimes": market_regimes,
     }
+
+
+def _evidence_notes(evidence: pd.DataFrame) -> list[str]:
+    """Aviso curto sobre o COMPRAR validado (resumo e Telegram)."""
+    if evidence.empty:
+        return ["a validação estatística do COMPRAR não foi publicada: nenhuma moeda pode mostrar COMPRAR"]
+    ok = [s.split("/")[0] for s in validated_symbols(evidence)]
+    return [f"COMPRAR só vale para moedas com evidência estatística ({', '.join(ok) if ok else 'nenhuma no momento'})"]
 
 
 def _publish_positions(history: pd.DataFrame, available: pd.DataFrame) -> pd.DataFrame:
