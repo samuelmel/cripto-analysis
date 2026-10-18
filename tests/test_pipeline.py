@@ -10,11 +10,12 @@ import pandas as pd
 import pytest
 
 from src import pipeline
-from src.config import RECOMMENDED, UNIVERSE
+from src.config import UNIVERSE
 from src.extractors import ExtractorError
 from src.loaders.market_store import MixedSourceError, read_ohlcv, write_ohlcv
 from src.loaders.source_log import read_source_log
 from src.transformers.anomaly_detector import STAGE_BUY, STAGE_UNAVAILABLE
+from src.transformers.entry_study import LEVEL_SCHEMA
 from src.loaders.parquet_loader import write_parquet
 from src.transformers.recommendation import validate_recommendation
 from src.transformers.signal_validation import EVIDENCE_SCHEMA
@@ -45,21 +46,35 @@ def _publish_evidence(workdir: Path, validated: tuple[str, ...]) -> None:
     write_parquet(frame, workdir / "evidence" / "signal_evidence.parquet")
 
 
-def test_buy_stage_requires_statistical_evidence(workdir: Path) -> None:
+def _publish_levels(workdir: Path, levels: dict[str, str]) -> None:
+    rows = [{"combo": c, "candidate": c[0], "kind": "SELECAO", "level": lv, "n_signals_7": 100, "n_signals_30": 100}
+            for c, lv in levels.items()]
+    frame = pd.DataFrame(rows).reindex(columns=list(LEVEL_SCHEMA)).astype(LEVEL_SCHEMA)
+    write_parquet(frame, workdir / "evidence" / "entry_signals" / "entry_signal_levels.parquet")
+
+
+def test_buy_stage_requires_a_validated_entry_signal(workdir: Path) -> None:
+    """COMPRAR depende do sinal, não da moeda (docs/entry_signals.md): validação por moeda não libera mais COMPRAR."""
     write_ohlcv(_base())
     none = pipeline.analyze(pd.Timestamp.now(tz="UTC"))
-    assert not none["signals"]["stage"].eq(STAGE_BUY).any()  # sem a tabela de evidência, falha fechada
+    assert not none["signals"]["stage"].eq(STAGE_BUY).any()  # sem a tabela de níveis, falha fechada
     assert none["recommendation"]["data_status"].iloc[0] == "OK"  # a falta da evidência não é falha de dados
     _publish_evidence(workdir, ("BTC/USDT", "SOL/USDT"))
-    some = pipeline.analyze(pd.Timestamp.now(tz="UTC"))["signals"].set_index("symbol")
-    assert some.loc["BTC/USDT", "stage"] == STAGE_BUY and some.loc["SOL/USDT", "stage"] == STAGE_BUY  # vale para qualquer moeda validada
-    assert some.loc["ETH/USDT", "stage"] != STAGE_BUY  # não validada: só ranking
-    assert some["stage"].eq(STAGE_BUY).sum() == 2
+    per_coin = pipeline.analyze(pd.Timestamp.now(tz="UTC"))["signals"]
+    assert not per_coin["stage"].eq(STAGE_BUY).any()  # moeda validada individualmente: só informação
+    _publish_levels(workdir, {"A_30": "PROMISSOR"})
+    watch = pipeline.analyze(pd.Timestamp.now(tz="UTC"))["signals"]
+    assert not watch["stage"].eq(STAGE_BUY).any()  # PROMISSOR nunca vira COMPRAR
+    assert watch["entry_level"].eq("PROMISSOR").sum() == 5  # top 5 de 30 dias em observação
+    _publish_levels(workdir, {"A_30": "VALIDADO"})
+    buy = pipeline.analyze(pd.Timestamp.now(tz="UTC"))["signals"]
+    assert buy["stage"].eq(STAGE_BUY).sum() == 5
+    assert buy.loc[buy["stage"].eq(STAGE_BUY), "entry_level"].eq("VALIDADO").all()
 
 
 def test_offline_pipeline_runs_and_publishes(workdir: Path, capsys: pytest.CaptureFixture[str]) -> None:
     write_ohlcv(_base())
-    _publish_evidence(workdir, tuple(RECOMMENDED))
+    _publish_levels(workdir, {"A_30": "VALIDADO"})
 
     assert pipeline.main(["--offline"]) == 0
 
@@ -67,9 +82,10 @@ def test_offline_pipeline_runs_and_publishes(workdir: Path, capsys: pytest.Captu
     assert "estágios" in out
     for name in PUBLISHED:
         assert (workdir / "frontend" / "public" / f"{name}.parquet").is_file(), name
+    assert (workdir / "frontend" / "public" / "entry_signal_levels.parquet").is_file()
     signals = pd.read_parquet(workdir / "frontend" / "public" / "daily_signals.parquet")
     assert len(signals) == len(UNIVERSE)
-    assert signals.set_index("symbol").loc[list(RECOMMENDED), "stage"].eq(STAGE_BUY).all()
+    assert signals["stage"].eq(STAGE_BUY).sum() == 5
     assert signals["stage_reason"].isna().all()
 
 
