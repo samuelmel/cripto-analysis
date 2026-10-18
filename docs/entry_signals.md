@@ -199,3 +199,17 @@ O protocolo previu que o critério de contradição "quase nunca vai disparar". 
 combinação, bem acima de 20, e com essa amostra o critério vira, na prática, "o sinal da média se manteve". Para um efeito nulo
 isso falha cerca de metade das vezes, então o teste final funciona como um filtro de moeda ao ar contra PROMISSOR ruidosos,
 não como confirmação. A regra foi aplicada como escrita; o texto da limitação acima fica como registro do que se esperava.
+
+## No produto (a partir de 2026-10-17)
+
+- `src/transformers/entry_live.py` recalcula, a cada execução, as condições das combinações VALIDADO/PROMISSOR lidas de
+  `evidence/entry_signals/entry_signal_levels.parquet`, sobre os candles analisados, com o universo point-in-time do dia
+  (mesma regra do estudo). Sem a tabela, nenhum sinal conta (falha fechada).
+- **COMPRAR** = a moeda está, no dia, na condição de uma combinação VALIDADO. O COMPRAR e o PREPARAR da regra SMA 200 são
+  sempre rebaixados para NEUTRO, inclusive para moeda validada individualmente; a validação por moeda vira só informação.
+  Com o resultado atual (nenhum VALIDADO), **nenhuma moeda mostra COMPRAR**.
+- **Observação** = condição ativa de uma combinação PROMISSOR (hoje só E: as 5 maiores notas do score de seleção).
+- `daily_signals.parquet` ganhou `entry_level`, `entry_combos`, `entry_new` e `entry_since` (tipo `DailySignal` no frontend);
+  `frontend/public/entry_signal_levels.parquet` publica a tabela de níveis.
+- Diferença em relação ao estudo: no produto, o universo do dia é calculado sobre as moedas analisadas (até 32), não sobre os
+  683 pares da base point-in-time. Para E, com o top 5 dentro do mesmo universo de 32, a diferença é pequena, mas existe.

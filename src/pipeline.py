@@ -53,7 +53,7 @@ from .config import (
 from .extractors import MARKET_SYMBOL, BaseExtractor, BinanceAdapter, CoinGeckoMarketAdapter, ExtractorError, FearGreedAdapter
 from .extractors.binance_adapter import DEFAULT_HOST as BINANCE_DEFAULT_HOST
 from .notifiers import TelegramError, send_messages, settings_from_env
-from .loaders.evidence_store import read_exit_rules, read_signal_evidence
+from .loaders.evidence_store import read_entry_levels, read_exit_rules, read_signal_evidence
 from .loaders.history_store import read_previous, write_snapshot
 from .loaders.market_store import (
     MixedSourceError,
@@ -71,7 +71,7 @@ from .loaders.position_log_store import append_notifications, append_state_log, 
 from .loaders.positions_store import read_positions
 from .loaders.signal_log_store import append_signal_log
 from .loaders.source_log import read_source_log, write_source_log
-from .transformers.anomaly_detector import STAGE_BUY, STAGE_WATCH, SignalRules, classify_history, detect
+from .transformers.anomaly_detector import SignalRules, classify_history, detect
 from .transformers.forecast import forecast_table
 from .transformers.allocation import allocate
 from .transformers.notification import data_notes, format_error, format_position_changes, format_report, redact, validate_messages
@@ -79,7 +79,14 @@ from .transformers.recommendation import build_recommendation, validate_recommen
 from .transformers.regimes import classify_market_regimes
 from .transformers.selection import REGIME_UNAVAILABLE, assess, compute_features, features_on, regime_series
 from .transformers.selection_backtest import evaluate_selection_runs, evidence_with_uncertainty
-from .transformers.signal_validation import apply_evidence_to_stage
+from .transformers.entry_live import (
+    apply_entry_signals_to_stage,
+    attach_entry_status,
+    buy_mask,
+    entry_changes,
+    entry_status,
+    live_conditions,
+)
 from .transformers.bootstrap import BootstrapConfig
 from .transformers.strategies import market_from_candles
 from .transformers.data_quality import audit_candles, availability, clean_candles, mark_unavailable
@@ -200,11 +207,14 @@ def analyze(
     dataset = dataset_manifest(candles)  # identidade dos dados desta execução (linhas, intervalo, SHA-256 por moeda)
     fng = read_fng()
 
-    # COMPRAR e PREPARAR só aparecem para moedas com evidência estatística (evidence/signal_evidence.parquet). A regra
-    # vale para todas as moedas analisadas; sem a tabela, nenhuma moeda é validada.
+    # COMPRAR depende do sinal, não da moeda (docs/entry_signals.md): aparece quando a moeda está na condição de um
+    # sinal VALIDADO no estudo agregado (evidence/entry_signals/). O COMPRAR/PREPARAR da regra SMA 200 é sempre rebaixado;
+    # a evidência por moeda (evidence/signal_evidence.parquet) fica só como informação. Sem a tabela de níveis, nenhum sinal.
     signal_evidence = read_signal_evidence()
+    entry_levels = read_entry_levels()
+    entry_conds = live_conditions(candles, entry_levels)
     signal_rules = SignalRules(recommended=tuple(selection.kept))
-    history = apply_evidence_to_stage(classify_history(candles, fng, signal_rules), signal_evidence, (STAGE_BUY, STAGE_WATCH))
+    history = apply_entry_signals_to_stage(classify_history(candles, fng, signal_rules), buy_mask(entry_conds, entry_levels))
     available = availability(history, selection.kept, today)
     snapshot = mark_unavailable(detect(candles, read_coingecko(), fng, rules=signal_rules, history=history), available)
     day = pd.Timestamp(snapshot["timestamp"].max())
@@ -212,6 +222,9 @@ def analyze(
     # os snapshots antigos em data/signals tenham sido gerados por uma regra diferente.
     previous = history[history["timestamp"].eq(day - pd.Timedelta(days=1))]
     signals = compare_with_previous(snapshot, previous if not previous.empty else read_previous(day))
+    symbols = signals["symbol"].astype(str).tolist()
+    signals = attach_entry_status(signals, entry_status(entry_conds, entry_levels, symbols, day))
+    changes_today = entry_changes(entry_conds, entry_levels, symbols, day)
 
     # Seleção e aporte: calculados uma vez aqui; painel e Telegram só leem o resultado.
     features = compute_features(market_from_candles(candles))
@@ -267,6 +280,8 @@ def analyze(
     write_parquet(recommendation, PUBLIC_DIR / "recommendation.parquet")
     if not signal_evidence.empty:
         write_parquet(signal_evidence, PUBLIC_DIR / "signal_evidence.parquet")
+    if not entry_levels.empty:
+        write_parquet(entry_levels, PUBLIC_DIR / "entry_signal_levels.parquet")
     # Estado persistente (branch `state`): registro imutável de sinais e histórico de estados das posições.
     state_log = read_state_log()
     today_rows = new_state_rows(positions, state_log, day)
@@ -284,7 +299,8 @@ def analyze(
         "signals": signals, "backtest": trades, "performance": performance, "positions": positions, "forecast": forecast,
         "availability": available, "issues": issues, "dropped": dropped, "recommendation": recommendation,
         "selection_backtest": selection_perf, "market_regimes": market_regimes, "dataset": dataset,
-        "position_changes": changes,
+        "position_changes": changes, "entry_levels": entry_levels, "entry_changes": changes_today,
+        "signal_evidence": signal_evidence,
     }
 
 

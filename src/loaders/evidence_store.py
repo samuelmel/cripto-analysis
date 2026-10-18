@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from ..transformers.entry_live import empty_levels
+from ..transformers.entry_study import LEVEL_SCHEMA
 from ..transformers.signal_validation import EVIDENCE_SCHEMA
 
 EVIDENCE_PATH = Path("evidence/signal_evidence.parquet")
@@ -28,6 +30,22 @@ def read_signal_evidence(path: Path = EVIDENCE_PATH) -> pd.DataFrame:
     except (OSError, KeyError, ValueError) as exc:
         logger.error("evidência do COMPRAR ilegível (%s); nenhuma moeda será validada: %s", path, exc)
         return empty_evidence()
+
+
+ENTRY_LEVELS_PATH = Path("evidence/entry_signals/entry_signal_levels.parquet")
+
+
+def read_entry_levels(path: Path = ENTRY_LEVELS_PATH) -> pd.DataFrame:
+    """Níveis dos sinais de entrada (`research/entry_signal_study.py`). Ausente ou ilegível: tabela vazia, nenhuma
+    combinação conta (falha fechada: sem COMPRAR e sem lista de observação)."""
+    if not path.is_file():
+        return empty_levels()
+    try:
+        frame = pd.read_parquet(path)
+        return frame[list(LEVEL_SCHEMA)].astype(LEVEL_SCHEMA)
+    except (OSError, KeyError, ValueError) as exc:
+        logger.error("níveis dos sinais de entrada ilegíveis (%s); nenhum sinal será usado: %s", path, exc)
+        return empty_levels()
 
 
 EXIT_RULES_PATH = Path("evidence/exit_rules.parquet")

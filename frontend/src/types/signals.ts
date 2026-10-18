@@ -1,7 +1,7 @@
 /**
  * Linhas dos arquivos publicados pelo pipeline em public/.
  * Espelham os schemas Python — mudou lá, muda aqui no mesmo commit:
- *   DailySignal   recommendation.SIGNALS_SCHEMA    (daily_signals.parquet: sinal SMA 200 + seleção + aporte)
+ *   DailySignal   recommendation.SIGNALS_SCHEMA    (daily_signals.parquet: sinal SMA 200 + seleção + aporte + sinais de entrada)
  *   Recommendation recommendation.RECOMMENDATION_SCHEMA (recommendation.parquet, uma linha)
  *   SelectionPerf selection_backtest.SELECTION_PERF_SCHEMA (selection_backtest.parquet)
  *   MarketRegime  regimes.REGIME_SCHEMA            (market_regimes.parquet, opcional: regime de mercado por dia)
@@ -64,6 +64,10 @@ export type EvidenceStatus = (typeof EVIDENCE_STATUSES)[number];
 export const HOLDOUT_STATES = ["CONFIRMADA", "INSUFICIENTE", "REFUTADA", "NAO_APLICA"] as const;
 export type HoldoutState = (typeof HOLDOUT_STATES)[number];
 
+/** Nível de um sinal de entrada no estudo agregado (transformers/entry_study.py). COMPRAR só com VALIDADO. */
+export const ENTRY_LEVELS = ["VALIDADO", "PROMISSOR", "SEM_EVIDENCIA"] as const;
+export type EntryLevel = (typeof ENTRY_LEVELS)[number];
+
 export const DECISIONS = ["NAO_INVESTIR", "APORTE_PEQUENO", "APORTE_PARCIAL", "APORTE_AMPLO"] as const;
 export type Decision = (typeof DECISIONS)[number];
 
@@ -125,6 +129,11 @@ export interface DailySignal {
   readonly theoretical_brl: number;
   readonly allocation_brl: number;
   readonly allocation_note: string | null;
+  // sinais de entrada (entry_live.ENTRY_SCHEMA)
+  readonly entry_level: EntryLevel | null;
+  readonly entry_combos: readonly string[];
+  readonly entry_new: boolean;
+  readonly entry_since: Date | null;
   readonly run_ts: Date;
 }
 

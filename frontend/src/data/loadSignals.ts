@@ -3,6 +3,7 @@ import {
   ALERTS,
   DATA_STATUSES,
   DECISIONS,
+  ENTRY_LEVELS,
   EVIDENCE_STATUSES,
   HOLDOUT_STATES,
   OPPORTUNITIES,
@@ -109,6 +110,10 @@ const parseSignal = (r: Row): DailySignal => ({
   theoretical_brl: num(r, "theoretical_brl"),
   allocation_brl: num(r, "allocation_brl"),
   allocation_note: strOrNull(r, "allocation_note"),
+  entry_level: oneOfOrNull(ENTRY_LEVELS, r, "entry_level"),
+  entry_combos: strList(r, "entry_combos"),
+  entry_new: bool(r, "entry_new"),
+  entry_since: dateOrNull(r, "entry_since"),
   run_ts: date(r, "run_ts"),
 });
 

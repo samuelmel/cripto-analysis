@@ -21,6 +21,7 @@ import pandas as pd
 
 from .allocation import ALLOCATION_SCHEMA, AllocationSummary
 from .daily_alerts import DAILY_SCHEMA
+from .entry_live import ENTRY_SCHEMA, attach_entry_status
 from .selection import OPP_AVOID, SELECTION_SCHEMA
 
 BUDGET_SIMULATION = "SIMULACAO"
@@ -32,6 +33,7 @@ SIGNALS_SCHEMA: dict[str, str] = {
     **DAILY_SCHEMA,
     **{k: v for k, v in SELECTION_SCHEMA.items() if k != "symbol"},
     **{k: v for k, v in ALLOCATION_SCHEMA.items() if k != "symbol"},
+    **ENTRY_SCHEMA,
     "run_ts": "datetime64[ns, UTC]",
 }
 
@@ -77,6 +79,8 @@ def build_recommendation(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """(daily_signals no SIGNALS_SCHEMA, recommendation com uma linha no RECOMMENDATION_SCHEMA)."""
     sel = assessed.merge(allocation, on="symbol", how="left", validate="one_to_one")
+    if not set(ENTRY_SCHEMA) <= set(signals.columns):  # sem estado dos sinais de entrada: nenhuma moeda com sinal
+        signals = attach_entry_status(signals, None)
     out = signals.merge(sel.astype({"symbol": "string"}), on="symbol", how="left", validate="one_to_one")
     missing = out["opportunity"].isna()
     if missing.any():  # moeda sem indicadores no dia: nunca recomendada
