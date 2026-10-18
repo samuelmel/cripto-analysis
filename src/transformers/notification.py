@@ -17,20 +17,22 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta, timezone
 
 import numpy as np
 import pandas as pd
 
+from .entry_live import COMBO_TEXT, active_levels
+
 TELEGRAM_LIMIT = 4096
 FORTALEZA = timezone(timedelta(hours=-3))  # UTC−3 o ano todo (sem horário de verão)
 
 _SECONDARY_SOURCES = {"coingecko", "alternative_me"}
 _OTHER_ALERTS = {
-    "COMPRAR AGORA": "entrou em tendência de alta",
-    "VENDER AGORA": "saiu da tendência de alta",
+    "COMPRAR AGORA": "entrou na condição de um sinal de entrada VALIDADO",
+    "VENDER AGORA": "saiu da condição do sinal VALIDADO (a saída de uma posição segue as regras da posição)",
     "NO RADAR": "chegou perto de voltar à tendência de alta",
     "SAIU DO RADAR": "saiu do radar",
 }
@@ -214,27 +216,94 @@ def _tickers(symbols: Sequence[str]) -> str:
 
 
 def _rule_state(signals: pd.DataFrame) -> str:
-    """Estado da regra SMA 200 de cada moeda, separado do COMPRAR. COMPRAR só existe para moeda com evidência
-    estatística validada (o pipeline já rebaixou as demais); a regra ativa nas outras é só descrição."""
+    """Estado da regra SMA 200 de cada moeda: só contexto (estado do mercado), não é gatilho de compra."""
     stage = signals["stage"].astype(str)
-    buy = signals.loc[stage.eq(STAGE_BUY_LABEL), "symbol"].tolist()
     nodata = signals.loc[stage.eq(STAGE_UNAVAILABLE_LABEL), "symbol"].tolist()
-    rest = signals[~stage.isin([STAGE_BUY_LABEL, STAGE_UNAVAILABLE_LABEL])]
+    rest = signals[~stage.eq(STAGE_UNAVAILABLE_LABEL)]
     active = rest.loc[rest["uptrend"].fillna(False).astype(bool), "symbol"].tolist()
     inactive = rest.loc[~rest["uptrend"].fillna(False).astype(bool), "symbol"].tolist()
-    lines = ["Regra SMA 200 por moeda (separada do COMPRAR)"]
-    lines.append(
-        f"Moedas com evidência estatística validada: {_tickers(buy)}." if buy
-        else "Nenhuma moeda tem evidência estatística validada: não há sinal de COMPRAR."
-    )
-    if buy:
-        lines.append(f"COMPRAR (evidência validada): {_tickers(buy)}")
+    lines = ["Regra SMA 200 por moeda (contexto, não é gatilho de compra)"]
     if active:
-        lines.append(f"Regra ativa, sem evidência estatística: {_tickers(active)}")
+        lines.append(f"Acima da tendência: {_tickers(active)}")
     if inactive:
-        lines.append(f"Regra inativa: {_tickers(inactive)}")
+        lines.append(f"Abaixo da tendência: {_tickers(inactive)}")
     if nodata:
         lines.append(f"Sem dado confiável hoje: {_tickers(nodata)}")
+    return "\n".join(lines)
+
+
+PROMISING_WARNING = (
+    "PROMISSOR = excesso médio positivo, mas sem significância estatística. Entre as 12 combinações testadas, pode ser só "
+    "a melhor de várias por acaso: é observação, não sinal de compra."
+)
+REGIME_SHORT = {"FAVORAVEL": "favorável", "NEUTRO": "neutro", "DEFENSIVO": "defensivo", "INDISPONIVEL": "indisponível"}
+_MAX_CANDIDATES_LISTED = 10
+
+
+def _pp(x: object) -> str:
+    v = float(x) if isinstance(x, int | float | np.integer | np.floating) else math.nan
+    return "—" if not math.isfinite(v) else f"{v * 100:+.1f} pp".replace(".", ",")
+
+
+def _level_line(row: Mapping[Hashable, object]) -> str:
+    """Um sinal ativo com o nível e o excesso (com IC) do estudo agregado."""
+    combo = str(row["combo"])
+    ref = "a média do universo no mesmo dia" if row["kind"] == "SELECAO" else "entrar em dia qualquer da mesma moeda"
+    line = (
+        f"{combo} ({COMBO_TEXT.get(combo, combo)}): {row['level']}. Excesso contra {ref}: "
+        f"{_pp(row['excess_7'])} em 7 dias (IC 95% {_pp(row['ci_low_7'])} a {_pp(row['ci_high_7'])}) e "
+        f"{_pp(row['excess_30'])} em 30 dias (IC 95% {_pp(row['ci_low_30'])} a {_pp(row['ci_high_30'])})"
+    )
+    hold7, hold30 = _pp(row["holdout_excess_7"]), _pp(row["holdout_excess_30"])
+    if hold7 != "—" or hold30 != "—":
+        line += f"; teste final {hold7} e {hold30}"
+    return line + "."
+
+
+def _entry_section(
+    signals: pd.DataFrame, levels: pd.DataFrame | None, evidence: pd.DataFrame | None, regime: str
+) -> str:
+    """Sinais de entrada do dia: candidatas (nível, desde quando, aporte, risco), excesso com IC, regime e aviso."""
+    lines = ["🎯 Sinais de entrada (estudo agregado, 12 combinações testadas)"]
+    if levels is None or levels.empty:
+        lines.append("Tabela de níveis indisponível: nenhum sinal de entrada é usado hoje e não há COMPRAR.")
+        return "\n".join(lines)
+    lv = active_levels(levels)
+    validated = sorted(k for k, v in lv.items() if v == "VALIDADO")
+    usable = signals[~signals["stage"].astype(str).eq(STAGE_UNAVAILABLE_LABEL)]
+    if not validated:
+        lines.append("Nenhum sinal VALIDADO: não há COMPRAR.")
+    elif not usable["stage"].astype(str).eq(STAGE_BUY_LABEL).any():
+        lines.append("Nenhuma moeda está hoje na condição de um sinal VALIDADO: não há COMPRAR.")
+    if "entry_level" in usable.columns and lv:
+        cands = usable[usable["entry_level"].notna()].copy()
+        cands["_rank"] = cands["entry_level"].astype(str).map({"VALIDADO": 0, "PROMISSOR": 1}).fillna(2)
+        cands = cands.sort_values(["_rank", "entry_since", "symbol"], kind="stable")
+        for r in cands.head(_MAX_CANDIDATES_LISTED).to_dict("records"):
+            label = "COMPRAR" if str(r["stage"]) == STAGE_BUY_LABEL else "em observação"
+            when = f", desde {_day(pd.Timestamp(r['entry_since']))}" if pd.notna(r["entry_since"]) else ""
+            new = " (novo hoje)" if bool(r.get("entry_new", False)) else ""
+            amount = float(r["allocation_brl"]) if pd.notna(r["allocation_brl"]) else 0.0
+            risks = _strings(r.get("risks"))
+            lines.append(
+                f"- {str(r['symbol']).split('/')[0]}: {label}, {r['entry_level']} ({', '.join(_strings(r['entry_combos']))})"
+                f"{when}{new} · aporte da seleção: {_brl(amount) if amount > 0 else 'nenhum'}"
+                f" · risco: {risks[0] if risks else 'oscilação normal de cripto'}"
+            )
+        if len(cands) > _MAX_CANDIDATES_LISTED:
+            lines.append(f"- e mais {len(cands) - _MAX_CANDIDATES_LISTED}")
+        if cands.empty:
+            lines.append("Nenhuma moeda analisada está hoje na condição de um sinal VALIDADO ou PROMISSOR.")
+    lines += [_level_line(r) for r in levels[levels["combo"].isin(list(lv))].to_dict("records")]
+    lines.append(f"Mercado: {REGIME_SHORT.get(regime, regime)} (detalhe no início da mensagem).")
+    if any(v == "PROMISSOR" for v in lv.values()):
+        lines.append(PROMISING_WARNING)
+    if evidence is not None and not evidence.empty:
+        ok = evidence.loc[evidence["status"].astype(str).eq("VALIDADA"), "symbol"].astype(str).tolist()
+        lines.append(
+            f"Validação individual por moeda (só informação, não libera COMPRAR): {_tickers(ok)}." if ok
+            else "Validação individual por moeda (só informação): nenhuma moeda validada."
+        )
     return "\n".join(lines)
 
 
@@ -244,11 +313,15 @@ def format_report(
     *,
     now: pd.Timestamp,
     recommended: Sequence[str],
+    entry_levels: pd.DataFrame | None = None,
+    signal_evidence: pd.DataFrame | None = None,
 ) -> list[str]:
     """Mensagens do dia (já divididas em até 4096 caracteres), só com números calculados pelo pipeline.
 
     `signals`: daily_signals da execução (recommendation.SIGNALS_SCHEMA). `recommendation`: a linha do resumo
-    (RECOMMENDATION_SCHEMA). `recommended`: moedas da regra SMA 200, para os alertas de virada.
+    (RECOMMENDATION_SCHEMA). `recommended`: moedas da regra SMA 200, para os alertas de virada. `entry_levels`: níveis
+    dos sinais de entrada (sem eles, a mensagem diz que nenhum sinal é usado). `signal_evidence`: validação por moeda,
+    só informativa.
     """
     rec = recommendation.iloc[0]
     budget = float(rec["budget_brl"])
@@ -308,13 +381,14 @@ def format_report(
     for r in signals[signals["symbol"].isin(list(recommended))].to_dict("records"):
         alert = _opt_str(r["alert"])
         if alert in _OTHER_ALERTS:
-            alerts.append(f"{str(r['symbol']).split('/')[0]} {_OTHER_ALERTS[alert]} hoje (regra principal SMA 200).")
+            alerts.append(f"{str(r['symbol']).split('/')[0]} {_OTHER_ALERTS[alert]} hoje.")
     panic = [str(s).split("/")[0] for s in signals.loc[signals["panic"].fillna(False).astype(bool), "symbol"]]
     if panic:
         alerts.append(f"Pânico em {', '.join(panic)}: queda forte com medo no mercado. É só aviso; comprar no pânico perdeu dinheiro nos testes.")
     if alerts:
         out.append("Alertas\n" + "\n".join(f"- {a}" for a in alerts))
 
+    out.append(_entry_section(signals, entry_levels, signal_evidence, str(rec["regime"])))
     out.append(_rule_state(signals))
     out.append(f"Validação histórica: {rec['evidence']}")
     out.append(IMPORTANT + " Detalhes de cada moeda e do backtest no painel.")

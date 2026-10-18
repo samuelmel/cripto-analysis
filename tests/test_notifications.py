@@ -135,10 +135,10 @@ def test_stale_data_is_flagged_in_the_header() -> None:
     assert "ATRASADO 2 dia(s)" in text and "Limitações desta análise" in text
 
 
-def test_essential_alerts_only_sma200_turns_and_panic() -> None:
+def test_essential_alerts_only_main_coins_and_panic() -> None:
     sig = signals(coin("BTC/USDT", alert="VENDER AGORA"), coin("ETH/USDT"), coin("SOL/USDT", alert="NO RADAR", panic=True))
     text = report(sig, rec())
-    assert "BTC saiu da tendência de alta hoje (regra principal SMA 200)." in text
+    assert "BTC saiu da condição do sinal VALIDADO (a saída de uma posição segue as regras da posição) hoje." in text
     assert "SOL chegou perto" not in text  # outras moedas não poluem a mensagem
     assert "Pânico em SOL" in text and "É só aviso" in text
 
@@ -445,20 +445,61 @@ def test_dry_run_never_sends_an_error_alert(workdir: Path, monkeypatch: pytest.M
     assert sent == []
 
 
-def test_rule_state_is_separate_from_buy_and_says_no_coin_has_evidence() -> None:
+def test_sma200_is_only_context() -> None:
     sig = signals(
         coin("BTC/USDT", uptrend=True), coin("ETH/USDT", uptrend=True), coin("SOL/USDT"), coin("TON/USDT", stage="INDISPONÍVEL"),
     )
     text = report(sig, rec())
-    assert "Nenhuma moeda tem evidência estatística validada: não há sinal de COMPRAR." in text
-    assert "Regra ativa, sem evidência estatística: BTC, ETH" in text
-    assert "Regra inativa: SOL" in text and "Sem dado confiável hoje: TON" in text
-    assert "COMPRAR (evidência validada)" not in text
+    assert "Regra SMA 200 por moeda (contexto, não é gatilho de compra)" in text
+    assert "Acima da tendência: BTC, ETH" in text
+    assert "Abaixo da tendência: SOL" in text and "Sem dado confiável hoje: TON" in text
 
 
-def test_validated_coins_are_the_only_ones_listed_as_buy() -> None:
-    sig = signals(coin("BTC/USDT", stage="COMPRAR", uptrend=True), coin("ETH/USDT", uptrend=True))
-    text = report(sig, rec())
-    assert "COMPRAR (evidência validada): BTC" in text
-    assert "Regra ativa, sem evidência estatística: ETH" in text
-    assert "Nenhuma moeda tem evidência" not in text
+def _levels(**rows: str) -> pd.DataFrame:
+    base = {"candidate": "E", "kind": "SELECAO", "excess_7": 0.016, "ci_low_7": 0.001, "ci_high_7": 0.037,
+            "excess_30": 0.003, "ci_low_30": -0.033, "ci_high_30": 0.039, "holdout_excess_7": 0.012,
+            "holdout_excess_30": 0.006}
+    return pd.DataFrame([{**base, "combo": c, "level": lv} for c, lv in rows.items()])
+
+
+def entry(symbol: str, level: str | None, since: str = "2026-10-01", **over: Any) -> dict[str, Any]:
+    fields: dict[str, Any] = {"entry_level": level, "entry_combos": ["E"] if level else [], "entry_new": False,
+                              "entry_since": pd.Timestamp(since, tz="UTC") if level else pd.NaT}
+    return coin(symbol, **{**fields, **over})
+
+
+def report_with(sig: pd.DataFrame, levels: pd.DataFrame | None, evidence: pd.DataFrame | None = None) -> str:
+    texts = format_report(sig, rec(), now=NOW, recommended=RECOMMENDED, entry_levels=levels, signal_evidence=evidence)
+    assert validate_messages(texts) == []
+    return "\n\n".join(texts)
+
+
+def test_promising_is_watch_only_with_ci_regime_and_warning() -> None:
+    sig = signals(entry("NEAR/USDT", "PROMISSOR", risks=["volatilidade elevada"]),
+                  entry("BTC/USDT", "PROMISSOR", "2026-09-28", entry_new=True, allocation_brl=30.0), entry("ETH/USDT", None))
+    text = report_with(sig, _levels(E="PROMISSOR", A_30="SEM_EVIDENCIA"))
+    assert "Nenhum sinal VALIDADO: não há COMPRAR." in text
+    assert "- BTC: em observação, PROMISSOR (E), desde 28/09 (novo hoje) · aporte da seleção: R$ 30" in text
+    assert "- NEAR: em observação, PROMISSOR (E), desde 01/10 · aporte da seleção: nenhum · risco: volatilidade elevada" in text
+    assert "ETH:" not in text.split("🎯")[1].split("Regra SMA 200")[0]
+    assert "+1,6 pp em 7 dias (IC 95% +0,1 pp a +3,7 pp)" in text and "teste final +1,2 pp e +0,6 pp" in text
+    assert "A_30" not in text  # SEM_EVIDENCIA não aparece
+    assert "Mercado: favorável" in text
+    assert "pode ser só a melhor de várias" in text
+
+
+def test_validated_signal_shows_buy_and_coin_evidence_is_only_information() -> None:
+    sig = signals(entry("SOL/USDT", "VALIDADO", stage="COMPRAR"), entry("NEAR/USDT", None))
+    evidence = pd.DataFrame({"symbol": ["NEAR/USDT"], "status": ["VALIDADA"]})
+    text = report_with(sig, _levels(E="VALIDADO"), evidence)
+    assert "- SOL: COMPRAR, VALIDADO (E)" in text
+    assert "Nenhum sinal VALIDADO" not in text and "melhor de várias" not in text
+    assert "Validação individual por moeda (só informação, não libera COMPRAR): NEAR." in text
+
+
+def test_unavailable_coins_are_never_candidates_and_missing_levels_fail_closed() -> None:
+    sig = signals(entry("SOL/USDT", "PROMISSOR", stage="INDISPONÍVEL"))
+    text = report_with(sig, _levels(E="PROMISSOR"))
+    assert "- SOL" not in text
+    assert "Nenhuma moeda analisada está hoje na condição" in text
+    assert "Tabela de níveis indisponível" in report_with(sig, None)

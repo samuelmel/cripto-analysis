@@ -429,7 +429,8 @@ def _notify(result: dict[str, pd.DataFrame], now: datetime, *, dry_run: bool, re
     """Resumo do dia no Telegram mais, só quando o estado de alguma posição mudou, o aviso das posições (ou, com dry_run, só
     gerado, validado e impresso). 0 = ok, 1 = mensagem inválida, 2 = sem credenciais ou envio falhou (o job deve ficar
     vermelho). A mudança só é marcada como avisada depois do envio: se falhar, é reenviada na próxima execução."""
-    texts = format_report(result["signals"], result["recommendation"], now=pd.Timestamp(now), recommended=RECOMMENDED)
+    texts = format_report(result["signals"], result["recommendation"], now=pd.Timestamp(now), recommended=RECOMMENDED,
+                          entry_levels=result.get("entry_levels"), signal_evidence=result.get("signal_evidence"))
     changes = result.get("position_changes", pd.DataFrame())
     texts += format_position_changes(changes, now=pd.Timestamp(now))
     problems = validate_messages(texts, _secrets())
