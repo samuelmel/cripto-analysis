@@ -32,7 +32,7 @@ spacing: { xs: 4px, sm: 8px, md: 12px, lg: 16px, xl: 24px }
 
 ## Overview
 
-Ferramenta pessoal de monitoramento e análise quantitativa de criptomoedas. O visual vem do material do próprio produto, as mesas de cotação e os terminais de análise: grade rígida, alta densidade com hierarquia clara, uma família tipográfica em vários pesos, cor só onde carrega significado. A informação que se consulta todo dia cabe na primeira tela de um desktop comum; o resto fica a uma aba, uma seção recolhível ou a uma rolagem interna de distância. A explicação para leigos continua presente, mas recolhida (dicas de glossário e textos "Como ler"), nunca no caminho do número.
+Ferramenta pessoal de monitoramento e análise quantitativa de criptomoedas, que precisa ser entendida por quem não conhece o assunto. O visual vem do material do próprio produto, as mesas de cotação e os terminais de análise: grade rígida, alta densidade com hierarquia clara, uma família tipográfica em vários pesos, cor só onde carrega significado. A tela inicial ("Hoje") responde em uma frase o que fazer, em português simples e sem jargão; os números técnicos ficam nas outras abas ou recolhidos. A informação que se consulta todo dia cabe na primeira tela de um desktop comum; o resto fica a uma aba, uma seção recolhível ou a uma rolagem interna de distância. A explicação para leigos continua presente, mas recolhida (dicas de glossário e textos "Como ler"), nunca no caminho do número.
 
 ## Colors
 
@@ -51,16 +51,19 @@ IBM Plex Sans, self-hosted via @fontsource (400/500/600). Escala: 11 (rótulos d
 
 Largura útil de até 1760px, alinhada à esquerda, em **grade de 12 colunas** com espaçamento `md` (12px) entre painéis. O painel nunca rola na horizontal; qualquer conteúdo largo (tabelas, abas) rola **dentro** do próprio painel.
 
-- **Barra superior fixa** (uma linha, 44px): nome do app, as cinco visões como abas, e à direita o estado dos dados: fechamento da análise com o atraso, hora da última coleta, estado da última execução do pipeline e o botão de recarregar os arquivos publicados (não roda o pipeline).
-- **Faixa de indicadores** (sempre visível, oito células em uma linha no desktop, quatro no tablet, duas no celular): mercado (regra de risco), regime do BTC (experimental), moedas analisadas, aporte sugerido, posições, regra principal (BTC e ETH), risco do BTC e humor do mercado. Cada célula sai de um campo que o pipeline publica; o que não existe aparece como "—".
-- **Faixa de avisos**, logo abaixo; sem avisos, uma linha tranquila.
-- **Visão geral** (desktop): coluna esquerda de 8 colunas (gráfico com seletor de moeda e a tabela de moedas com altura limitada) e coluna direita de 4 (recomendação de aporte, regra principal e um painel de apoio com abas: posições, previsão, descartadas). Em telas de 1024px a 1279px as colunas passam a 7 e 5; abaixo disso, uma coluna na mesma ordem.
+- **Barra superior fixa** (uma linha, 44px): nome do app, as cinco visões como abas (Hoje, Seleção, Histórico, Previsões, Pesquisa) e, à direita, "Dados de <dia> (em dia/atrasado)" e o botão de recarregar. Hora da coleta e estado da execução ficam na dica (title), não na tela.
+- **Hoje** (tela inicial, pensada para leigos):
+  1. **Resumo de hoje**: uma frase de ação ("Considere aplicar R$ X de R$ Y em N moedas, ou espere"), três linhas curtas do porquê (mercado, sinais de entrada, "é simulação") e três indicadores: mercado, humor do mercado e suas posições.
+  2. **Avisos**: uma frase por aviso; moedas sem dado viram uma linha só ("1 moeda ficou de fora hoje por falta de dados: TON") e o detalhe técnico fica em "detalhes". Sem aviso, uma linha tranquila.
+  3. **Três cartões**: Onde aplicar (moeda, valor, nota), Em observação (candidatas dos sinais de entrada, desde quando, com o "por quê" e o aviso de que não é compra) e Suas posições.
+  4. **"Ver gráfico e todas as moedas"**, recolhido: gráfico com seletor de moeda e a tabela de todas as moedas.
+  A antiga faixa de oito indicadores e o painel da regra SMA 200 saíram da tela inicial (a SMA 200 é só contexto desde 2026-10-17; o detalhe está em Histórico e Pesquisa).
 - **Seleção**: ranking completo (altura limitada, cabeçalho fixo) e, abaixo, o backtest da seleção ao lado de "Como a seleção decide".
 - **Histórico**: tabela de todas as moedas ao lado do gráfico e da lista de operações da moeda escolhida.
 - **Previsões**: BTC e ETH lado a lado, cada um com gráfico e tabela de avaliação; colunas de detalhe só a partir de 1536px.
-- **Pesquisa**: um seletor segmentado escolhe um grupo por vez: regra de tendência, laboratório, regimes (experimental), como funciona e glossário.
+- **Pesquisa**: um seletor segmentado escolhe um grupo por vez: sinais de entrada (padrão), regra de tendência, validação por moeda, laboratório, regimes (experimental), como funciona e glossário.
 
-Abaixo de 768px tudo vira uma coluna, na mesma ordem. Colunas secundárias das tabelas somem no celular (`hidden md:table-cell`); nada deixa a página rolar na horizontal.
+Abaixo de 768px tudo vira uma coluna, na mesma ordem; toda grade declara `grid-cols-1` no tamanho base para nenhum filho largo empurrar a página. Colunas secundárias das tabelas somem no celular (`hidden md:table-cell`); nada deixa a página rolar na horizontal.
 
 ## Elevation & Depth
 
@@ -74,10 +77,9 @@ Plano. Nenhuma sombra. Painéis se separam por fundo (surface sobre ground) e ha
 
 - **Painel** — surface, hairline, `md`. Cabeçalho de uma linha (título 13px peso 600, nota `muted` 12px e ações à direita) separado do corpo por hairline; corpo com padding `md`, ou sem padding quando contém uma tabela. Um nível só: painel nunca contém painel nem cartão com borda própria.
 - **Barra superior** — fixa no topo, surface com hairline embaixo. Abas em texto 13px: a ativa tem fundo `signal-bg`, texto `signal` e `aria-selected`; setas do teclado trocam de visão. No celular o conjunto quebra em linhas e as abas rolam dentro da própria faixa.
-- **Faixa de indicadores** — células surface divididas por hairline de 1px: rótulo `muted` 11px, valor 13px peso 600 (tom de status quando carrega significado), nota `muted` 11px. Texto cortado mostra o completo no `title`.
+- **Resumo de hoje** — surface com padding `lg`: rótulo `muted` 12px em caixa alta, frase de ação 20–22px peso 600, linhas do porquê `muted` 14px e três indicadores em células divididas por hairline (rótulo 12px, valor 15px peso 600 no tom de status). A explicação completa de cada indicador fica no `title`.
 - **Faixa de avisos** — uma caixa surface com uma linha por aviso (ícone Phosphor de 16px, título em `warning` ou `critical`, texto `muted`); diz que avisos não são recomendações. Sem avisos, uma linha `muted` com ícone de confirmação.
 - **Tabela** — compacta (linhas de 28px, texto 13px), cabeçalho `muted` 12px peso 500 **fixo** durante a rolagem interna, `max-height` por painel, números à direita em tabulares, linha selecionável com foco visível. Colunas secundárias: `narrow: "hide"` (some no celular) e `narrow: "wide"` (só a partir de 1536px).
-- **Regra principal** — tabela de BTC e ETH com etiqueta do sinal, preço, variação de 24 horas e 30 dias, distância da média de 200 dias (barra e número) e mini-gráfico de 90 dias; acima dela, a frase de veredito do dia com ícone Phosphor (nunca faixa colorida lateral) e os detalhes recolhidos.
 - **Recomendação** — frase de decisão, barra do orçamento (cores de série, sempre mostrando o que fica sem investir) e uma linha por moeda selecionada (classificação, aporte, score e motivo principal); o detalhe (componentes do score, motivos, riscos, indicadores) abre sob demanda. Classificação usa `signal` (boa oportunidade relativa), neutro (moderada e evitar) e `warning` (aguardar). **Nunca** `good`/verde para oportunidade: verde sugeriria certeza de ganho.
 - **Faixa de previsão** — uma linha por horizonte: nome, trilho `ground` com o zero marcado, segmento tracejado de P10 a P90 e um traço no P50. Sempre rotulada "estimativa". Quando o modelo não vence a referência, vem junto a etiqueta `warning` "sem vantagem demonstrada".
 - **Regimes (experimental)** — células do estado de hoje, faixa do tempo da tendência e da volatilidade (largura proporcional aos dias, legenda de texto, eixo de anos), frequência por regime e as limitações conhecidas. Sempre rotulado experimental e descritivo: não gera sinal e não altera aporte, compra ou venda.

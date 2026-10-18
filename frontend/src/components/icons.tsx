@@ -1,5 +1,4 @@
 import {
-  CheckCircle,
   CurrencyBtc,
   Eye,
   HandCoins,
@@ -9,7 +8,6 @@ import {
   WarningCircle,
   type Icon,
 } from "@phosphor-icons/react";
-import type { Tone } from "../data/analytics";
 import type { ExitReason, Stage } from "../types/signals";
 
 /* Ícones com significado fixo — o mesmo ícone sempre quer dizer a mesma coisa no painel. */
@@ -26,12 +24,4 @@ export const STAGE_ICON: Record<Stage, Icon | null> = {
   PREPARAR: Eye,
   NEUTRO: null,
   INDISPONÍVEL: WarningCircle,
-};
-
-export const VERDICT_ICON: Record<Tone, Icon> = {
-  critical: WarningCircle,
-  signal: HandCoins,
-  warning: Eye,
-  good: CheckCircle,
-  neutral: CheckCircle,
 };

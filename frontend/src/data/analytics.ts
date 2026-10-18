@@ -9,7 +9,6 @@ import type {
   Performance,
   Period,
   Portfolio,
-  Position,
   SourceEvent,
   Stage,
   Strategy,
@@ -178,74 +177,6 @@ export const REASON_SHORT: Record<ExitReason, string> = {
   DESLISTAGEM: "Parou de negociar",
 };
 
-export interface Verdict {
-  readonly tone: Tone;
-  readonly headline: string;
-  readonly details: readonly string[];
-}
-
-/** O que fazer hoje, em uma frase principal e algumas linhas de apoio. */
-export function todayVerdict(signals: readonly DailySignal[], positions: readonly Position[]): Verdict {
-  const toSell = positions.filter((p) => p.action === "VENDER");
-  const buy = byStage(signals, "COMPRAR");
-  const watch = byStage(signals, "PREPARAR");
-  const turnedDown = withAlert(signals, "VENDER AGORA");
-  const turnedUp = withAlert(signals, "COMPRAR AGORA");
-  const panic = signals.filter((s) => s.panic);
-  const unavailable = signals.filter((s) => s.stage === "INDISPONÍVEL");
-  const names = (xs: readonly DailySignal[]): string => list(xs.map((s) => coinName(s.symbol)));
-
-  const details = [
-    ...positions.filter((p) => p.action === "INDISPONÍVEL").map((p) => `${coinName(p.symbol)}: sem dados confiáveis para avaliar a sua posição (${p.data_note ?? "motivo desconhecido"}).`),
-    ...positions.filter((p) => p.action === "ATENÇÃO").map((p) => `Atenção com ${coinName(p.symbol)}: ${p.state_detail ?? "uma regra de venda está perto de disparar"}.`),
-    ...toSell.map((p) => `Venda ${coinName(p.symbol)}: ${p.reason === null ? "a regra de saída disparou" : REASON_TEXT[p.reason]}.`),
-    ...turnedUp.map((s) => `${coinName(s.symbol)} entrou em tendência de alta hoje: o preço passou da média de 200 dias.`),
-    ...turnedDown.map((s) => `${coinName(s.symbol)} saiu da tendência de alta hoje. Quem tem deve vender.`),
-    ...(watch.length > 0
-      ? [`${names(watch)} ${watch.length === 1 ? "está" : "estão"} perto de voltar à tendência de alta. Ainda não é hora.`]
-      : []),
-    ...unavailable.map((s) => `${coinName(s.symbol)}: sem dados confiáveis hoje (${s.stage_reason ?? "motivo desconhecido"}).`),
-    ...(panic.length > 0
-      ? [`Mercado em pânico em ${names(panic)}. É só um aviso: no passado, comprar no pânico perdeu dinheiro.`]
-      : []),
-  ];
-  if (toSell.length > 0) {
-    return { tone: "critical", headline: `Você tem ${plural(toSell.length, "moeda para vender", "moedas para vender")}.`, details };
-  }
-  if (turnedDown.length > 0) {
-    return { tone: "critical", headline: `A tendência de ${names(turnedDown)} virou para baixo.`, details };
-  }
-  if (turnedUp.length > 0) {
-    return { tone: "signal", headline: `${names(turnedUp)} ${turnedUp.length === 1 ? "entrou" : "entraram"} em tendência de alta hoje.`, details };
-  }
-  if (buy.length === 0 && unavailable.length > 0) {
-    return { tone: "warning", headline: "Sem dados confiáveis para decidir hoje.", details };
-  }
-  if (buy.length > 0) {
-    const holding = positions.length > 0 ? " As suas posições podem continuar como estão." : "";
-    return {
-      tone: "good",
-      headline: `${names(buy)} ${buy.length === 1 ? "está" : "estão"} em tendência de alta pela regra da média de 200 dias.`,
-      details: [`Quem já tem pode segurar.${holding} Quanto aportar vem da recomendação de aporte, acima.`, ...details],
-    };
-  }
-  if (watch.length > 0) {
-    return { tone: "warning", headline: `Nada para comprar ainda, mas ${plural(watch.length, "moeda merece", "moedas merecem")} atenção.`, details };
-  }
-  return {
-    tone: "neutral",
-    headline: "Fique de fora por enquanto.",
-    details: ["Bitcoin e Ethereum não estão em tendência de alta pela regra da média de 200 dias.", ...details],
-  };
-}
-
-const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
-
-function list(items: readonly string[]): string {
-  if (items.length <= 1) return items.join("");
-  return `${items.slice(0, -1).join(", ")} e ${items.at(-1) ?? ""}`;
-}
-
 /* ---------- formatação pt-BR ---------- */
 
 const nf = (opts: Intl.NumberFormatOptions): Intl.NumberFormat => new Intl.NumberFormat("pt-BR", opts);
@@ -292,92 +223,12 @@ export const toInput = (n: number): string => String(n).replace(".", ",");
 
 const DAY_MS = 86_400_000;
 
-/** Variação do último fechamento contra o de `days` dias antes, em %. */
-export function changeOver(history: readonly HistoryPoint[], symbol: string, days: number): number | null {
-  const own = history.filter((h) => h.symbol === symbol);
-  const last = own.at(-1);
-  const before = own.at(-1 - days);
-  return last === undefined || before === undefined || before.close === 0 ? null : (last.close / before.close - 1) * 100;
-}
-
 /** Quantos dias o último candle está atrás do último candle fechado esperado (ontem, em UTC). */
 export function dataLagDays(lastCandle: Date | null, now: Date): number | null {
   if (lastCandle === null) return null;
   const expected = Math.floor(now.getTime() / DAY_MS) * DAY_MS - DAY_MS;
   const last = Math.floor(lastCandle.getTime() / DAY_MS) * DAY_MS;
   return Math.round((expected - last) / DAY_MS);
-}
-
-/** O que o painel mostra de cada sinal: rótulo, tom e a razão em uma frase. */
-export interface SignalView {
-  readonly text: string;
-  readonly tone: Tone;
-  readonly stage: Stage;
-  readonly why: string;
-}
-
-export function signalView(s: DailySignal): SignalView {
-  if (s.stage === "INDISPONÍVEL") {
-    return { text: "Sem dados confiáveis", tone: "warning", stage: s.stage, why: s.stage_reason ?? "Dado desatualizado ou insuficiente." };
-  }
-  if (s.alert === "VENDER AGORA") {
-    return { text: "Vender", tone: "critical", stage: s.stage, why: "Saiu da tendência de alta hoje." };
-  }
-  const label = STAGE_LABEL[s.stage];
-  const why: Record<Stage, string> = {
-    COMPRAR: "Fechou acima da média de 200 dias, e o Bitcoin também.",
-    PREPARAR: "Perto de voltar à tendência de alta: até 3% abaixo da média e subindo.",
-    NEUTRO: "Abaixo da média de 200 dias, ou o Bitcoin está abaixo da dele.",
-    INDISPONÍVEL: "",
-  };
-  return { text: label.text, tone: label.tone, stage: s.stage, why: why[s.stage] };
-}
-
-export interface Notice {
-  readonly kind: "panic" | "stale" | "collect";
-  readonly tone: Tone;
-  readonly title: string;
-  readonly text: string;
-}
-
-/** Avisos do dia, separados das recomendações: pânico, dado desatualizado e falha de coleta. */
-export function notices(signals: readonly DailySignal[], sources: readonly SourceEvent[], lag: number | null): readonly Notice[] {
-  const out: Notice[] = [];
-  const panic = signals.filter((s) => s.panic).map((s) => coinName(s.symbol));
-  if (panic.length > 0) {
-    out.push({
-      kind: "panic",
-      tone: "warning",
-      title: `Mercado em pânico em ${list(panic)}`,
-      text: "Queda forte com medo no mercado. É só um aviso: comprar no pânico perdeu dinheiro nos testes.",
-    });
-  }
-  const stale = signals.filter((s) => s.stage === "INDISPONÍVEL");
-  for (const s of stale) {
-    out.push({
-      kind: "stale",
-      tone: "warning",
-      title: `${coinName(s.symbol)} sem dados confiáveis`,
-      text: `${s.stage_reason ?? "Dado desatualizado."} Sem sinal para esta moeda.`,
-    });
-  }
-  if (lag !== null && lag > 0 && stale.length === 0) {
-    out.push({
-      kind: "stale",
-      tone: "warning",
-      title: "Dados com atraso",
-      text: `O último candle está ${plural(lag, "dia", "dias")} atrás do esperado. Os sinais valem com ressalva.`,
-    });
-  }
-  for (const e of sources.filter((x) => x.status === "erro")) {
-    out.push({
-      kind: "collect",
-      tone: "critical",
-      title: `Falha na coleta: ${e.source} (${e.scope === "MARKET" ? "mercado" : coinName(e.scope)})`,
-      text: e.detail === "" ? "A fonte não respondeu." : e.detail,
-    });
-  }
-  return out;
 }
 
 /** Última atualização das fontes: quando a coleta mais recente aconteceu e quantas falharam. */

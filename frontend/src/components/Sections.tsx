@@ -14,9 +14,7 @@ import {
   signTone,
   summarize,
   trendVerdict,
-  type Tone,
   type TrendVerdict,
-  type Verdict,
 } from "../data/analytics";
 import {
   EXIT_REASONS,
@@ -29,41 +27,10 @@ import {
   type Trade,
 } from "../types/signals";
 import { CoinLabel } from "./CoinLabel";
-import { REASON_ICON, STAGE_ICON, VERDICT_ICON } from "./icons";
+import { REASON_ICON, STAGE_ICON } from "./icons";
 import { Sparkline } from "./Sparkline";
 import { Term } from "./Glossary";
 import { Badge, Block, Collapsible, Empty, Figure, Panel, TEXT_TONE, Table, cell, hideNarrow, hideWide, numCell } from "./ui";
-
-/* ---------- hoje ---------- */
-
-const VERDICT_ICON_TONE: Record<Tone, string> = {
-  good: "text-good",
-  critical: "text-critical",
-  warning: "text-warning",
-  neutral: "text-good",
-  signal: "text-signal",
-};
-
-/** O que fazer hoje pela regra principal: uma frase de destaque e o resto recolhido. */
-export function VerdictLine({ verdict, asOf }: { readonly verdict: Verdict; readonly asOf: string }) {
-  const Icon = VERDICT_ICON[verdict.tone];
-  return (
-    <div className="flex gap-2.5">
-      <Icon size={24} weight="duotone" className={`mt-0.5 shrink-0 ${VERDICT_ICON_TONE[verdict.tone]}`} aria-hidden />
-      <div className="min-w-0">
-        <p className="text-[11px] text-muted">Hoje, com o fechamento de {asOf}</p>
-        <p className="text-[14px] font-semibold leading-snug">{verdict.headline}</p>
-        {verdict.details.length > 0 && (
-          <Collapsible summary={`Detalhes (${verdict.details.length})`} className="mt-0.5">
-            <ul className="space-y-0.5">
-              {verdict.details.map((d) => <li key={d}>{d}</li>)}
-            </ul>
-          </Collapsible>
-        )}
-      </div>
-    </div>
-  );
-}
 
 /* ---------- moedas ---------- */
 

@@ -1,7 +1,6 @@
 import { ArrowsClockwise } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  changeOver,
   coinName,
   dataLagDays,
   fmt,
@@ -9,26 +8,21 @@ import {
   historyOf,
   lastCollection,
   modelForecast,
-  notices,
   recentCloses,
-  signalView,
-  todayVerdict,
   type Tone,
 } from "../data/analytics";
 import { RECOMMENDED_SYMBOLS, coinFullName } from "../data/coins";
-import { buildKpis } from "../data/kpis";
 import { MissingFileError, loadDashboard } from "../data/loadSignals";
+import { simpleNotices, todaySummary } from "../data/today";
 import type { Dashboard as Data } from "../types/signals";
 import { CoinLogo } from "./CoinLabel";
 import { ForecastView } from "./ForecastView";
-import { KpiStrip } from "./Kpis";
 import { Nav, panelId, tabId, type ViewId } from "./Nav";
-import { NoticesBar } from "./Overview";
-import { OverviewView } from "./OverviewView";
 import { PriceChart } from "./PriceChart";
 import { SelectionView } from "./Recommendation";
 import { ResearchView } from "./ResearchView";
 import { MarketTable, TradeList } from "./Sections";
+import { TodayView } from "./Today";
 import { Empty, Panel, TEXT_TONE } from "./ui";
 
 type State =
@@ -80,23 +74,15 @@ function TopBar({ view, onView, fresh, onReload, reloading }: {
       <div className="mx-auto flex max-w-[1760px] flex-wrap items-center gap-x-5 gap-y-1 px-3 py-1.5 sm:px-4">
         <h1 className="flex items-baseline gap-2 whitespace-nowrap">
           <span className="text-[15px] font-semibold tracking-[-0.01em]">Crypto Analyzer</span>
-          <span className="hidden text-[12px] text-muted lg:inline">monitor quantitativo</span>
+          <span className="hidden text-[12px] text-muted lg:inline">o que fazer com cripto hoje</span>
         </h1>
         <Nav view={view} onChange={onView} />
         {fresh !== null && (
           <dl className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[12px]">
-            <div className="flex gap-1">
-              <dt className="text-muted">Fechamento</dt>
+            <div className="flex gap-1" title={`Coleta: ${fresh.collectedAt} · última execução: ${fresh.runState}`}>
+              <dt className="text-muted">Dados de</dt>
               <dd className="num font-medium">{fresh.closeDay}</dd>
               <dd className={TEXT_TONE[fresh.freshnessTone]}>({fresh.freshness})</dd>
-            </div>
-            <div className="hidden gap-1 md:flex">
-              <dt className="text-muted">Coleta</dt>
-              <dd className="num font-medium">{fresh.collectedAt}</dd>
-            </div>
-            <div className="flex gap-1">
-              <dt className="text-muted">Última execução</dt>
-              <dd className={`font-medium ${TEXT_TONE[fresh.runTone]}`}>{fresh.runState}</dd>
             </div>
             <button
               type="button"
@@ -149,10 +135,8 @@ export function Dashboard() {
         {state.status === "loading" && (
           <div role="status" aria-live="polite" className="space-y-3">
             <p className="text-muted">Carregando os dados publicados…</p>
-            <div aria-hidden className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-hairline bg-hairline sm:grid-cols-4 xl:grid-cols-8">
-              {Array.from({ length: 8 }, (_, i) => <div key={i} className="h-[58px] bg-surface" />)}
-            </div>
-            <div aria-hidden className="h-[340px] rounded-md border border-hairline bg-surface" />
+            <div aria-hidden className="h-[180px] rounded-md border border-hairline bg-surface" />
+            <div aria-hidden className="h-[240px] rounded-md border border-hairline bg-surface" />
           </div>
         )}
         {state.status === "missing" && (
@@ -181,27 +165,14 @@ function Ready({ data, view, onView, onChanged, now }: {
   readonly now: Date;
 }) {
   const { signals, recommendation, selectionPerf, history, trades, forecast, sources, positions, closed, positionStates } = data;
-  const first = signals[0];
   const [selected, setSelected] = useState<string>(positions[0]?.symbol ?? "BTC/USDT");
 
-  const verdict = useMemo(() => todayVerdict(signals, positions), [signals, positions]);
-  const kpis = useMemo(() => buildKpis(data), [data]);
+  const summary = useMemo(() => todaySummary(data), [data]);
   const lag = useMemo(
     () => dataLagDays(signals.reduce<Date | null>((m, s) => (m === null || s.timestamp > m ? s.timestamp : m), null), now),
     [signals, now],
   );
-  const warnings = useMemo(() => notices(signals, sources, lag), [signals, sources, lag]);
-  const coreRows = useMemo(
-    () =>
-      CORE.flatMap((symbol) => signals.filter((s) => s.symbol === symbol)).map((signal) => ({
-        signal,
-        view: signalView(signal),
-        change1: changeOver(history, signal.symbol, 1),
-        change30: changeOver(history, signal.symbol, 30),
-        closes: recentCloses(history, signal.symbol),
-      })),
-    [signals, history],
-  );
+  const warnings = useMemo(() => simpleNotices(signals, sources, lag), [signals, sources, lag]);
   const chartHistory = useMemo(() => historyOf(history, selected), [history, selected]);
   const chartTrades = useMemo(() => trades.filter((t) => t.symbol === selected), [trades, selected]);
   const chartPositions = useMemo(() => positions.filter((p) => p.symbol === selected), [positions, selected]);
@@ -212,16 +183,13 @@ function Ready({ data, view, onView, onChanged, now }: {
 
   return (
     <main className="space-y-3">
-      <KpiStrip items={kpis} />
-      <NoticesBar items={warnings} />
-
       <div role="tabpanel" id={panelId("geral")} aria-labelledby={tabId("geral")} hidden={view !== "geral"}>
-        <OverviewView
+        <TodayView
+          summary={summary}
+          notices={warnings}
           signals={signals}
           recommendation={recommendation}
-          verdict={verdict}
-          asOf={fmt.day(first?.timestamp ?? null)}
-          coreRows={coreRows}
+          hasLevels={data.entryLevels.length > 0}
           selected={selected}
           onSelect={setSelected}
           coinsByName={coinsByName}
@@ -230,7 +198,6 @@ function Ready({ data, view, onView, onChanged, now }: {
           chartTrades={chartTrades}
           chartPositions={chartPositions}
           chartForecast={chartForecast}
-          forecast={forecast}
           positions={positions}
           closed={closed}
           positionStates={positionStates}
