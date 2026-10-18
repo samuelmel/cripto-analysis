@@ -135,3 +135,67 @@ com 11 combinações testadas tem alto risco de ser acaso (a melhor de várias),
 6. Mensagem diária do Telegram (candidatas, nível, excesso com IC, aporte, risco, regime, aviso).
 7. Lista de observação e avisos só na mudança (candidata dispara ou se desfaz); ATENÇÃO sugere reduzir o tamanho.
 8. Painel e relatório final.
+
+## Resultado da execução de 2026-10-17
+
+Experimento `562e2e955fe0ddf0` (dados fea05e374077, `continuidade-v1`; código 62470df, árvore limpa; semente 20261016;
+2000 reamostragens por janelas de 30 dias). Evidência em `evidence/entry_signals/`. Entrada e saída na abertura, 24 hipóteses
+no Holm. O score E foi reconstruído por data sem olhar o futuro (teste de truncagem em `tests/test_entry_signals.py`) e
+ficou na lista.
+
+### Desenvolvimento (até 2024-12-31)
+
+| Comb. | Sinais 7 d | Excesso 7 d (IC 95%) | p Holm 7 d | Sinais 30 d | Excesso 30 d (IC 95%) | p Holm 30 d | Nível no desenvolvimento |
+|---|---|---|---|---|---|---|---|
+| A_30 | 1072 | −0,2 pp (−1,5 a +1,1) | 1,00 | 719 | −1,7 pp (−4,1 a +0,8) | 1,00 | SEM_EVIDENCIA |
+| A_60 | 769 | −0,3 pp (−2,1 a +1,8) | 1,00 | 523 | −3,1 pp (−6,8 a +0,5) | 1,00 | SEM_EVIDENCIA |
+| A_90 | 685 | −0,7 pp (−2,8 a +1,6) | 1,00 | 450 | −2,5 pp (−6,5 a +1,7) | 1,00 | SEM_EVIDENCIA |
+| B_10 | 1967 | +0,6 pp (−1,5 a +2,6) | 1,00 | 995 | +0,6 pp (−5,8 a +7,1) | 1,00 | PROMISSOR |
+| B_15 | 1485 | −1,0 pp (−3,1 a +1,1) | 1,00 | 803 | −2,1 pp (−10,1 a +6,8) | 1,00 | SEM_EVIDENCIA |
+| B_20 | 1041 | −1,0 pp (−3,3 a +1,4) | 1,00 | 601 | −3,1 pp (−10,7 a +5,8) | 1,00 | SEM_EVIDENCIA |
+| C | 1436 | +2,9 pp (+0,5 a +5,3) | 0,24 | 813 | +6,2 pp (−1,1 a +13,1) | 0,87 | PROMISSOR |
+| D_30 | 1004 | −0,3 pp (−1,5 a +1,0) | 1,00 | 677 | −2,0 pp (−4,5 a +0,6) | 1,00 | SEM_EVIDENCIA |
+| D_60 | 719 | −0,4 pp (−2,1 a +1,5) | 1,00 | 494 | −3,3 pp (−7,1 a +0,2) | 1,00 | SEM_EVIDENCIA |
+| D_90 | 652 | −0,9 pp (−2,5 a +0,9) | 1,00 | 429 | −2,7 pp (−7,0 a +1,7) | 1,00 | SEM_EVIDENCIA |
+| E | 638 | +1,6 pp (+0,1 a +3,7) | 1,00 | 376 | +0,3 pp (−3,3 a +3,9) | 1,00 | PROMISSOR |
+| F | 973 | −0,7 pp (−1,8 a +0,3) | 1,00 | 624 | −2,3 pp (−5,2 a +0,6) | 1,00 | SEM_EVIDENCIA |
+
+Nenhuma combinação passou no Holm (o menor p ajustado é 0,24, de C em 7 dias). A mediana do excesso é negativa em todas as 24
+hipóteses: as médias positivas vêm de poucos ganhos grandes.
+
+### Teste final (2025-01-01 em diante), só para os 3 PROMISSOR
+
+| Comb. | Sinais 7 d | Excesso 7 d | Sinais 30 d | Excesso 30 d | Veredito | Nível final |
+|---|---|---|---|---|---|---|
+| B_10 | 531 | −0,3 pp | 281 | −3,7 pp | CONTRADITO | SEM_EVIDENCIA |
+| C | 329 | −0,7 pp | 196 | −2,2 pp | CONTRADITO | SEM_EVIDENCIA |
+| E | 184 | +1,2 pp | 112 | +0,6 pp | NAO_CONTRADITO | **PROMISSOR** |
+
+### Modelo sombra F
+
+Walk-forward de 2020 a 2026 sem problemas numéricos (IRLS converge em 5 a 7 iterações; treino de 3.897 linhas em 2020 a
+72.153 em 2026). F ficou SEM_EVIDENCIA (excesso negativo nos dois horizontes) e não supera A_90 em 30 dias: diferença
++0,5 pp, IC pareado de −4,7 a +6,1 pp (624 sinais de F contra 409 de A_90, 60 janelas). **F não vira candidato**; continua
+só em sombra.
+
+### Veredito
+
+**0 VALIDADO, 1 PROMISSOR (E, score atual de seleção), 11 SEM_EVIDENCIA.** Nenhuma moeda mostra COMPRAR por este estudo.
+
+- **E PROMISSOR é fraco.** O excesso de 30 dias é +0,3 pp com IC de −3,3 a +3,9 pp, e só metade das moedas (7 dias) ou um
+  terço (30 dias) tem excesso positivo. Entre 12 combinações testadas, é plausível que seja só a melhor de várias. Aparece
+  como "em observação", nunca como COMPRAR.
+- **Momentum puro (A, D) e o modelo F ficam abaixo da média do universo** nos dois horizontes, com o IC de 30 dias quase todo
+  negativo. Comprar o que mais subiu nos últimos 30 a 90 dias não bateu comprar o universo inteiro no mesmo dia.
+- **Rompimento (C) teve o maior excesso no desenvolvimento** (+2,9 pp em 7 dias, com IC acima de zero antes da correção), mas
+  não sobreviveu ao Holm e inverteu de sinal no teste final.
+- A sensibilidade com fechamentos (fora do Holm) não muda o quadro: C continua o maior em 7 dias (+3,0 pp); E cai para +0,8 pp
+  em 7 dias e −0,1 pp em 30 dias, o que reforça que o PROMISSOR de E é frágil.
+
+### Correção de uma limitação escrita antes
+
+O protocolo previu que o critério de contradição "quase nunca vai disparar". **A previsão estava errada:** ele disparou em 2 dos
+3 PROMISSOR. Com a referência do universo e eventos de entrada na condição, o teste final teve de 112 a 531 sinais por
+combinação, bem acima de 20, e com essa amostra o critério vira, na prática, "o sinal da média se manteve". Para um efeito nulo
+isso falha cerca de metade das vezes, então o teste final funciona como um filtro de moeda ao ar contra PROMISSOR ruidosos,
+não como confirmação. A regra foi aplicada como escrita; o texto da limitação acima fica como registro do que se esperava.
