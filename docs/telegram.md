@@ -152,3 +152,16 @@ O [`mcp_server.py`](../mcp_server.py) expõe a tool `run_crypto_pipeline`, que r
   }
 }
 ```
+
+## Sinais de entrada (desde 2026-10-17, `docs/entry_signals.md`)
+
+- **Resumo diário**: seção "🎯 Sinais de entrada" com o estado do COMPRAR (só com sinal VALIDADO), as candidatas do dia com
+  dado confiável (nível, combinação, desde quando, "novo hoje", aporte sugerido pela seleção e principal risco), o excesso com
+  IC 95% em 7 e 30 dias e o teste final de cada sinal ativo, o regime do mercado e o aviso de que PROMISSOR pode ser só a melhor
+  de várias combinações testadas. A validação por moeda aparece como informação; a regra SMA 200 aparece como contexto.
+- **Aviso de mudança** ("👀 LISTA DE OBSERVAÇÃO — MUDANÇA"): mensagem separada, só quando uma candidata dispara (entra na
+  condição de um sinal VALIDADO/PROMISSOR) ou se desfaz (sai dela) no dia. Moeda sem dado confiável não gera aviso. A mudança
+  é calculada comparando hoje com ontem nas próprias condições (não depende de estado gravado); se o pipeline rodar duas vezes
+  sobre o mesmo candle, o aviso se repete.
+- **Posições**: quando uma posição muda para ATENÇÃO, o aviso traz "Sugestão: considere reduzir o tamanho da posição (não é
+  ordem de venda; a regra ainda não disparou)".

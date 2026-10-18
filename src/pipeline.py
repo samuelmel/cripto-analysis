@@ -74,7 +74,15 @@ from .loaders.source_log import read_source_log, write_source_log
 from .transformers.anomaly_detector import SignalRules, classify_history, detect
 from .transformers.forecast import forecast_table
 from .transformers.allocation import allocate
-from .transformers.notification import data_notes, format_error, format_position_changes, format_report, redact, validate_messages
+from .transformers.notification import (
+    data_notes,
+    format_entry_changes,
+    format_error,
+    format_position_changes,
+    format_report,
+    redact,
+    validate_messages,
+)
 from .transformers.recommendation import build_recommendation, validate_recommendation
 from .transformers.regimes import classify_market_regimes
 from .transformers.selection import REGIME_UNAVAILABLE, assess, compute_features, features_on, regime_series
@@ -433,6 +441,7 @@ def _notify(result: dict[str, pd.DataFrame], now: datetime, *, dry_run: bool, re
                           entry_levels=result.get("entry_levels"), signal_evidence=result.get("signal_evidence"))
     changes = result.get("position_changes", pd.DataFrame())
     texts += format_position_changes(changes, now=pd.Timestamp(now))
+    texts += format_entry_changes(result.get("entry_changes"), result["signals"], now=pd.Timestamp(now))
     problems = validate_messages(texts, _secrets())
     if problems:
         logger.error("mensagem do Telegram inválida: %s", "; ".join(problems))

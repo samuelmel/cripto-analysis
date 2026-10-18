@@ -24,7 +24,7 @@ from datetime import timedelta, timezone
 import numpy as np
 import pandas as pd
 
-from .entry_live import COMBO_TEXT, active_levels
+from .entry_live import CHANGE_FIRED, COMBO_TEXT, active_levels
 
 TELEGRAM_LIMIT = 4096
 FORTALEZA = timezone(timedelta(hours=-3))  # UTC−3 o ano todo (sem horário de verão)
@@ -395,6 +395,38 @@ def format_report(
     return split_message("\n\n".join(out))
 
 
+WATCHLIST_DISCLAIMER = (
+    "Lista de observação: PROMISSOR não é sinal de compra (pode ser só a melhor de várias combinações testadas). "
+    "Este aviso só aparece quando uma candidata entra ou sai da condição."
+)
+
+
+def format_entry_changes(
+    changes: pd.DataFrame | None, signals: pd.DataFrame, *, now: pd.Timestamp
+) -> list[str]:
+    """Aviso só na mudança: candidata que disparou (entrou na condição de um sinal VALIDADO/PROMISSOR) ou se desfez
+    (saiu dela). Moeda sem dado confiável hoje fica de fora (a saída seria do dado, não do sinal). Vazio sem mudança."""
+    if changes is None or changes.empty:
+        return []
+    unavailable = set(signals.loc[signals["stage"].astype(str).eq(STAGE_UNAVAILABLE_LABEL), "symbol"].astype(str))
+    rows = changes[~changes["symbol"].astype(str).isin(unavailable)]
+    if rows.empty:
+        return []
+    local = now.tz_convert(FORTALEZA)
+    lines = ["👀 LISTA DE OBSERVAÇÃO — MUDANÇA", f"{local:%d/%m/%Y %H:%M} (Fortaleza)", ""]
+    for r in rows.sort_values(["change", "symbol"], kind="stable").to_dict("records"):
+        name = str(r["symbol"]).split("/")[0]
+        combo = str(r["combo"])
+        what = f"{combo} ({COMBO_TEXT.get(combo, combo)}), {r['level']}"
+        if r["change"] == CHANGE_FIRED:
+            role = "COMPRAR" if r["level"] == "VALIDADO" else "em observação"
+            lines.append(f"- {name} disparou: {what} → {role}.")
+        else:
+            lines.append(f"- {name} se desfez: saiu de {what}.")
+    lines += ["", WATCHLIST_DISCLAIMER]
+    return split_message("\n".join(lines))
+
+
 POSITION_DISCLAIMER = (
     "Recomendação por regra, não previsão nem garantia. Nenhuma ordem é executada pelo sistema: a decisão é sua."
 )
@@ -402,6 +434,10 @@ POSITION_DISCLAIMER = (
 
 def _pct(x: float | None) -> str:
     return "—" if x is None or not math.isfinite(float(x)) else f"{float(x):+.1f}%".replace(".", ",")
+
+
+WATCH_STATE = "ATENÇÃO"
+WATCH_SUGGESTION = "Sugestão: considere reduzir o tamanho da posição (não é ordem de venda; a regra ainda não disparou)."
 
 
 def format_position_changes(changes: pd.DataFrame, *, now: pd.Timestamp) -> list[str]:
@@ -425,6 +461,8 @@ def format_position_changes(changes: pd.DataFrame, *, now: pd.Timestamp) -> list
         )
         if r["rule_evidence"] is not None and not pd.isna(r["rule_evidence"]):
             lines.append(f"Histórico da regra: {r['rule_evidence']}.")
+        if r["state"] == WATCH_STATE:
+            lines.append(WATCH_SUGGESTION)
         blocks.append("\n".join(lines))
     blocks.append(POSITION_DISCLAIMER)
     return split_message("\n\n".join(blocks))
