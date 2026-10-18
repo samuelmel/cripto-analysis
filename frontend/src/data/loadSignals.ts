@@ -3,6 +3,8 @@ import {
   ALERTS,
   DATA_STATUSES,
   DECISIONS,
+  ENTRY_HOLDOUTS,
+  ENTRY_KINDS,
   ENTRY_LEVELS,
   EVIDENCE_STATUSES,
   HOLDOUT_STATES,
@@ -24,6 +26,7 @@ import {
   type ClosedPosition,
   type Dashboard,
   type DailySignal,
+  type EntryLevelRow,
   type Forecast,
   type HistoryPoint,
   type LabResult,
@@ -315,6 +318,30 @@ const parseEvidence = (r: Row): SignalEvidence => ({
   reason: str(r, "reason"),
 });
 
+const parseEntryLevel = (r: Row): EntryLevelRow => ({
+  combo: str(r, "combo"),
+  candidate: str(r, "candidate"),
+  kind: oneOf(ENTRY_KINDS, r, "kind"),
+  level: oneOf(ENTRY_LEVELS, r, "level"),
+  dev_level: oneOf(ENTRY_LEVELS, r, "dev_level"),
+  holdout: oneOf(ENTRY_HOLDOUTS, r, "holdout"),
+  excess_7: numOrNull(r, "excess_7"),
+  ci_low_7: numOrNull(r, "ci_low_7"),
+  ci_high_7: numOrNull(r, "ci_high_7"),
+  p_holm_7: numOrNull(r, "p_holm_7"),
+  n_signals_7: num(r, "n_signals_7"),
+  excess_30: numOrNull(r, "excess_30"),
+  ci_low_30: numOrNull(r, "ci_low_30"),
+  ci_high_30: numOrNull(r, "ci_high_30"),
+  p_holm_30: numOrNull(r, "p_holm_30"),
+  n_signals_30: num(r, "n_signals_30"),
+  holdout_n_7: numOrNull(r, "holdout_n_7"),
+  holdout_n_30: numOrNull(r, "holdout_n_30"),
+  holdout_excess_7: numOrNull(r, "holdout_excess_7"),
+  holdout_excess_30: numOrNull(r, "holdout_excess_30"),
+  reason: str(r, "reason"),
+});
+
 const parsePosition = (r: Row): Position => ({
   position_id: str(r, "position_id"),
   symbol: str(r, "symbol"),
@@ -380,7 +407,7 @@ async function optionalRows(url: string): Promise<readonly Row[]> {
 
 /** Leitura: baixa e valida tudo que o pipeline publicou (a escrita fica em api.ts). */
 export async function loadDashboard(base = ""): Promise<Dashboard> {
-  const [signals, recs, selectionPerf, marketRegimes, history, trades, performance, forecast, sources, lab, positions, closed, evidence, positionStates] = await Promise.all([
+  const [signals, recs, selectionPerf, marketRegimes, history, trades, performance, forecast, sources, lab, positions, closed, evidence, positionStates, entryLevels] = await Promise.all([
     fetchRows(`${base}/daily_signals.parquet`),
     fetchRows(`${base}/recommendation.parquet`),
     optionalRows(`${base}/selection_backtest.parquet`),
@@ -395,6 +422,7 @@ export async function loadDashboard(base = ""): Promise<Dashboard> {
     fetchRows(`${base}/closed_positions.parquet`),
     optionalRows(`${base}/signal_evidence.parquet`),
     optionalRows(`${base}/position_states.parquet`),
+    optionalRows(`${base}/entry_signal_levels.parquet`),
   ]);
   const parsed = signals.map(parseSignal);
   const first = recs[0];
@@ -417,5 +445,6 @@ export async function loadDashboard(base = ""): Promise<Dashboard> {
     closed: closed.map(parseClosed),
     evidence: evidence.map(parseEvidence),
     positionStates: positionStates.map(parsePositionState),
+    entryLevels: entryLevels.map(parseEntryLevel),
   };
 }

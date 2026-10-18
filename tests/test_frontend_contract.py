@@ -12,6 +12,7 @@ import pytest
 from src.loaders.positions_store import POSITIONS_SCHEMA
 from src.loaders.source_log import SOURCE_LOG_SCHEMA
 from src.transformers.anomaly_detector import HISTORY_SCHEMA
+from src.transformers.entry_study import LEVEL_SCHEMA
 from src.transformers.forecast import FORECAST_SCHEMA
 from src.transformers.position_advisor import CLOSED_SCHEMA, POSITION_SCHEMA
 from src.transformers.recommendation import RECOMMENDATION_SCHEMA, SIGNALS_SCHEMA
@@ -40,6 +41,7 @@ CONTRACTS: dict[str, tuple[dict[str, str], str]] = {
     "MarketRegime": (REGIME_SCHEMA, "parseMarketRegime"),
     "SignalEvidence": (EVIDENCE_SCHEMA, "parseEvidence"),
     "PositionStateRow": (POSITION_STATE_LOG_SCHEMA, "parsePositionState"),
+    "EntryLevelRow": (LEVEL_SCHEMA, "parseEntryLevel"),
 }
 
 
@@ -75,3 +77,4 @@ def test_the_dashboard_loads_every_published_file_and_only_regimes_are_new() -> 
                  "performance", "forecast", "sources", "strategy_lab", "positions", "closed_positions"):
         assert f"/{name}.parquet" in LOADER, name
     assert "optionalRows(`${base}/market_regimes.parquet`)" in LOADER  # opcional: o painel abre sem ele
+    assert "optionalRows(`${base}/entry_signal_levels.parquet`)" in LOADER  # opcional: sem ele, nenhum sinal (falha fechada)

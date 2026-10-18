@@ -77,12 +77,12 @@ const EVIDENCE_TEXT: Readonly<Record<EvidenceStatus, string>> = {
 };
 const EVIDENCE_ORDER: Readonly<Record<EvidenceStatus, number>> = { VALIDADA: 0, REVOGADA: 1, NAO_VALIDADA: 2, SEM_EVIDENCIA: 3, NAO_AVALIADA: 4 };
 
-/** Evidência estatística do COMPRAR por moeda. Só moedas "Validada" mostram COMPRAR no painel e no Telegram. */
+/** Validação por moeda da regra SMA 200 (informativa: o COMPRAR depende do sinal de entrada, ver EntrySignals). */
 export function EvidencePanel({ rows }: { readonly rows: readonly SignalEvidence[] }) {
   if (rows.length === 0) {
     return (
-      <Empty title="A validação do COMPRAR ainda não foi publicada." tone="warning">
-        Sem esse arquivo nenhuma moeda mostra COMPRAR (o painel falha fechado). Para gerar, rode no terminal e recarregue:
+      <Empty title="A validação por moeda ainda não foi publicada.">
+        É só informação (não libera COMPRAR). Para gerar, rode no terminal e recarregue:
         <pre className="mt-2 overflow-x-auto rounded-sm bg-ground px-3 py-2 text-[12px] text-ink">uv run python research/signal_evidence_study.py run</pre>
       </Empty>
     );
@@ -122,7 +122,7 @@ export function EvidencePanel({ rows }: { readonly rows: readonly SignalEvidence
       <p className="border-t border-hairline px-3 py-2 text-[12px] text-muted">
         Excesso = retorno líquido médio após o sinal (entrada no fechamento seguinte, com custos) menos o de entrar em qualquer dia da mesma moeda. Validada exige
         os dois horizontes, valor-p com correção de Holm abaixo de 0,05 e um mínimo de sinais independentes. O teste final (desde 2025) só pode revogar. Moedas
-        com poucos sinais ficam sem evidência. Não é recomendação de compra.
+        com poucos sinais ficam sem evidência. Informativo: não libera COMPRAR. Não é recomendação de compra.
       </p>
     </>
   );

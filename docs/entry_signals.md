@@ -213,3 +213,19 @@ não como confirmação. A regra foi aplicada como escrita; o texto da limitaç�
   `frontend/public/entry_signal_levels.parquet` publica a tabela de níveis.
 - Diferença em relação ao estudo: no produto, o universo do dia é calculado sobre as moedas analisadas (até 32), não sobre os
   683 pares da base point-in-time. Para E, com o top 5 dentro do mesmo universo de 32, a diferença é pequena, mas existe.
+
+## Relatório final (2026-10-18)
+
+| Nível | Combinações |
+|---|---|
+| VALIDADO | nenhuma |
+| PROMISSOR | E (score atual de seleção: as 5 maiores notas) |
+| SEM_EVIDENCIA | A_30, A_60, A_90, B_10, B_15, B_20, C, D_30, D_60, D_90, F (modelo sombra) |
+
+- B_10 e C eram PROMISSOR no desenvolvimento e foram contraditos no teste final; F não superou A_90 e fica só em sombra.
+- No produto: nenhuma moeda mostra COMPRAR; as moedas no top 5 do score aparecem "em observação" no Telegram e na aba
+  "Sinais de entrada" do painel (Pesquisa), com o aviso de "melhor de várias". O aviso de mudança só sai quando uma
+  candidata entra ou sai da lista.
+- Pendências conhecidas: (1) o produto calcula o universo sobre as moedas analisadas, não sobre a base point-in-time inteira;
+  (2) as previsões do modelo F ainda não são registradas na branch `state` (o protocolo previa o registro em sombra); (3) a
+  limitação escrita antes sobre o critério de contradição estava errada (ver acima).

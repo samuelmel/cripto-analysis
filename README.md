@@ -148,3 +148,5 @@ implementação. O README mantém apenas as informações necessárias para
 entender, instalar e executar o projeto.
 
 Pesquisa quantitativa (dados point-in-time, motor de backtest de referência, validação estatística e a validação do COMPRAR por moeda): [docs/pesquisa_quantitativa.md](docs/pesquisa_quantitativa.md) e [docs/signal_validation.md](docs/signal_validation.md).
+
+Sinais de entrada (desde 2026-10-17 o COMPRAR depende do sinal, não da moeda): protocolo, resultado e uso no produto em [docs/entry_signals.md](docs/entry_signals.md). Resultado atual: nenhum sinal validado, então nenhuma moeda mostra COMPRAR; o score de seleção (E) fica em observação como promissor.

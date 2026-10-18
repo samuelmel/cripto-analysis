@@ -13,7 +13,8 @@
  *   LabResult     research/strategy_lab.RESULT_SCHEMA (strategy_lab.parquet, opcional)
  *   Position      position_advisor.POSITION_SCHEMA (positions.parquet)
  *   PositionStateRow position_log.POSITION_STATE_LOG_SCHEMA (position_states.parquet, opcional: histórico de estados)
- *   SignalEvidence signal_validation.EVIDENCE_SCHEMA (signal_evidence.parquet, opcional: evidência estatística do COMPRAR)
+ *   SignalEvidence signal_validation.EVIDENCE_SCHEMA (signal_evidence.parquet, opcional: validação por moeda, informativa)
+ *   EntryLevelRow entry_study.LEVEL_SCHEMA         (entry_signal_levels.parquet, opcional: nível de cada sinal de entrada)
  */
 
 export const STAGES = ["COMPRAR", "PREPARAR", "NEUTRO", "INDISPONÍVEL"] as const;
@@ -67,6 +68,12 @@ export type HoldoutState = (typeof HOLDOUT_STATES)[number];
 /** Nível de um sinal de entrada no estudo agregado (transformers/entry_study.py). COMPRAR só com VALIDADO. */
 export const ENTRY_LEVELS = ["VALIDADO", "PROMISSOR", "SEM_EVIDENCIA"] as const;
 export type EntryLevel = (typeof ENTRY_LEVELS)[number];
+
+export const ENTRY_HOLDOUTS = ["CONTRADITO", "NAO_CONTRADITO", "INSUFICIENTE", "NAO_AVALIADO"] as const;
+export type EntryHoldout = (typeof ENTRY_HOLDOUTS)[number];
+
+export const ENTRY_KINDS = ["SELECAO", "TEMPO"] as const;
+export type EntryKind = (typeof ENTRY_KINDS)[number];
 
 export const DECISIONS = ["NAO_INVESTIR", "APORTE_PEQUENO", "APORTE_PARCIAL", "APORTE_AMPLO"] as const;
 export type Decision = (typeof DECISIONS)[number];
@@ -409,6 +416,31 @@ export interface SignalEvidence {
   readonly reason: string;
 }
 
+/** Uma linha de entry_signal_levels.parquet: o nível de uma combinação no estudo agregado (docs/entry_signals.md). */
+export interface EntryLevelRow {
+  readonly combo: string;
+  readonly candidate: string;
+  readonly kind: EntryKind;
+  readonly level: EntryLevel;
+  readonly dev_level: EntryLevel;
+  readonly holdout: EntryHoldout;
+  readonly excess_7: number | null;
+  readonly ci_low_7: number | null;
+  readonly ci_high_7: number | null;
+  readonly p_holm_7: number | null;
+  readonly n_signals_7: number;
+  readonly excess_30: number | null;
+  readonly ci_low_30: number | null;
+  readonly ci_high_30: number | null;
+  readonly p_holm_30: number | null;
+  readonly n_signals_30: number;
+  readonly holdout_n_7: number | null;
+  readonly holdout_n_30: number | null;
+  readonly holdout_excess_7: number | null;
+  readonly holdout_excess_30: number | null;
+  readonly reason: string;
+}
+
 export interface Dashboard {
   readonly signals: readonly DailySignal[];
   readonly recommendation: Recommendation;
@@ -424,4 +456,5 @@ export interface Dashboard {
   readonly closed: readonly ClosedPosition[];
   readonly evidence: readonly SignalEvidence[];
   readonly positionStates: readonly PositionStateRow[];
+  readonly entryLevels: readonly EntryLevelRow[];
 }
