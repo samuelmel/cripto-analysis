@@ -3,9 +3,11 @@ name: Pipeline diário
 on:
   workflow_dispatch:
   schedule:
-    # 00:10 UTC = 21:10 em Fortaleza (UTC−3, sem horário de verão): logo depois do fechamento do candle diário
-    # da Binance (00:00 UTC). O sinal só muda uma vez por dia, então não há ganho em rodar com mais frequência.
-    - cron: "10 0 * * *"
+    # 00:37 UTC = 21:37 em Fortaleza (UTC−3, sem horário de verão): depois do fechamento do candle diário
+    # da Binance (00:00 UTC). O minuto 37 evita o pico de agendamentos do começo da hora: com "10 0 * * *"
+    # o GitHub começou o job por volta de 04:20 UTC (01:20 em Fortaleza) em 16, 17 e 18/10.
+    # O sinal só muda uma vez por dia, então não há ganho em rodar com mais frequência.
+    - cron: "37 0 * * *"
 
 permissions:
   contents: write  # só para gravar a branch `state` (dados); o workflow nunca escreve na `main`
