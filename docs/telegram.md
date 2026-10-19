@@ -107,7 +107,7 @@ O workflow [`.github/workflows/daily.yml`](../.github/workflows/daily.yml) roda 
 
 ### Horário
 
-O gatilho é `cron: "10 0 * * *"`, ou seja, **00:10 UTC = 21:10 em Brasília e Fortaleza** (UTC−3, sem horário de verão). Esse horário fica logo depois do fechamento do candle diário da Binance (00:00 UTC). Para outro fuso, converta para UTC.
+O gatilho é `cron: "7 21 * * *"`, ou seja, **21:07 UTC = 18:07 em Brasília e Fortaleza** (UTC−3, sem horário de verão). O GitHub costuma atrasar o início em várias horas (com 00:10 e 00:37 UTC o resumo chegava entre 01h e 02h da madrugada); agendando às 21:07 UTC, ele chega à noite. Antes de 00:00 UTC o último candle fechado é o do dia anterior; se o atraso passar da meia-noite UTC, entra o candle do dia. Só candles fechados são usados. Para outro fuso, converta para UTC.
 
 - O GitHub pode atrasar ou descartar execuções agendadas em horário de pico. O começo de cada hora é pico, por isso o gatilho é às 00:10 e não às 00:00.
 - Em repositório público, o GitHub desativa o agendamento depois de 60 dias sem atividade. Para reativar, vá em **Actions**.
