@@ -60,7 +60,10 @@ class BitstampAdapter(BaseExtractor):
                 fresh = [k for k in page if isinstance(k, dict) and since <= int(k.get("timestamp", -1)) < stop]
                 rows.extend(k for k in fresh if int(k["timestamp"]) + DAY_SECONDS <= stop)
                 if not fresh:
-                    break
+                    if rows:
+                        break
+                    since += PAGE_LIMIT * DAY_SECONDS  # o par ainda não existia: avança até o primeiro candle
+                    continue
                 since = max(int(k["timestamp"]) for k in fresh) + DAY_SECONDS
                 if len(page) < PAGE_LIMIT:
                     break

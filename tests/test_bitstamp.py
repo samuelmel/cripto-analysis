@@ -44,3 +44,15 @@ def test_rejects_unexpected_payload_and_non_usd_pairs(monkeypatch: pytest.Monkey
         BitstampAdapter(["BTC/USD"]).extract(None, datetime(2012, 1, 1, tzinfo=timezone.utc))
     with pytest.raises(ValueError):
         BitstampAdapter(["BTC/USDT"])
+
+
+def test_pair_listed_after_2011_is_found_by_skipping_empty_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    listed = 2500  # o par começa 2.500 dias depois do primeiro dia do BTC
+
+    def fake(url: str, params: dict[str, Any], **_: Any) -> dict[str, Any]:
+        first = max((int(params["start"]) - T0) // DAY, listed)
+        return {"data": {"ohlc": [candle(i) for i in range(first, min(first + 1000, 3000))]}}
+
+    monkeypatch.setattr(bitstamp_adapter, "get_json", fake)
+    df = BitstampAdapter(["ETH/USD"]).extract(None, datetime.fromtimestamp(T0 + 3000 * DAY, tz=timezone.utc))
+    assert len(df) == 500 and df["timestamp"].iloc[0] == pd.Timestamp(T0 + listed * DAY, unit="s", tz="UTC")
