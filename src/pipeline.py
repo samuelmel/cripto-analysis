@@ -70,6 +70,7 @@ from .loaders.parquet_loader import write_daily_signals, write_parquet
 from .loaders.position_log_store import append_notifications, append_state_log, read_notifications, read_state_log
 from .loaders.positions_store import read_positions
 from .loaders.signal_log_store import append_signal_log
+from .loaders.model_log_store import append_fng_history, append_predictions, read_fng_history
 from .loaders.source_log import read_source_log, write_source_log
 from .transformers.anomaly_detector import SignalRules, classify_history, detect
 from .transformers.forecast import forecast_table
@@ -99,6 +100,9 @@ from .transformers.bootstrap import BootstrapConfig
 from .transformers.strategies import market_from_candles
 from .transformers.data_quality import audit_candles, availability, clean_candles, mark_unavailable
 from .transformers.dataset import combined_fingerprint, dataset_manifest
+from .transformers.entry_model import model_features, outperform_target
+from .transformers.entry_signals import EntryRules, build_panel
+from .transformers.model_shadow import fng_series, latest_fng, live_predictions, stack_all
 from .transformers.daily_alerts import ALERT_BUY, ALERT_EXIT, ALERT_SELL, ALERT_WATCH, compare_with_previous
 from .transformers.position_advisor import ACTION_SELL, ACTION_UNAVAILABLE, advise, realized
 from .transformers.position_log import acknowledgements, new_state_rows, pending_changes
@@ -213,7 +217,14 @@ def analyze(
     issues = audit_candles(kept, as_of=today)
     candles = clean_candles(kept)
     dataset = dataset_manifest(candles)  # identidade dos dados desta execução (linhas, intervalo, SHA-256 por moeda)
-    fng = read_fng()
+    fng_fresh = read_fng()
+    fng = fng_fresh
+    if fng.empty:
+        # A fonte falhou nesta execução: usa a cópia guardada na branch `state` (só o que já foi visto antes; nada é
+        # inventado para o dia de hoje). O registro de fontes continua mostrando a falha.
+        fng = latest_fng(read_fng_history())
+        if not fng.empty:
+            logger.warning("Fear & Greed indisponível: usando a cópia da branch state (até %s)", f"{fng['timestamp'].max():%Y-%m-%d}")
 
     # COMPRAR depende do sinal, não da moeda (docs/entry_signals.md): aparece quando a moeda está na condição de um
     # sinal VALIDADO no estudo agregado (evidence/entry_signals/). O COMPRAR/PREPARAR da regra SMA 200 é sempre rebaixado;
@@ -301,6 +312,12 @@ def analyze(
         state_log = pd.concat([state_log, today_rows], ignore_index=True) if not state_log.empty else today_rows
     changes = pending_changes(state_log, read_notifications())
     write_parquet(state_log, PUBLIC_DIR / "position_states.parquet")
+    shadow, shadow_notes = shadow_predictions(candles, fng, day, run_ts=pd.Timestamp(today),
+                                              data_fingerprint=combined_fingerprint(dataset))
+    if record_state:
+        append_fng_history(fng_fresh, pd.Timestamp(today))
+        if not shadow.empty:
+            append_predictions(shadow)
     write_daily_signals(signals)  # por último: o estado final da execução (CLAUDE.md §3)
     dropped = pd.DataFrame({"symbol": list(selection.dropped), "reason": list(selection.dropped.values())})
     return {
@@ -308,8 +325,24 @@ def analyze(
         "availability": available, "issues": issues, "dropped": dropped, "recommendation": recommendation,
         "selection_backtest": selection_perf, "market_regimes": market_regimes, "dataset": dataset,
         "position_changes": changes, "entry_levels": entry_levels, "entry_changes": changes_today,
-        "signal_evidence": signal_evidence,
+        "signal_evidence": signal_evidence, "shadow_predictions": shadow,
+        "shadow_notes": pd.DataFrame({"note": shadow_notes}, dtype="string"),
     }
+
+
+def shadow_predictions(
+    candles: pd.DataFrame, fng: pd.DataFrame, day: pd.Timestamp, *, run_ts: pd.Timestamp, data_fingerprint: str
+) -> tuple[pd.DataFrame, list[str]]:
+    """Previsões de hoje dos modelos de IA em modo sombra (docs/ml_study.md). Não entram na recomendação nem no
+    Telegram; só são registradas. Uma falha aqui nunca derruba o pipeline: vira nota no relatório."""
+    try:
+        panel = build_panel(candles, EntryRules())
+        rows = stack_all(model_features(panel, fng_series(fng)), outperform_target(panel, REGIME_SYMBOL), panel.member)
+        return live_predictions(rows, day.floor("D"), run_ts=run_ts, data_fingerprint=data_fingerprint,
+                                code_version=_code_version())
+    except Exception as exc:  # modo sombra: o erro é registrado, a análise do dia segue
+        logger.exception("modelos em sombra falharam")
+        return pd.DataFrame(), [f"modelos em sombra falharam: {type(exc).__name__}: {exc}"]
 
 
 @dataclass(frozen=True)
@@ -417,6 +450,13 @@ def report(result: dict[str, pd.DataFrame], source_errors: pd.DataFrame | None =
     model = result["forecast"][result["forecast"]["role"].eq("MODELO")]
     if not model.empty:
         lines.append(f"  previsão 1/7/30 dias: {int(model['beats_baseline'].sum())} de {len(model)} superam o baseline no teste")
+    shadow = result.get("shadow_predictions", pd.DataFrame())
+    if not shadow.empty:
+        for name, part in shadow.groupby("model"):
+            top = part.sort_values("rank")["symbol"].head(5).tolist()
+            lines.append(f"  IA em sombra {name} (não é recomendação): maiores probabilidades {', '.join(top)}")
+    for note in result.get("shadow_notes", pd.DataFrame(columns=["note"]))["note"]:
+        lines.append(f"  IA em sombra: {note}")
     for _, p in positions.iterrows():
         if p["action"] == ACTION_UNAVAILABLE:
             tag = f"INDISPONÍVEL ({p['data_note']})"

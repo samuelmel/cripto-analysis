@@ -6,6 +6,8 @@ Guarda o que precisa sobreviver entre execuções e ficar acessível ao GitHub A
     signal_log.parquet          registro imutável de sinais, uma linha por moeda e dia, com cadeia de hash
     position_states.parquet     histórico diário do estado de cada posição aberta
     notifications.parquet       avisos de mudança de estado já enviados ao Telegram
+    model_predictions.parquet   previsões diárias dos modelos de IA em modo sombra, com cadeia de hash (append-only)
+    fng_history.parquet         cópia do histórico do Fear & Greed visto em cada execução (append-only, com revisões)
 
 A sincronização com a branch (git) fica em `src/state_sync.py`. Esta pasta é ignorada pelo git da branch `main`.
 """
@@ -31,3 +33,11 @@ def position_states_path(base: Path = STATE_DIR) -> Path:
 
 def notifications_path(base: Path = STATE_DIR) -> Path:
     return base / "notifications.parquet"
+
+
+def model_predictions_path(base: Path = STATE_DIR) -> Path:
+    return base / "model_predictions.parquet"
+
+
+def fng_history_path(base: Path = STATE_DIR) -> Path:
+    return base / "fng_history.parquet"
