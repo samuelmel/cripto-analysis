@@ -86,3 +86,32 @@ def test_full_study_runs_and_keeps_the_family_fixed(with_fng: bool) -> None:
     assert (family["p_holm"].dropna() >= family["p_value"].dropna().reindex(family["p_holm"].dropna().index).fillna(0)).all()
     run = result.predictive.dropna(subset=["auc"])
     assert run["auc"].between(0, 1).all() and set(run["period"]) <= {"DESENVOLVIMENTO", "TESTE_FINAL"}
+
+
+def test_rank_ic_and_quintile_spread_use_every_coin() -> None:
+    from src.transformers.ml_study import quantile_spread, rank_ic
+
+    idx = pd.date_range("2024-01-01", periods=2, freq="D", tz=UTC)
+    cols = [f"C{i}" for i in range(5)]
+    scores = pd.DataFrame([[1, 2, 3, 4, 5], [5, 4, 3, 2, 1]], index=idx, columns=cols, dtype="float64")
+    fwd = pd.DataFrame([[0.1, 0.2, 0.3, 0.4, 0.5]] * 2, index=idx, columns=cols)
+    member = pd.DataFrame(True, index=idx, columns=cols)
+    ic = rank_ic(scores, fwd, member, min_universe=5)
+    assert ic.iloc[0] == pytest.approx(1.0) and ic.iloc[1] == pytest.approx(-1.0)
+    spread = quantile_spread(scores, fwd, member, min_universe=5)
+    assert spread.iloc[0] == pytest.approx(0.5 - 0.1) and spread.iloc[1] == pytest.approx(0.1 - 0.5)
+    assert rank_ic(scores, fwd, member, min_universe=6).empty
+
+
+def test_ranking_study_reports_every_metric_with_and_without_2021() -> None:
+    from src.transformers.ml_study import ranking_study
+
+    candles = clean_candles(synthetic_candles())
+    panel = build_panel(candles, EntryRules())
+    rows = stack_all(model_features(panel, None), outperform_target(panel, "BTC/USDT"), panel.member)
+    rules = StudyRules(years=(2022, 2023, 2024, 2025), min_universe=4, top_k=2,
+                       boot=BootstrapConfig(n_boot=200, seed=5, ci_level=0.95))
+    table = ranking_study(rows, panel, False, rules)
+    assert set(table["model"]) == {"MOMENTO_90D", "F_LOGIT_SEM_FNG", "G_GBM_SEM_FNG"}  # sem F&G: só os SEM_FNG
+    assert set(table["period"]) == {"DESENVOLVIMENTO", "DESENVOLVIMENTO_SEM_2021", "TESTE_FINAL"}
+    assert set(table["metric"]) == {"rank_ic", "quintil_spread", "top_k_vs_universo"}

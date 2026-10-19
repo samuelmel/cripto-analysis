@@ -243,3 +243,67 @@ def run_study(rows: pd.DataFrame, panel: Panel, fng_available: bool, rules: Stud
         sensitivity=pd.DataFrame(sens), folds=pd.concat(folds_all, ignore_index=True) if folds_all else pd.DataFrame(),
         daily=pd.DataFrame(daily).rename_axis("day").reset_index(),
     )
+
+
+# ---------------------------------------------------------------------------------------------
+# v2 (exploratória, docs/ml_study_v2.md): ranking de TODAS as moedas do universo, não só o top-k
+# ---------------------------------------------------------------------------------------------
+
+def rank_ic(scores: pd.DataFrame, forward: pd.DataFrame, member: pd.DataFrame, min_universe: int) -> pd.Series:
+    """Correlação de postos (Spearman) do dia entre o escore e o retorno futuro, sobre todas as moedas do universo com
+    os dois valores. Só dias com pelo menos `min_universe` moedas."""
+    ok = member & scores.notna() & forward.notna()
+    s = scores.where(ok).rank(axis=1)
+    f = forward.where(ok).rank(axis=1)
+    sc = s.sub(s.mean(axis=1), axis=0)
+    fc = f.sub(f.mean(axis=1), axis=0)
+    num = (sc * fc).sum(axis=1)
+    den = ((sc**2).sum(axis=1) * (fc**2).sum(axis=1)).pow(0.5)
+    out: pd.Series = (num / den.replace(0.0, np.nan)).where(ok.sum(axis=1) >= min_universe)
+    return out.dropna()
+
+
+def quantile_spread(scores: pd.DataFrame, forward: pd.DataFrame, member: pd.DataFrame, min_universe: int, q: float = 0.2) -> pd.Series:
+    """Retorno futuro médio das moedas no quinto superior do escore − no quinto inferior, por dia."""
+    ok = member & scores.notna() & forward.notna()
+    pct = scores.where(ok).rank(axis=1, pct=True)
+    top = forward.where(pct > 1 - q).mean(axis=1)
+    bottom = forward.where(pct <= q).mean(axis=1)
+    out: pd.Series = (top - bottom).where(ok.sum(axis=1) >= min_universe)
+    return out.dropna()
+
+
+RANKING_METRICS: tuple[str, ...] = ("rank_ic", "quintil_spread", "top_k_vs_universo")
+
+
+def ranking_study(rows: pd.DataFrame, panel: Panel, fng_available: bool, rules: StudyRules = StudyRules(),
+                  specs: Sequence[ModelSpec] = MODELS) -> pd.DataFrame:
+    """Para cada modelo executável e para o momento de 90 dias: média (IC 95%, p unilateral) do IC de postos, do spread
+    entre quintos e do excesso do top-k, no desenvolvimento, no desenvolvimento sem 2021 e no teste final."""
+    index, columns = pd.DatetimeIndex(panel.close.index), panel.close.columns
+    forward = forward_returns(panel, rules.horizon, EXECUTION_OPEN)
+    scores: dict[str, pd.DataFrame] = {"MOMENTO_90D": trailing_return(panel.close, rules.momentum_days)}
+    for spec in specs:
+        if any(f in FNG_FEATURES for f in spec.features) and not fng_available:
+            continue
+        prob, _ = walk_forward(spec, rows, rules.years)
+        scores[spec.name] = prob.unstack("symbol").reindex(index=index, columns=columns).astype("float64")
+    first = pd.Timestamp(f"{rules.years[0]}-01-01", tz="UTC")
+    out = []
+    for name, sc in scores.items():
+        series = {
+            "rank_ic": rank_ic(sc, forward, panel.member, rules.min_universe),
+            "quintil_spread": quantile_spread(sc, forward, panel.member, rules.min_universe),
+            "top_k_vs_universo": daily_excess(sc, forward, panel.member, rules.top_k, rules.min_universe),
+        }
+        for metric, s in series.items():
+            days = pd.DatetimeIndex(s.index)
+            windows = {
+                "DESENVOLVIMENTO": (days >= first) & (days <= rules.development_end),
+                "DESENVOLVIMENTO_SEM_2021": (days >= first) & (days <= rules.development_end) & (days.year != 2021),
+                "TESTE_FINAL": days >= rules.holdout_start,
+            }
+            for period, mask in windows.items():
+                res = mean_test(s[mask], rules)
+                out.append({"model": name, "metric": metric, "period": period, **res})
+    return pd.DataFrame(out)
