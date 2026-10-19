@@ -495,3 +495,55 @@ def format_error(stage: str, detail: str, *, now: pd.Timestamp, secrets: Sequenc
         f"Etapa: {stage}\nErro: {short}\n"
         "Os sinais publicados antes podem estar desatualizados; não use como atuais."
     )
+
+
+PAPER_DISCLAIMER = (
+    "Simulação com dinheiro fictício para estudar a IA: não é recomendação e nenhuma ordem real é feita. Os modelos "
+    "continuam em teste (docs/ml_study.md)."
+)
+
+
+def format_paper_report(
+    shadow: pd.DataFrame | None, summary: pd.DataFrame | None, track: pd.DataFrame | None, *, now: pd.Timestamp,
+    labels: Mapping[str, str] | None = None,
+) -> list[str]:
+    """Bloco "IA em teste": o que cada modelo compraria hoje (simulação), o placar das carteiras simuladas contra o
+    mercado e o momento, e o acerto das previsões já maduras. Vazio se não há nada para mostrar."""
+    names = dict(labels or {})
+    has_shadow = shadow is not None and not shadow.empty
+    has_summary = summary is not None and not summary.empty
+    if not has_shadow and not has_summary:
+        return []
+    local = now.tz_convert(FORTALEZA)
+    lines = ["🧪 IA EM TESTE — SIMULAÇÃO (sem dinheiro real)", f"{local:%d/%m/%Y %H:%M} (Fortaleza)", ""]
+    if has_shadow and shadow is not None:
+        lines.append("Hoje cada modelo compraria (simulado):")
+        for model, part in shadow.groupby("model", sort=True):
+            coins = [str(s).split("/")[0] for s in part.sort_values("rank")["symbol"].head(5)]
+            lines.append(f"- {names.get(str(model), str(model))}: {', '.join(coins)}")
+        lines.append("")
+    if has_summary and summary is not None:
+        first = pd.Timestamp(summary["start"].min())  # dia dos dados (UTC), não o horário local
+        days = int(summary["n_days"].max())
+        lines.append(f"Carteiras simuladas desde {first:%d/%m/%Y} ({days} dia(s)):")
+        for r in summary.sort_values("total_return_pct", ascending=False).to_dict("records"):
+            tag = "" if r["status"] in ("REFERENCIA", "EM_TESTE", "INICIO") else f" · {r['status']}"
+            vs = "" if r["status"] == "REFERENCIA" else f" ({_points(float(r['vs_market_pp']))} contra o mercado)"
+            lines.append(f"- {r['label']}: {_pct(float(r['total_return_pct']))}{vs}{tag}")
+        lines.append("")
+    if track is not None and not track.empty:
+        lines.append("Previsões com os 30 dias completos (só as compradas):")
+        for r in track.to_dict("records"):
+            lines.append(f"- {names.get(str(r['model']), str(r['model']))}: {int(r['n_mature'])} previsões, "
+                         f"{float(r['hit_rate_pct']):.0f}% superaram o BTC, {_points(float(r['mean_excess_pp']))} contra o universo")
+        lines.append("")
+    elif has_summary:
+        lines.append("Nenhuma previsão completou 30 dias ainda: o placar de acertos começa depois disso.")
+        lines.append("")
+    lines.append(PAPER_DISCLAIMER)
+    return split_message("\n".join(lines))
+
+
+def _points(x: float) -> str:
+    """Diferença já em pontos percentuais."""
+    return "—" if not math.isfinite(x) else f"{x:+.1f} pp".replace(".", ",")

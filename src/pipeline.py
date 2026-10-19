@@ -70,7 +70,7 @@ from .loaders.parquet_loader import write_daily_signals, write_parquet
 from .loaders.position_log_store import append_notifications, append_state_log, read_notifications, read_state_log
 from .loaders.positions_store import read_positions
 from .loaders.signal_log_store import append_signal_log
-from .loaders.model_log_store import append_fng_history, append_predictions, read_fng_history
+from .loaders.model_log_store import append_fng_history, append_predictions, read_fng_history, read_predictions
 from .loaders.source_log import read_source_log, write_source_log
 from .transformers.anomaly_detector import SignalRules, classify_history, detect
 from .transformers.forecast import forecast_table
@@ -78,6 +78,7 @@ from .transformers.allocation import allocate
 from .transformers.notification import (
     data_notes,
     format_entry_changes,
+    format_paper_report,
     format_error,
     format_position_changes,
     format_report,
@@ -101,8 +102,9 @@ from .transformers.strategies import market_from_candles
 from .transformers.data_quality import audit_candles, availability, clean_candles, mark_unavailable
 from .transformers.dataset import combined_fingerprint, dataset_manifest
 from .transformers.entry_model import model_features, outperform_target
-from .transformers.entry_signals import EntryRules, build_panel
-from .transformers.model_shadow import fng_series, latest_fng, live_predictions, stack_all
+from .transformers.entry_signals import EntryRules, Panel, build_panel, trailing_return
+from .transformers.model_shadow import fng_series, latest_fng, live_predictions, realized_outcomes, stack_all
+from .transformers.paper_portfolio import MODEL_LABELS, run_paper, track_record
 from .transformers.daily_alerts import ALERT_BUY, ALERT_EXIT, ALERT_SELL, ALERT_WATCH, compare_with_previous
 from .transformers.position_advisor import ACTION_SELL, ACTION_UNAVAILABLE, advise, realized
 from .transformers.position_log import acknowledgements, new_state_rows, pending_changes
@@ -312,12 +314,17 @@ def analyze(
         state_log = pd.concat([state_log, today_rows], ignore_index=True) if not state_log.empty else today_rows
     changes = pending_changes(state_log, read_notifications())
     write_parquet(state_log, PUBLIC_DIR / "position_states.parquet")
-    shadow, shadow_notes = shadow_predictions(candles, fng, day, run_ts=pd.Timestamp(today),
+    entry_panel = build_panel(candles, EntryRules())
+    shadow, shadow_notes = shadow_predictions(entry_panel, fng, day, run_ts=pd.Timestamp(today),
                                               data_fingerprint=combined_fingerprint(dataset))
     if record_state:
         append_fng_history(fng_fresh, pd.Timestamp(today))
         if not shadow.empty:
             append_predictions(shadow)
+    paper_summary, paper_track, paper_equity, paper_notes = paper_outputs(candles, entry_panel, merged_log(read_predictions(), shadow))
+    shadow_notes += paper_notes
+    write_parquet(paper_summary, PUBLIC_DIR / "paper_portfolio.parquet")
+    write_parquet(paper_equity, PUBLIC_DIR / "paper_equity.parquet")
     write_daily_signals(signals)  # por último: o estado final da execução (CLAUDE.md §3)
     dropped = pd.DataFrame({"symbol": list(selection.dropped), "reason": list(selection.dropped.values())})
     return {
@@ -326,23 +333,52 @@ def analyze(
         "selection_backtest": selection_perf, "market_regimes": market_regimes, "dataset": dataset,
         "position_changes": changes, "entry_levels": entry_levels, "entry_changes": changes_today,
         "signal_evidence": signal_evidence, "shadow_predictions": shadow,
+        "paper_summary": paper_summary, "paper_track": paper_track,
         "shadow_notes": pd.DataFrame({"note": shadow_notes}, dtype="string"),
     }
 
 
 def shadow_predictions(
-    candles: pd.DataFrame, fng: pd.DataFrame, day: pd.Timestamp, *, run_ts: pd.Timestamp, data_fingerprint: str
+    panel: Panel, fng: pd.DataFrame, day: pd.Timestamp, *, run_ts: pd.Timestamp, data_fingerprint: str
 ) -> tuple[pd.DataFrame, list[str]]:
-    """Previsões de hoje dos modelos de IA em modo sombra (docs/ml_study.md). Não entram na recomendação nem no
-    Telegram; só são registradas. Uma falha aqui nunca derruba o pipeline: vira nota no relatório."""
+    """Previsões de hoje dos modelos de IA em modo sombra (docs/ml_study.md). Não entram na recomendação; são registradas
+    e mostradas só no bloco "IA em teste" (simulação). Uma falha aqui nunca derruba o pipeline: vira nota no relatório."""
     try:
-        panel = build_panel(candles, EntryRules())
         rows = stack_all(model_features(panel, fng_series(fng)), outperform_target(panel, REGIME_SYMBOL), panel.member)
         return live_predictions(rows, day.floor("D"), run_ts=run_ts, data_fingerprint=data_fingerprint,
                                 code_version=_code_version())
     except Exception as exc:  # modo sombra: o erro é registrado, a análise do dia segue
         logger.exception("modelos em sombra falharam")
         return pd.DataFrame(), [f"modelos em sombra falharam: {type(exc).__name__}: {exc}"]
+
+
+def merged_log(stored: pd.DataFrame, today: pd.DataFrame) -> pd.DataFrame:
+    """O registro gravado mais as previsões de hoje ainda não gravadas (execução sem --record-state)."""
+    if today.empty:
+        return stored
+    if stored.empty:
+        return today
+    key = ["day", "symbol", "model"]
+    seen = set(map(tuple, stored[key].astype(str).to_numpy()))
+    fresh = today[[tuple(k) not in seen for k in today[key].astype(str).to_numpy()]]
+    return pd.concat([stored, fresh], ignore_index=True) if not fresh.empty else stored
+
+
+def paper_outputs(
+    candles: pd.DataFrame, panel: Panel, log: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str]]:
+    """Carteiras simuladas da IA (docs/paper_portfolio.md): resumo, acerto das previsões maduras e patrimônio diário.
+    Sem dinheiro real. Uma falha aqui nunca derruba o pipeline."""
+    try:
+        market = panel_from_candles(candles, CostModel())
+        result = run_paper(log, market, panel.member, trailing_return(panel.close, 90),
+                           ExecutionConfig(costs=CostModel(), rebalance_band=0.0))
+        track = track_record(realized_outcomes(log, panel))
+        equity = result.equity.rename_axis("day").reset_index() if not result.equity.empty else pd.DataFrame()
+        return result.summary, track, equity, []
+    except Exception as exc:  # simulação: o erro é registrado, a análise do dia segue
+        logger.exception("carteiras simuladas falharam")
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), [f"carteiras simuladas falharam: {type(exc).__name__}: {exc}"]
 
 
 @dataclass(frozen=True)
@@ -482,6 +518,8 @@ def _notify(result: dict[str, pd.DataFrame], now: datetime, *, dry_run: bool, re
     changes = result.get("position_changes", pd.DataFrame())
     texts += format_position_changes(changes, now=pd.Timestamp(now))
     texts += format_entry_changes(result.get("entry_changes"), result["signals"], now=pd.Timestamp(now))
+    texts += format_paper_report(result.get("shadow_predictions"), result.get("paper_summary"), result.get("paper_track"),
+                                 now=pd.Timestamp(now), labels=MODEL_LABELS)
     problems = validate_messages(texts, _secrets())
     if problems:
         logger.error("mensagem do Telegram inválida: %s", "; ".join(problems))
