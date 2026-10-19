@@ -95,3 +95,54 @@ k = 3 e k = 10; execução no fechamento em vez da abertura; peso das moedas por
 - Spread e slippage são hipóteses por faixa de volume.
 - Base do arquivo oficial (S3), equivalente aos klines da REST, mas com fingerprint diferente da base usada no estudo
   dos sinais de entrada.
+
+## Resultado da execução de 2026-10-19 (parcial: sem Fear & Greed)
+
+Experimento `0498216a4d4223f0`, código `e97bbfc` (protocolo commitado antes da execução), dados do arquivo oficial com
+`continuidade-v1` (691 séries, 795.659 candles, fingerprint `9e01bf713328…`), 82.192 linhas (dia, moeda) no universo
+point-in-time. Saídas em `evidence/ml_study/`.
+
+**O Fear & Greed estava indisponível neste ambiente** (o host é bloqueado): `F_LOGIT` e `G_GBM` não foram executados e
+ficam com p = 1 na família de 8 hipóteses. A cópia diária do índice passa a ser guardada pelo GitHub Actions na branch
+`state` (`fng_history.parquet`); com ela, os dois serão executados numa execução nova do mesmo protocolo
+(`research/ml_study.py --fng ...`), registrada separadamente.
+
+Métricas preditivas (o alvo é "supera o BTC em 30 dias"; taxa de positivos de ~35%):
+
+| Modelo | Período | AUC | Log loss | Log loss da taxa | Ganho |
+|---|---|---|---|---|---|
+| F_LOGIT_SEM_FNG | desenvolvimento | 0,491 | 0,756 | 0,649 | −16,5% |
+| F_LOGIT_SEM_FNG | teste final | 0,548 | 0,628 | 0,633 | +0,7% |
+| G_GBM_SEM_FNG | desenvolvimento | 0,551 | 0,697 | 0,649 | −7,3% |
+| G_GBM_SEM_FNG | teste final | 0,545 | 0,640 | 0,633 | −1,2% |
+
+Excesso médio de 30 dias das 5 de maior probabilidade (desenvolvimento 2020–2024, 1.827 dias, IC de 95%, bloco ~65–72
+dias; Holm sobre as 8 hipóteses):
+
+| Modelo | Contra | Excesso | IC 95% | p | p Holm | Teste final (2025+) |
+|---|---|---|---|---|---|---|
+| F_LOGIT_SEM_FNG | universo | −2,7 pp | −5,4 a −0,2 | 0,97 | 1 | +4,3 pp |
+| F_LOGIT_SEM_FNG | momento 90 dias | −0,1 pp | −4,1 a +3,8 | 0,53 | 1 | +9,0 pp |
+| G_GBM_SEM_FNG | universo | +2,0 pp | −0,7 a +5,1 | 0,10 | 0,73 | +2,6 pp |
+| G_GBM_SEM_FNG | momento 90 dias | +4,5 pp | +0,4 a +9,1 | 0,026 | 0,21 | +7,3 pp |
+| (referência) momento 90 dias | universo | −2,6 pp | −5,7 a +0,5 | — | fora da família | −4,7 pp |
+
+Níveis: **0 VALIDADO**; `G_GBM_SEM_FNG` **PROMISSOR** (excessos positivos no desenvolvimento e no teste final, sem
+significância depois de Holm); `F_LOGIT_SEM_FNG` **SEM_EVIDENCIA**; `F_LOGIT` e `G_GBM` **NAO_EXECUTADO**.
+
+Leitura, sem exagerar:
+
+- **O PROMISSOR do boosting vem quase todo de 2021.** Excesso médio por ano contra o universo: 2020 −2,1 pp; **2021
+  +12,0 pp**; 2022 +1,6 pp; 2023 −2,5 pp; 2024 +0,9 pp; 2025 +3,3 pp; 2026 +1,6 pp. Sem o ano de alta das altcoins, a
+  vantagem no desenvolvimento some.
+- **A vantagem sobre o momento é em boa parte o momento ser ruim**: as 5 de maior alta em 90 dias perderam do universo
+  (−2,6 pp no desenvolvimento, −4,7 pp no teste final).
+- **As probabilidades não são confiáveis como probabilidades.** As duas perdem da taxa de positivos em log loss no
+  desenvolvimento. Só o decil mais alto do boosting diferencia: 52% de acertos contra ~33% nos outros decis. A
+  regressão logística tem um formato em U (os decis extremos acertam mais que os do meio), que um modelo linear não
+  representa; o boosting captura parte disso.
+- **Sensibilidade:** com k = 3 o boosting sobe para +3,4 pp, com k = 10 cai para +1,1 pp, e executando no fechamento
+  fica em +2,0 pp. O sinal concentra-se nas poucas moedas de maior probabilidade.
+
+Consequência (fixada antes): nenhum modelo sai do modo sombra. Os quatro modelos já registram previsões diárias em
+`model_predictions.parquet` (branch `state`); a avaliação prospectiva, com o mesmo teste, só depois de 365 dias.
