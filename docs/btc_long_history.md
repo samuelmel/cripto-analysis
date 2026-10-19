@@ -47,3 +47,39 @@ muita gente nesses anos; o que é inédito é o teste dela com o código, os cus
 - Liquidez de 2011–2013 muito menor que a de hoje: custos reais eram maiores (por isso a sensibilidade de taxa).
 - O incidente da Mt. Gox (2014) afetou o mercado inteiro; a Bitstamp teve uma suspensão em janeiro de 2015 (hack):
   dias sem candle são tratados pelo motor (ordem pendente, preço marcado no último conhecido).
+
+## Resultado da execução de 2026-10-19 (única, conforme o protocolo)
+
+Código `aa93d80` (protocolo commitado antes de os dados existirem), dados da Bitstamp baixados pelo workflow "Base de
+pesquisa" (execução 39308972936): BTC/USD de 2011-08-18 a 2026-10-18, 5.541 candles, 0 dias faltando, 33 dias com volume
+zero (2011–2012), fingerprint `b23c419cc145…`. Saídas em `evidence/btc_long_history/`.
+
+**H1 (2012-03-05 a 2017-08-16, 1.991 dias, período nunca consultado no projeto):** ΔSharpe da regra contra comprar e
+segurar = **+0,10** (IC 90%: −0,17 a +0,45; p = 0,29; bloco ~76 dias) → **COMPATIVEL_COM_SORTE**.
+
+| | Regra SMA 200 | Comprar e segurar |
+|---|---|---|
+| Retorno total | +90.910% | +90.853% |
+| Ao ano | 248,7% | 248,7% |
+| Sharpe | 1,97 | 1,87 |
+| Pior queda | **−71,2%** | −84,9% |
+| Tempo investido | 76% | 100% |
+| Entradas | 15 | 1 |
+
+Por ciclo: 2011–2013, regra +11.376% contra +15.104% (a regra saiu e voltou durante a alta); **2014–2015 (a grande
+queda depois da Mt. Gox), regra −22% contra −41%**; 2016–2017, idênticas (sempre acima da SMA 200). Sensibilidade:
+ΔSharpe +0,03 (SMA 150), +0,08 (SMA 250), +0,10 (sem STOP; o STOP de −20% não mudou nada aqui) e +0,07 com taxa de 0,5%.
+(`cost_pct` da regra, 402%, é a soma dos custos em % do capital INICIAL: com o patrimônio multiplicado por 900, os
+custos somados passam o capital do começo.)
+
+Leitura:
+
+- **É o mesmo quadro do período da Binance (2018–2026), agora num período inédito:** a regra não rende mais que comprar e
+  segurar em retorno por risco de forma demonstrável, mas corta a pior queda (−71% contra −85%; antes, −60% contra
+  −76%). Dois períodos independentes contando a mesma história deixam esse achado mais confiável.
+- A vantagem está nas quedas longas (2014–2015); nas altas fortes, a regra perde um pouco por sair e voltar.
+- Nenhuma regra do painel muda: o texto do painel já diz que a vantagem da regra é suportar melhor as quedas, não
+  render mais.
+
+Coleta: só o BTC/USD veio nesta execução. ETH, LTC e XRP começaram na Bitstamp depois de 2011 e o coletor parava na
+primeira página vazia; corrigido no commit seguinte (não afeta este teste, que usa só o BTC).
