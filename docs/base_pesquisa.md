@@ -6,6 +6,7 @@ estudos (`research/`). O pipeline diário não depende dela: ele baixa só as mo
 | Pasta | Conteúdo | Origem |
 |---|---|---|
 | `archive/` | 676 pares em USDT (vivos e deslistados), manifesto com SHA-256 de cada ZIP, catálogo, log de sincronização, universo point-in-time | `python -m src.archive sync --all` |
+| `archive_bitstamp/` | candles diários da Bitstamp em USD: BTC desde 2011-08-18, ETH, LTC e XRP (API pública oficial) | `research/build_bitstamp.py` (só no Actions: a Bitstamp não é acessível do ambiente de desenvolvimento) |
 | `archive_btc/` | os pares em BTC que começaram antes do par em USDT da mesma moeda (ou que nunca tiveram par em USDT) | `research/build_btc_pairs.py` |
 
 ## Onde fica e quanto custa
@@ -27,4 +28,4 @@ git fetch origin base-pesquisa
 git archive origin/base-pesquisa | tar -x -C data/
 ```
 
-Cria `data/archive/` e `data/archive_btc/`. Para conferir: `uv run python -m src.archive status` mostra o fingerprint.
+Cria `data/archive/`, `data/archive_btc/` e `data/archive_bitstamp/`. Para conferir: `uv run python -m src.archive status` mostra o fingerprint.

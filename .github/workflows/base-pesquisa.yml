@@ -1,6 +1,7 @@
 name: Base de pesquisa
 
-# Atualiza a base de pesquisa (arquivo oficial da Binance: pares em USDT e os pares em BTC que ampliam o histórico) e a
+# Atualiza a base de pesquisa (arquivo oficial da Binance: pares em USDT e os pares em BTC que ampliam o histórico;
+# Bitstamp: BTC/USD desde 2011) e a
 # guarda na branch `base-pesquisa`, só de dados, com um único commit substituído a cada execução (não acumula tamanho).
 # Incremental: restaura a base anterior e baixa só os arquivos novos ou revisados (ETag + SHA-256). Se qualquer par
 # falhar, o job fica vermelho e a base anterior continua intacta (nada é publicado).
@@ -51,13 +52,16 @@ jobs:
       - name: Atualizar os pares em BTC que ampliam o histórico
         run: uv run python research/build_btc_pairs.py
 
+      - name: Atualizar o histórico longo da Bitstamp (BTC/USD desde 2011)
+        run: uv run python research/build_bitstamp.py
+
       - name: Publicar na branch base-pesquisa (um único commit)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           export GIT_INDEX_FILE="${RUNNER_TEMP}/base-index"
           git read-tree --empty
-          git --work-tree=data add -f archive archive_btc
+          git --work-tree=data add -f archive archive_btc archive_bitstamp
           tree=$(git write-tree)
           unset GIT_INDEX_FILE
           commit=$(git commit-tree "$tree" -m "base de pesquisa: arquivo oficial da Binance (USDT e pares em BTC), $(date -u +%Y-%m-%d), execução ${GITHUB_RUN_ID}")
