@@ -55,16 +55,25 @@ def load_ohlc(symbol: str = "BTC") -> pd.DataFrame:
     return pd.concat([a[a.index < b.index.min()], b]).sort_index()
 
 
-def unirenko(ohlc: pd.DataFrame, pct: float, rev_pct: float | None = None) -> pd.DataFrame:
+def unirenko(ohlc: pd.DataFrame, pct: float | pd.Series, rev_pct: float | pd.Series | None = None) -> pd.DataFrame:
     """UniRenko: cada barra abre no fechamento da anterior (sem gaps). Continuar a direção da última barra fecha a barra
     com `pct`% de movimento; reverter exige `rev_pct`% (padrão = pct) e a barra de reversão tem esse tamanho. O que passou do
-    corpo vira pavio. Só há candles diários: o caminho do dia é suposto (alta = O,L,H,C; queda = O,H,L,C)."""
-    up_step, dn_step = math.log(1 + pct / 100), math.log(1 + (rev_pct if rev_pct is not None else pct) / 100)
+    corpo vira pavio. `pct`/`rev_pct` podem ser uma série indexada por dia (UTC, normalizado): tamanho dinâmico (ex.: ATR).
+    Só há candles diários: o caminho do dia é suposto (alta = O,L,H,C; queda = O,H,L,C)."""
+    def steps(day: pd.Timestamp) -> tuple[float, float]:
+        t = float(pct.loc[day]) if isinstance(pct, pd.Series) else pct
+        rv = rev_pct if rev_pct is not None else pct
+        r = float(rv.loc[day]) if isinstance(rv, pd.Series) else rv
+        return math.log(1 + t / 100), math.log(1 + r / 100)
+
+    up_step, dn_step = steps(ohlc.index[0].normalize())
     op = math.log(float(ohlc["open"].iloc[0]))
     hi = lo = op
     direction = 0
     rows: list[dict[str, object]] = []
     for ts, r in ohlc.iterrows():
+        if isinstance(pct, pd.Series) or isinstance(rev_pct, pd.Series):
+            up_step, dn_step = steps(ts.normalize())
         o, h, l, c = (math.log(float(r[k])) for k in ("open", "high", "low", "close"))
         for px in ((o, l, h, c) if c >= o else (o, h, l, c)):
             hi, lo = max(hi, px), min(lo, px)
