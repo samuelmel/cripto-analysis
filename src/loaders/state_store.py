@@ -7,6 +7,7 @@ Guarda o que precisa sobreviver entre execuções e ficar acessível ao GitHub A
     position_states.parquet     histórico diário do estado de cada posição aberta
     notifications.parquet       avisos de mudança de estado já enviados ao Telegram
     model_predictions.parquet   previsões diárias dos modelos de IA em modo sombra, com cadeia de hash (append-only)
+    sim_decisions.parquet       decisões das carteiras simuladas em reais (dinheiro fictício), com cadeia de hash (append-only)
     fng_history.parquet         cópia do histórico do Fear & Greed visto em cada execução (append-only, com revisões)
 
 A sincronização com a branch (git) fica em `src/state_sync.py`. Esta pasta é ignorada pelo git da branch `main`.
@@ -41,3 +42,7 @@ def model_predictions_path(base: Path = STATE_DIR) -> Path:
 
 def fng_history_path(base: Path = STATE_DIR) -> Path:
     return base / "fng_history.parquet"
+
+
+def sim_decisions_path(base: Path = STATE_DIR) -> Path:
+    return base / "sim_decisions.parquet"
