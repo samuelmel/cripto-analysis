@@ -170,6 +170,26 @@ def test_update_base_survives_source_failures_and_logs_them(workdir: Path, monke
     assert stored.loc[stored["scope"].eq("BTC/USDT"), "last_data_ts"].iloc[0] == _yesterday()
 
 
+def test_usdt_brl_rate_is_downloaded_outside_the_universe_and_its_failure_is_not_a_source_error(
+    workdir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pipeline, "BinanceAdapter", FakeBinance)
+    monkeypatch.setattr(pipeline, "FearGreedAdapter", FakeFng)
+    monkeypatch.setattr(pipeline, "CoinGeckoMarketAdapter", FakeCoinGecko)
+    FakeBinance.fail = {"ETH/USDT"}
+
+    log = pipeline.update_base(datetime.now(tz=_yesterday().tz))
+
+    assert read_ohlcv(["USDT/BRL"])["symbol"].eq("USDT/BRL").all()
+    assert "USDT/BRL" not in set(read_ohlcv(list(UNIVERSE))["symbol"]) and "USDT/BRL" not in set(log["scope"])
+    FakeBinance.fail = {"ETH/USDT", "USDT/BRL"}
+    try:
+        assert pipeline.update_quote_rate(datetime.now(tz=_yesterday().tz), rebuild=True) is not None  # falha: devolve o erro
+    finally:
+        FakeBinance.fail = {"ETH/USDT"}
+    assert len(log) == len(UNIVERSE) + 2  # a cotação não entra no registro de fontes
+
+
 def test_secondary_sources_down_do_not_stop_the_analysis(workdir: Path) -> None:
     write_ohlcv(_base())  # sem Fear & Greed nem CoinGecko na base
     result = pipeline.analyze(pd.Timestamp.now(tz="UTC"))

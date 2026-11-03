@@ -109,6 +109,13 @@ conversão do token. Não há fonte confiável de listagem na base, então a cau
 REGIME_SYMBOL = "BTC/USDT"
 """Moeda cujo estado de tendência (acima/abaixo da SMA 200) vale como filtro de mercado para todas."""
 
+FX_SYMBOL = "USDT/BRL"
+"""Cotação do dólar digital em reais (par spot da Binance). Só converte as carteiras simuladas em reais: fica fora de
+`UNIVERSE` e nunca entra na análise, nos sinais nem na recomendação."""
+
+FX_HISTORY_DAYS = 400
+"""Primeira carga da cotação: os últimos 400 dias (as carteiras simuladas só precisam de preços a partir do início delas)."""
+
 TRAIN_PERIOD: tuple[str, str] = ("2018-01-01", "2022-12-31")
 TEST_PERIOD: tuple[str, str] = ("2023-01-01", "2026-12-31")
 """Períodos dos backtests publicados. O "teste" (2023 em diante) já foi consultado muitas vezes durante o

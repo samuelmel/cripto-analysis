@@ -38,6 +38,8 @@ import pandas as pd
 from .config import (
     BUDGET_BRL,
     FORECAST_SEED,
+    FX_HISTORY_DAYS,
+    FX_SYMBOL,
     REBALANCE_BAND,
     RECOMMENDED,
     REGIME_FILTER,
@@ -164,6 +166,23 @@ def _optional(adapter: BaseExtractor, start: datetime | None, now: datetime) -> 
         return adapter.standardize(pd.DataFrame()), str(exc)
 
 
+def update_quote_rate(now: datetime, *, rebuild: bool = False, binance_host: str = BINANCE_DEFAULT_HOST) -> str | None:
+    """Baixa o que falta da cotação USDT/BRL (converte as carteiras simuladas em reais). Fica fora de `UNIVERSE`, do registro de
+    fontes e da análise: a falha vira aviso no log e a mensagem do erro (None = ok); as carteiras simuladas mostram em USDT."""
+    last = None if rebuild else last_timestamp(FX_SYMBOL)
+    start = now - timedelta(days=FX_HISTORY_DAYS) if last is None else last.to_pydatetime() + timedelta(days=1)
+    if start >= now - timedelta(days=1):
+        return None
+    try:
+        candles = BinanceAdapter([FX_SYMBOL], host=binance_host).extract(start, now)
+        if not candles.empty:
+            write_ohlcv(candles, ingested_at=pd.Timestamp(now))
+    except (ExtractorError, MixedSourceError) as exc:
+        logger.warning("cotação %s indisponível: %s", FX_SYMBOL, exc)
+        return str(exc)
+    return None
+
+
 def update_base(now: datetime, *, rebuild: bool = False, binance_host: str = BINANCE_DEFAULT_HOST) -> pd.DataFrame:
     """Baixa só o que falta de cada ativo (ou tudo, com rebuild) e grava na base local.
 
@@ -188,6 +207,8 @@ def update_base(now: datetime, *, rebuild: bool = False, binance_host: str = BIN
             error = str(exc)
             logger.error("%s: atualização falhou: %s", symbol, exc)
         events.append(_event(BinanceAdapter.source, symbol, now, error, candles))
+
+    update_quote_rate(now, rebuild=rebuild, binance_host=binance_host)
 
     fng, fng_error = _optional(FearGreedAdapter(), None, now)
     if not fng.empty:
