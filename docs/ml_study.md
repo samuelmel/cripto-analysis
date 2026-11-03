@@ -146,3 +146,19 @@ Leitura, sem exagerar:
 
 Consequência (fixada antes): nenhum modelo sai do modo sombra. Os quatro modelos já registram previsões diárias em
 `model_predictions.parquet` (branch `state`); a avaliação prospectiva, com o mesmo teste, só depois de 365 dias.
+
+## Resultado da execução de 2026-11-03 (completa: com Fear & Greed)
+
+Mesmo protocolo `ml-v1`, agora com o histórico do Fear & Greed guardado pelo GitHub Actions na branch `state`
+(`fng_history.parquet`, 3.193 dias de 2018-02-01 a 2026-11-02). Os 4 modelos executados; as tabelas de
+`evidence/ml_study/` passam a ser as desta execução (a anterior continua no histórico do Git e no registro).
+
+| Modelo | Contra o universo (dev) | Contra o momento (dev) | p Holm | Teste final (universo / momento) | Nível |
+|---|---|---|---|---|---|
+| F_LOGIT | −2,8 pp (−5,4 a −0,8) | −0,3 pp | 1 / 1 | +3,9 / +8,5 pp | SEM_EVIDENCIA |
+| F_LOGIT_SEM_FNG | −2,7 pp | −0,1 pp | 1 / 1 | +4,2 / +8,8 pp | SEM_EVIDENCIA |
+| G_GBM | +1,7 pp (−0,5 a +4,0) | +4,2 pp (+0,2 a +8,3) | 0,49 / 0,18 | +2,2 / +6,8 pp | PROMISSOR |
+| G_GBM_SEM_FNG | +2,0 pp (−0,7 a +5,1) | +4,5 pp (+0,4 a +9,1) | 0,52 / 0,18 | +2,5 / +7,1 pp | PROMISSOR |
+
+**O Fear & Greed não acrescenta nada mensurável**: com e sem o índice, os dois tipos de modelo dão praticamente o mesmo
+resultado. **0 VALIDADO**; os dois boostings seguem PROMISSOR, sem significância depois de Holm.
