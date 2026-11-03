@@ -49,3 +49,24 @@ a reserva ficou parada durante a alta: é o custo de oportunidade esperado do ca
 O "PROMISSOR" do ETH vem de poucas janelas sobrepostas (12 e 8, de um único caminho de 8 anos), então não é evidência de vantagem estrutural.
 Conclusão: o Smart DCA não demonstra vantagem consistente sobre o DCA fixo; se entrar nas carteiras simuladas, só como robô experimental.
 Sem IC nem correção para múltiplos testes; janelas sobrepostas.
+
+## Apêndice: `research/dca_simulator.py` (aporte semanal, inícios anuais 2013-2022)
+
+Variante pedida depois, com regras fixadas no cabeçalho do código antes da execução (aporte de R$ 100 por semana no fechamento do domingo, execução na
+abertura seguinte, 0,25%, lote-base f = 0,5, multiplicadores 1x/3x/5x, janelas de 3 e 5 anos com início em 1º de janeiro). Execução de 2026-11-03.
+
+| Ativo | Horizonte | Janelas | Vitórias do inteligente | Diferença média | Pior | Janelas fatais (perda > 5%) |
+|---|---|---|---|---|---|---|
+| BTC | 3 anos | 10 | 1 (10%) | −4,23% | −18,75% | 2013, 2016, 2017 |
+| BTC | 5 anos | 9 | 1 (11%) | −4,35% | −17,48% | 2013, 2017 |
+| ETH | 3 anos | 5 | 4 (80%) | +0,01% | −0,10% | nenhuma |
+| ETH | 5 anos | 4 | 4 (100%) | +0,18% | 0,00% | nenhuma |
+
+- **BTC REJEITADO**, e pior que no protocolo mensal acima. Nas janelas fatais o ativo subiu 6x a mais de 1.000x enquanto a reserva (3% a 8% do patrimônio em média)
+  ficava parada e o preço médio saía 13% a 23% mais caro que o do fixo.
+- **ETH "PROMISSOR" pelo critério, mas sem significado prático:** a diferença média é de +0,01% a +0,18%. O ETH ficou quase sempre mais de 20% abaixo da sua máxima,
+  então o inteligente compra 3x ou 5x, esvazia o cofre rapidamente e passa a gastar só o aporte da semana, ou seja, se comporta como o DCA fixo.
+  Poucas janelas (5 e 4) e sobrepostas. Não é evidência de vantagem.
+- **Isolamento (caixa infinito, mesmo gasto total):** o preço médio cai em média 1,1% (3 anos) e 4,7% (5 anos) no BTC, e 10% a 11% no ETH, o que
+  melhoraria o valor final em 5% a 13%. Mas isso exige caixa que o orçamento semanal não tem e a reescala usa o total da janela, conhecido só depois. É um teto teórico, não uma regra operável.
+- Sensibilidade (descritiva): f = 0,75 reduz a perda no BTC (−1,3% de média) mas não vira vitória; f = 0,25 piora (−5,8% a −6,8%).
