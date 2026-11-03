@@ -29,4 +29,23 @@ com diferença média positiva. Caso contrário, rejeitado nesse ativo. Mesmo pr
 - A máxima histórica usa só a história disponível na base (BTC desde 2011, ETH desde 2017).
 
 ## Resultados
-(preencher após a execução)
+Execução de 2026-11-03, dados até 2026-11-01. Valor final por real aportado; "dif" = Smart DCA (f = 0,5) contra DCA fixo.
+
+| Ativo | Horizonte | Janelas | Vitórias do Smart (f=0,5) | Diferença média | Mediana | Pior | Melhor |
+|---|---|---|---|---|---|---|---|
+| BTC | 3 anos | 24 | 7 (29%) | −2,58% | −0,88% | −17,98% | +4,09% |
+| BTC | 5 anos | 20 | 5 (25%) | −3,16% | −1,62% | −16,59% | +1,96% |
+| ETH | 3 anos | 12 | 9 (75%) | +1,02% | +0,92% | −0,86% | +4,20% |
+| ETH | 5 anos | 8 | 5 (62%) | +0,90% | +1,06% | −0,86% | +3,47% |
+
+Critério (> 60% de vitórias nos dois horizontes e diferença média > 0): **BTC REJEITADO; ETH PROMISSOR**.
+
+Sensibilidade ao lote-base (descritiva): BTC f=0,25: 33% e 45% de vitórias, média −4,83% e −6,39%; f=0,75: 67% e 70%, média +0,34% e +0,18%.
+ETH f=0,25: 83% e 100% de vitórias, média +3,64% e +3,42%; f=0,75: 50% e 75%, média +0,88% e +0,72%.
+
+**Leitura:** as diferenças são pequenas (em geral entre −3% e +4% no valor final por real aportado) e o sinal depende do ativo e do lote-base
+(no BTC, só f=0,75 empata ou ganha; no ETH, a vantagem é maior com f=0,25). No BTC, o Smart perde principalmente nas janelas que começam em 2012-2013 e 2017, em que
+a reserva ficou parada durante a alta: é o custo de oportunidade esperado do caixa finito. O caixa quase sempre acaba investido (86% a 100% do aportado).
+O "PROMISSOR" do ETH vem de poucas janelas sobrepostas (12 e 8, de um único caminho de 8 anos), então não é evidência de vantagem estrutural.
+Conclusão: o Smart DCA não demonstra vantagem consistente sobre o DCA fixo; se entrar nas carteiras simuladas, só como robô experimental.
+Sem IC nem correção para múltiplos testes; janelas sobrepostas.
