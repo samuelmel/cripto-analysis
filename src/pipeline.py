@@ -73,6 +73,7 @@ from .loaders.position_log_store import append_notifications, append_state_log, 
 from .loaders.positions_store import read_positions
 from .loaders.signal_log_store import append_signal_log
 from .loaders.model_log_store import append_fng_history, append_predictions, read_fng_history, read_predictions
+from .loaders.sim_wallet_store import append_decisions, read_decisions
 from .loaders.source_log import read_source_log, write_source_log
 from .transformers.anomaly_detector import SignalRules, classify_history, detect
 from .transformers.forecast import forecast_table
@@ -81,6 +82,7 @@ from .transformers.notification import (
     data_notes,
     format_entry_changes,
     format_paper_report,
+    format_sim_wallets,
     format_error,
     format_position_changes,
     format_report,
@@ -107,6 +109,7 @@ from .transformers.entry_model import model_features, outperform_target
 from .transformers.entry_signals import EntryRules, Panel, build_panel, trailing_return
 from .transformers.model_shadow import fng_series, latest_fng, live_predictions, realized_outcomes, stack_all
 from .transformers.paper_portfolio import MODEL_LABELS, run_paper, track_record
+from .transformers.sim_wallet import SimState, decide_all, empty_state, replay, sim_market, stamp, with_new
 from .transformers.daily_alerts import ALERT_BUY, ALERT_EXIT, ALERT_SELL, ALERT_WATCH, compare_with_previous
 from .transformers.position_advisor import ACTION_SELL, ACTION_UNAVAILABLE, advise, realized
 from .transformers.position_log import acknowledgements, new_state_rows, pending_changes
@@ -346,6 +349,12 @@ def analyze(
     shadow_notes += paper_notes
     write_parquet(paper_summary, PUBLIC_DIR / "paper_portfolio.parquet")
     write_parquet(paper_equity, PUBLIC_DIR / "paper_equity.parquet")
+    sim, sim_notes = sim_outputs(
+        candles, read_ohlcv([FX_SYMBOL]), entry_panel, signals, history, available, read_exit_rules(),
+        merged_log(read_predictions(), shadow), day, run_ts=pd.Timestamp(today), record_state=record_state,
+    )
+    write_parquet(sim.summary, PUBLIC_DIR / "sim_wallets.parquet")
+    write_parquet(sim.positions, PUBLIC_DIR / "sim_wallet_positions.parquet")
     write_daily_signals(signals)  # por último: o estado final da execução (CLAUDE.md §3)
     dropped = pd.DataFrame({"symbol": list(selection.dropped), "reason": list(selection.dropped.values())})
     return {
@@ -356,6 +365,8 @@ def analyze(
         "signal_evidence": signal_evidence, "shadow_predictions": shadow,
         "paper_summary": paper_summary, "paper_track": paper_track,
         "shadow_notes": pd.DataFrame({"note": shadow_notes}, dtype="string"),
+        "sim_summary": sim.summary, "sim_positions": sim.positions, "sim_trades": sim.trades,
+        "sim_notes": pd.DataFrame({"note": sim_notes}, dtype="string"),
     }
 
 
@@ -400,6 +411,35 @@ def paper_outputs(
     except Exception as exc:  # simulação: o erro é registrado, a análise do dia segue
         logger.exception("carteiras simuladas falharam")
         return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), [f"carteiras simuladas falharam: {type(exc).__name__}: {exc}"]
+
+
+def sim_outputs(
+    candles: pd.DataFrame, fx_candles: pd.DataFrame, panel: Panel, signals: pd.DataFrame, history: pd.DataFrame,
+    available: pd.DataFrame, rule_table: pd.DataFrame, log: pd.DataFrame, day: pd.Timestamp, *, run_ts: pd.Timestamp,
+    record_state: bool,
+) -> tuple[SimState, list[str]]:
+    """Carteiras simuladas em reais (docs/sim_wallets.md), dinheiro fictício, nenhuma ordem real: refaz as carteiras das
+    decisões gravadas, decide o dia de cada robô e, com `record_state`, grava só as decisões novas. Não altera sinais, aporte
+    nem recomendação. Uma falha aqui nunca derruba o pipeline: vira nota no relatório."""
+    try:
+        market = sim_market(candles, fx_candles, CostModel())
+        stored = read_decisions()
+        notes: list[str] = []
+        decisions = stored
+        if day.floor("D") == market.close.index.max():
+            fresh = decide_all(
+                day.floor("D"), signals=signals, history=history, panel=panel, log=log, state=replay(stored, market),
+                available=available, rule_table=rule_table,
+            )
+            decisions = with_new(stored, fresh)
+            if record_state and not fresh.empty:
+                append_decisions(stamp(fresh, run_ts=run_ts, code_version=_code_version()))
+        else:
+            notes.append(f"carteiras simuladas: dados de {day:%Y-%m-%d} desatualizados, sem decisões novas")
+        return replay(decisions, market), notes
+    except Exception as exc:  # simulação: o erro é registrado, a análise do dia segue
+        logger.exception("carteiras simuladas em reais falharam")
+        return empty_state(), [f"carteiras simuladas em reais falharam: {type(exc).__name__}: {exc}"]
 
 
 @dataclass(frozen=True)
@@ -514,6 +554,11 @@ def report(result: dict[str, pd.DataFrame], source_errors: pd.DataFrame | None =
             lines.append(f"  IA em sombra {name} (não é recomendação): maiores probabilidades {', '.join(top)}")
     for note in result.get("shadow_notes", pd.DataFrame(columns=["note"]))["note"]:
         lines.append(f"  IA em sombra: {note}")
+    for w in result.get("sim_summary", pd.DataFrame()).itertuples():
+        value = f"R$ {w.total_brl:.2f} ({w.return_pct:+.1f}%)" if w.currency == "BRL" else f"posições {w.positions_usdt:.2f} USDT (cotação do real indisponível)"
+        lines.append(f"  carteira simulada {w.wallet} (dinheiro fictício): {value} · caixa R$ {w.cash_brl:.2f}")
+    for note in result.get("sim_notes", pd.DataFrame(columns=["note"]))["note"]:
+        lines.append(f"  {note}")
     for _, p in positions.iterrows():
         if p["action"] == ACTION_UNAVAILABLE:
             tag = f"INDISPONÍVEL ({p['data_note']})"
@@ -541,6 +586,7 @@ def _notify(result: dict[str, pd.DataFrame], now: datetime, *, dry_run: bool, re
     texts += format_entry_changes(result.get("entry_changes"), result["signals"], now=pd.Timestamp(now))
     texts += format_paper_report(result.get("shadow_predictions"), result.get("paper_summary"), result.get("paper_track"),
                                  now=pd.Timestamp(now), labels=MODEL_LABELS)
+    texts += format_sim_wallets(result.get("sim_summary"), result.get("sim_positions"), result.get("sim_trades"), now=pd.Timestamp(now))
     problems = validate_messages(texts, _secrets())
     if problems:
         logger.error("mensagem do Telegram inválida: %s", "; ".join(problems))

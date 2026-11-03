@@ -24,7 +24,9 @@ from datetime import timedelta, timezone
 import numpy as np
 import pandas as pd
 
+from .backtest_engine import SIDE_BUY, SIDE_SELL
 from .entry_live import CHANGE_FIRED, COMBO_TEXT, active_levels
+from .sim_wallet import STATUS_DONE, STATUS_NOT_DONE, STATUS_PENDING
 
 TELEGRAM_LIMIT = 4096
 FORTALEZA = timezone(timedelta(hours=-3))  # UTC−3 o ano todo (sem horário de verão)
@@ -547,3 +549,96 @@ def format_paper_report(
 def _points(x: float) -> str:
     """Diferença já em pontos percentuais."""
     return "—" if not math.isfinite(x) else f"{x:+.1f} pp".replace(".", ",")
+
+
+SIM_DISCLAIMER = (
+    "Simulação com dinheiro fictício, não é recomendação; nenhuma ordem real é enviada e o sistema não tem integração com "
+    "corretora. Compra e venda na abertura do dia seguinte, com taxa, spread e slippage estimados; o custo de converter reais "
+    "em USDT não é simulado. A IA está em modo sombra (docs/ml_study.md) e a Reversão não foi estudada: o placar não prova que "
+    "alguma estratégia funciona."
+)
+SIM_MAX_LINES = 10  # linhas por grupo (posições, vendas) em cada carteira; o resto vira "+ N"
+
+
+def _money(x: float) -> str:
+    return "—" if not math.isfinite(x) else f"R$ {_num(x)}"
+
+
+def _coin(symbol: object) -> str:
+    return str(symbol).split("/")[0]
+
+
+def _arrow(pct: float) -> str:
+    return "↑" if pct > 0 else "↓" if pct < 0 else "·"
+
+
+def _names(symbols: Sequence[str], limit: int = 5) -> str:
+    shown = ", ".join(_coin(s) for s in symbols[:limit])
+    return shown if len(symbols) <= limit else f"{shown} e mais {len(symbols) - limit}"
+
+
+def _sim_position_line(r: Mapping[Hashable, object], brl: bool) -> str:
+    since = f"comprou {_day(pd.Timestamp(str(r['first_buy'])))}"
+    if int(str(r["n_lots"])) > 1:
+        since = f"{r['n_lots']} lotes desde {_day(pd.Timestamp(str(r['first_buy'])))}"
+    now = _money(float(str(r["value_brl"]))) if brl else f"{_num(float(str(r['value_usdt'])))} USDT"
+    pct = float(str(r["return_pct"]))
+    return f"  {_coin(r['symbol'])}  {since} {_money(float(str(r['cost_brl'])))} → hoje {now} ({_pct(pct)}) {_arrow(pct)}"
+
+
+def _sim_wallet_block(
+    s: Mapping[Hashable, object], positions: pd.DataFrame, trades: pd.DataFrame, as_of: pd.Timestamp, brl: bool
+) -> list[str]:
+    wallet, cash = str(s["wallet"]), float(str(s["cash_brl"]))
+    if brl:
+        lines = [f"{s['label']}: {_money(float(str(s['initial_brl'])))} → {_money(float(str(s['total_brl'])))} ({_pct(float(str(s['return_pct'])))})"]
+    else:
+        lines = [f"{s['label']}: caixa {_money(cash)} + posições {_num(float(str(s['positions_usdt'])))} USDT"]
+    mine = positions[positions["wallet"].eq(wallet)].sort_values("value_usdt", ascending=False)
+    lines += [_sim_position_line(r, brl) for r in mine.head(SIM_MAX_LINES).to_dict("records")]
+    if len(mine) > SIM_MAX_LINES:
+        rest = mine.iloc[SIM_MAX_LINES:]
+        value = f"{_money(float(rest['value_brl'].sum()))}" if brl else f"{_num(float(rest['value_usdt'].sum()))} USDT"
+        lines.append(f"  + {len(rest)} moedas ({value})")
+    mt = trades[trades["wallet"].eq(wallet)]
+    sold = mt[mt["side"].eq(SIDE_SELL) & mt["status"].eq(STATUS_DONE) & mt["exec_day"].eq(as_of)]
+    for symbol, g in list(sold.groupby("symbol", sort=True))[:SIM_MAX_LINES]:
+        got, cost = float(g["value_brl"].sum()), float(g["cost_brl"].sum())
+        lines.append(f"  {_coin(symbol)}  vendeu {_day(as_of)} por {_money(got)} (comprou {_money(cost)}: {_pct((got / cost - 1.0) * 100.0)})")
+    if len(sold["symbol"].unique()) > SIM_MAX_LINES:
+        lines.append(f"  + {len(sold['symbol'].unique()) - SIM_MAX_LINES} vendas")
+    failed = mt[mt["status"].eq(STATUS_NOT_DONE) & mt["exec_day"].eq(as_of)]
+    for reason, g in failed.groupby("reason", sort=True):
+        lines.append(f"  Não executada ({reason}): {_names(sorted(g['symbol'].astype(str)))}")
+    waiting = mt[mt["status"].eq(STATUS_PENDING)]
+    buys, sells = waiting[waiting["side"].eq(SIDE_BUY)], waiting[waiting["side"].eq(SIDE_SELL)]
+    todo = []
+    if not buys.empty:
+        todo.append(f"comprar {_names(sorted(buys['symbol'].astype(str)))} ({_money(float(buys['amount_brl'].sum()))})")
+    if not sells.empty:
+        todo.append(f"vender {_names(sorted(sells['symbol'].astype(str).unique()))}")
+    if todo:
+        lines.append(f"  Na abertura de amanhã: {'; '.join(todo)}")
+    missed = int(str(s["n_not_executed"]))
+    lines.append(f"  Em caixa: {_money(cash)}" + (f" · {missed} ordem(ns) não executada(s) desde o início" if missed else ""))
+    return lines
+
+
+def format_sim_wallets(
+    summary: pd.DataFrame | None, positions: pd.DataFrame | None, trades: pd.DataFrame | None, *, now: pd.Timestamp
+) -> list[str]:
+    """Placar das carteiras simuladas em reais (dinheiro fictício), numa mensagem separada: por carteira, valor inicial →
+    atual, posições agrupadas por moeda, vendas do dia, ordens pendentes e caixa. Sem cotação do real, os valores saem em USDT
+    com o aviso. Vazio se a simulação ainda não tem decisões."""
+    if summary is None or summary.empty or positions is None or trades is None:
+        return []
+    as_of = pd.Timestamp(summary["as_of"].iloc[0])
+    fx = float(summary["fx_close"].iloc[0])
+    brl = math.isfinite(fx)
+    local = now.tz_convert(FORTALEZA)
+    rate = f"dólar digital {_money(fx)}" if brl else "cotação do real indisponível: valores em USDT"
+    lines = ["💼 CARTEIRAS SIMULADAS (dinheiro fictício, sem ordens reais)", f"{local:%d/%m/%Y %H:%M} (Fortaleza) · dados de {_day(as_of)} · {rate}", ""]
+    for s in summary.to_dict("records"):
+        lines += _sim_wallet_block(s, positions, trades, as_of, brl) + [""]
+    lines.append(SIM_DISCLAIMER)
+    return split_message("\n".join(lines))

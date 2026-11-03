@@ -11,6 +11,7 @@ branch `state` do repositório privado. É uma branch **só de dados** (sem cód
 | `notifications.parquet` | avisos de mudança de estado já enviados ao Telegram | pipeline do Actions |
 | `model_predictions.parquet` | previsões diárias dos modelos de IA **em modo sombra** (probabilidade e posição por moeda e modelo, versão do modelo, fingerprint dos dados), com cadeia de hash; nunca entram na recomendação nem no Telegram | pipeline do Actions (`--record-state`) |
 | `fng_history.parquet` | cópia do histórico do Fear & Greed visto em cada execução; um dia cujo valor muda na fonte entra de novo (revisão auditável). Se a fonte falhar, o pipeline usa esta cópia | pipeline do Actions (`--record-state`) |
+| `sim_decisions.parquet` | decisões das **carteiras simuladas em reais** (dinheiro fictício; `docs/sim_wallets.md`): carteira, dia, moeda, lote, COMPRA/VENDA e valor em R$, com cadeia de hash; append-only e idempotente por (carteira, dia, moeda, lado). Posições e caixa não são guardados: são refeitos a cada execução a partir das decisões e dos preços | pipeline do Actions (`--record-state`) |
 
 No PC, `data/state/` é um *worktree* git da branch `state` (a pasta `data/` é ignorada pela `main`). `python -m src.state_sync
 init` cria o worktree (e a branch vazia na primeira vez, copiando as posições antigas de `data/positions/`).

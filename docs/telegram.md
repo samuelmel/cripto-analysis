@@ -165,3 +165,10 @@ O [`mcp_server.py`](../mcp_server.py) expõe a tool `run_crypto_pipeline`, que r
   sobre o mesmo candle, o aviso se repete.
 - **Posições**: quando uma posição muda para ATENÇÃO, o aviso traz "Sugestão: considere reduzir o tamanho da posição (não é
   ordem de venda; a regra ainda não disparou)".
+
+## Carteiras simuladas em reais (`docs/sim_wallets.md`)
+
+Depois do resumo do dia vai uma mensagem separada, "💼 CARTEIRAS SIMULADAS (dinheiro fictício, sem ordens reais)": quatro
+carteiras de R$ 1.000,00 fictícios (PAINEL, IA, REVERSAO, SO_BTC) com valor inicial → atual, posições por moeda, vendas do dia,
+ordens que executam na abertura de amanhã e caixa. Sem cotação do USDT/BRL, os valores saem em USDT com o aviso. Nenhuma ordem
+real é enviada; a REVERSAO não foi estudada e a IA está em modo sombra. A mensagem não altera a recomendação nem o resumo.

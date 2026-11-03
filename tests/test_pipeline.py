@@ -13,6 +13,7 @@ from src import pipeline
 from src.config import UNIVERSE
 from src.extractors import ExtractorError
 from src.loaders.market_store import MixedSourceError, read_ohlcv, write_ohlcv
+from src.loaders.sim_wallet_store import read_decisions
 from src.loaders.source_log import read_source_log
 from src.transformers.anomaly_detector import STAGE_BUY, STAGE_UNAVAILABLE
 from src.transformers.entry_study import LEVEL_SCHEMA
@@ -245,3 +246,50 @@ def test_negative_budget_is_rejected(workdir: Path) -> None:
     write_ohlcv(_base())
     with pytest.raises(SystemExit):
         pipeline.main(["--offline", "--budget", "-10"])
+
+
+def _usdt_brl() -> pd.DataFrame:
+    return make_candles({"USDT/BRL": [5.0] * 60}, _yesterday())
+
+
+def test_simulated_wallets_are_published_recorded_once_and_shown_without_changing_the_recommendation(
+    workdir: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write_ohlcv(_base())
+    write_ohlcv(_usdt_brl())
+    now = pd.Timestamp.now(tz="UTC")
+
+    result = pipeline.analyze(now, record_state=True)
+    assert result["sim_summary"]["wallet"].tolist() == ["PAINEL", "IA", "REVERSAO", "SO_BTC"]
+    assert result["sim_summary"]["currency"].eq("BRL").all() and result["sim_notes"].empty
+    stored = read_decisions()
+    assert stored["wallet"].eq("SO_BTC").any() and stored["side"].eq("COMPRA").all()  # nada vende no primeiro dia
+    assert (workdir / "frontend" / "public" / "sim_wallets.parquet").is_file()
+    assert (workdir / "frontend" / "public" / "sim_wallet_positions.parquet").is_file()
+
+    assert pipeline._notify(result, now.to_pydatetime(), dry_run=True) == 0
+    out = capsys.readouterr().out
+    assert "CARTEIRAS SIMULADAS (dinheiro fictício, sem ordens reais)" in out and "nenhuma ordem real é enviada" in out
+    assert out.index("CARTEIRAS SIMULADAS") > out.index("--- mensagem 1/")  # numa mensagem separada, depois do resumo
+
+    pipeline.analyze(now, record_state=True)
+    assert len(read_decisions()) == len(stored)  # mesmo dia: idempotente
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("falha de teste")
+
+    monkeypatch.setattr(pipeline, "replay", boom)
+    failed = pipeline.analyze(now)
+    assert failed["sim_summary"].empty and failed["sim_notes"]["note"].str.contains("falharam").all()
+    pd.testing.assert_frame_equal(failed["recommendation"], result["recommendation"])  # a simulação não mexe na recomendação
+    pd.testing.assert_frame_equal(failed["signals"], result["signals"])
+
+
+def test_simulated_wallets_without_the_real_quote_say_so_and_never_invent_one(workdir: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    write_ohlcv(_base())  # sem USDT/BRL na base
+    now = pd.Timestamp.now(tz="UTC")
+    result = pipeline.analyze(now)
+    assert result["sim_summary"]["currency"].eq("USDT").all() and result["sim_summary"]["fx_close"].isna().all()
+    assert result["sim_trades"]["status"].isin(["PENDENTE", "NAO_EXECUTADA"]).all()
+    assert pipeline._notify(result, now.to_pydatetime(), dry_run=True) == 0
+    assert "cotação do real indisponível" in capsys.readouterr().out
