@@ -6,6 +6,8 @@ Entrypoint (CLAUDE.md §1): lê dados e imprime. Dinheiro fictício; nenhuma ord
 """
 from __future__ import annotations
 
+import argparse
+import dataclasses
 import itertools
 import math
 import sys
@@ -19,7 +21,9 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.loaders.archive_store import read_archive_candles  # noqa: E402
-from src.transformers.backtest_engine import BacktestResult, ExecutionConfig, MarketPanel, panel_from_candles, run_backtest  # noqa: E402
+from src.transformers.backtest_engine import (  # noqa: E402
+    SIDE_BUY, SIDE_SELL, BacktestResult, ExecutionConfig, MarketPanel, panel_from_candles, run_backtest,
+)
 from src.transformers.costs import CostModel  # noqa: E402
 from src.transformers.data_quality import clean_candles  # noqa: E402
 from src.transformers.entry_signals import EntryRules, build_panel, trailing_return  # noqa: E402
@@ -76,7 +80,7 @@ def metrics(res: BacktestResult) -> dict[str, float]:
     r = res.returns
     sd = float(r.std())
     t = res.trades
-    traded = float(t.loc[t["side"].isin(["BUY", "SELL"]), "notional"].sum()) if len(t) else 0.0
+    traded = float(t.loc[t["side"].isin([SIDE_BUY, SIDE_SELL]), "notional"].sum()) if len(t) else 0.0
     costs = float(t[["fee", "spread_cost", "slippage_cost"]].to_numpy().sum()) if len(t) else 0.0
     return {"cagr%": cagr * 100, "calmar": cagr / abs(maxdd) if maxdd < 0 else math.nan,
             "sharpe": float(r.mean() / sd * math.sqrt(PER_YEAR)) if sd > 0 else math.nan, "maxdd%": maxdd * 100,
@@ -89,7 +93,14 @@ def run(panel: MarketPanel, targets: pd.DataFrame, start: pd.Timestamp, end: pd.
 
 
 def main() -> int:
+    global CFG
+    ap = argparse.ArgumentParser(description="Estudo xs-v1 (docs/cross_sectional_study.md)")
+    ap.add_argument("--delist-recovery", type=float, default=0.0,
+                    help="fração do último preço recuperada na baixa. 0 = protocolo xs-v1 (perda total); outro valor = SENSIBILIDADE pós-hoc")
+    args = ap.parse_args()
+    CFG = dataclasses.replace(CFG, delist_recovery=args.delist_recovery)
     t0 = time.time()
+    print(f"recuperação na baixa de moeda sem candle: {args.delist_recovery:.0%}" + ("" if args.delist_recovery == 0 else "  [SENSIBILIDADE pós-hoc, fora do protocolo xs-v1]"))
     raw = clean_candles(read_archive_candles())
     candles, _ = split_discontinuities(raw, ContinuityRules())
     pa = build_panel(candles, EntryRules())

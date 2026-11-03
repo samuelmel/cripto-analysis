@@ -40,4 +40,25 @@ Caso contrário, é rejeitada. Mesmo promissora, não é validada: faltam interv
 - Meio-spread fixo (hipótese, não medido). Baixa por perda total é conservadora para moedas deslistadas.
 
 ## Resultados
-(preencher após a execução)
+Execução de 2026-11-03, dados até 2026-11-01, 273 séries que passaram pelo universo. IS 2019-06-02 a 2022-12-31; OOS 2023-01-01 a 2026-11-01.
+
+**Protocolo xs-v1 (baixa com perda total).** Escolhidos no IS (maior Calmar): momentum = MOM L14 top10; reversão = REV L90 top10.
+
+| Out-of-Sample | CAGR | Calmar | Sharpe | Drawdown máx. | Capital final (1 = início) |
+|---|---|---|---|---|---|
+| Momentum L14 top10 | −39,7% | −0,43 | −0,26 | −93% | 0,14 |
+| Reversão L90 top10 | −21,5% | −0,24 | 0,07 | −88% | 0,40 |
+| MERCADO (referência) | −31,9% | −0,35 | −0,16 | −92% | 0,23 |
+| BTC (comprar e segurar) | +49,9% | 0,94 | 1,11 | −53% | 4,72 |
+
+Regra de decisão: momentum REJEITADA; reversão PROMISSORA (supera o MERCADO em Calmar e Sharpe). Média das 12 configurações de cada
+direção no OOS (descritivo): momentum CAGR −75% / Sharpe −0,57; reversão CAGR −62% / Sharpe −0,57.
+
+**Sensibilidade pós-hoc (fora do protocolo; baixa com recuperação de 100% do último preço):** a seleção no IS muda
+(momentum L30 top10, reversão L90 top5) e a reversão passa a ser REJEITADA (Calmar −0,25 vs −0,22 do MERCADO; Sharpe 0,09 vs 0,04).
+Ou seja, o veredito "promissora" depende da hipótese de perda total nas moedas que somem.
+
+**Leitura:** nenhuma configuração gerou retorno positivo ajustado ao risco; o universo de altcoins perdeu para o BTC no período
+(MERCADO −32% ao ano contra BTC +50%). Reversão ficou menos ruim que momentum, mas o "vencedor" só vence uma referência que perde
+dinheiro, e a vantagem não resiste à sensibilidade. Não vale levar a regra para os robôs. Sem IC nem correção para múltiplos testes.
+Giro anual impresso corrige um erro de relatório da primeira execução (a coluna aparecia zerada; os retornos não mudaram).
