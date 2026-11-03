@@ -25,4 +25,21 @@ Se nenhum escolhido superar o BTC, o eixo de rotação de altcoins é encerrado.
 Histórico já explorado antes no projeto; universo = moedas da Binance em USDT; meio-spread fixo; o OOS de 2023+ é um período de alta do BTC.
 
 ## Resultados
-(preencher após a execução)
+Execução de 2026-11-03, dados até 2026-11-01. IS 2019-06-02 a 2022-12-31; OOS 2023-01-01 a 2026-11-01.
+Escolhidos no IS (maior Calmar): `REL L30 top5` com fallback BTC e `REL L30 top5` com fallback caixa.
+
+| Out-of-Sample | CAGR | Calmar | Sharpe | Drawdown máx. | Capital final (1 = início) |
+|---|---|---|---|---|---|
+| REL L30 top5, fallback BTC | −81,5% | −0,82 | −0,96 | −99,9% | 0,00 |
+| REL L30 top5, fallback caixa | −80,8% | −0,81 | −0,95 | −99,9% | 0,00 |
+| BTC (comprar e segurar) | +49,9% | 0,94 | 1,11 | −53% | 4,72 |
+| MERCADO | −31,9% | −0,35 | −0,16 | −92% | 0,23 |
+
+Critério (superar o BTC em Calmar e Sharpe): ambos REJEITADOS. As 8 configurações no OOS (descritivo) ficaram entre −60% e −100% ao ano.
+O filtro quase nunca ficou fora de altcoins: em 96% a 99% das semanas do OOS havia pelo menos uma altcoin com retorno positivo e melhor
+que o BTC, então o fallback raramente atuou e a regra virou perseguição de momentum entre altcoins.
+Sensibilidade com recuperação de 100% do último preço nas moedas que somem (pós-hoc, fora do protocolo): os escolhidos seguem
+em −68% a −69% ao ano (Calmar −0,69 e −0,68; Sharpe −0,76 e −0,75), também rejeitados.
+
+**Decisão do protocolo:** nenhum escolhido superou o BTC; o eixo de rotação de altcoins (xs-v1 e xs-v2) está encerrado.
+Sem IC nem correção para múltiplos testes; histórico já explorado antes.
