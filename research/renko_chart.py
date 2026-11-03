@@ -2,7 +2,7 @@
 
 Bitstamp BTC/USD (2011-2017) emendado com Binance BTC/USDT (2017 em diante). Só leitura; saída: PNG.
     uv run --with matplotlib python research/renko_chart.py [brick_pct] [saida.png]
-    uv run --with matplotlib python research/renko_chart.py uni [barra_pct] [saida.png]   # variante UniRenko
+    uv run --with matplotlib python research/renko_chart.py uni [barra_pct] [saida.png] [MOEDA]   # variante UniRenko
 """
 from __future__ import annotations
 
@@ -46,8 +46,10 @@ def renko(close: pd.Series, pct: float) -> list[tuple[pd.Timestamp, float, float
     return bricks
 
 
-def load_ohlc() -> pd.DataFrame:
+def load_ohlc(symbol: str = "BTC") -> pd.DataFrame:
     cols = ["open", "high", "low", "close"]
+    if symbol != "BTC":
+        return pd.read_parquet(f"data/archive/ohlcv_1d/symbol={symbol}_USDT/data.parquet").set_index("timestamp").sort_index()[cols]
     a = pd.read_parquet("data/archive_bitstamp/ohlcv_1d/symbol=BTC_USD/data.parquet").set_index("timestamp")[cols]
     b = pd.read_parquet("data/archive/ohlcv_1d/symbol=BTC_USDT/data.parquet").set_index("timestamp")[cols]
     return pd.concat([a[a.index < b.index.min()], b]).sort_index()
@@ -72,8 +74,8 @@ def unirenko(ohlc: pd.DataFrame, pct: float) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def main_unirenko(pct: float, out: Path) -> None:
-    ohlc = load_ohlc()
+def main_unirenko(pct: float, out: Path, symbol: str = "BTC") -> None:
+    ohlc = load_ohlc(symbol)
     bars = unirenko(ohlc, pct)
     fig, ax = plt.subplots(figsize=(16, 8))
     for i, r in enumerate(bars.itertuples()):
@@ -85,7 +87,7 @@ def main_unirenko(pct: float, out: Path) -> None:
     ax.set_ylim(math.exp(bars["low"].min()) * 0.9, math.exp(bars["high"].max()) * 1.1)
     n = max(1, len(bars) // 12)
     ax.set_xticks(range(0, len(bars), n)); ax.set_xticklabels([bars["ts"].iloc[i].strftime("%Y-%m") for i in range(0, len(bars), n)])
-    ax.set_title(f"BTC — UniRenko, barra de {pct:g}% (escala log) | {len(bars)} barras | {ohlc.index[0]:%Y-%m-%d} a {ohlc.index[-1]:%Y-%m-%d}\n"
+    ax.set_title(f"{symbol} — UniRenko, barra de {pct:g}% (escala log) | {len(bars)} barras | {ohlc.index[0]:%Y-%m-%d} a {ohlc.index[-1]:%Y-%m-%d}\n"
                  "abertura = fechamento anterior; pavio = excursão além do corpo; ordem intradiária suposta (só há candles diários)")
     ax.set_ylabel("Preço (US$)"); ax.grid(alpha=0.25, which="both")
     fig.tight_layout(); fig.savefig(out, dpi=130)
@@ -94,7 +96,8 @@ def main_unirenko(pct: float, out: Path) -> None:
 
 def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "uni":
-        main_unirenko(float(sys.argv[2]) if len(sys.argv) > 2 else 5.0, Path(sys.argv[3] if len(sys.argv) > 3 else "unirenko_btc.png"))
+        sym = sys.argv[4].upper() if len(sys.argv) > 4 else "BTC"
+        main_unirenko(float(sys.argv[2]) if len(sys.argv) > 2 else 5.0, Path(sys.argv[3] if len(sys.argv) > 3 else f"unirenko_{sym.lower()}.png"), sym)
         return
     pct = float(sys.argv[1]) if len(sys.argv) > 1 else 10.0
     out = Path(sys.argv[2] if len(sys.argv) > 2 else "renko_btc.png")
