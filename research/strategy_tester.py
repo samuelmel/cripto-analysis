@@ -134,12 +134,21 @@ def sma_cross_adx(df: pd.DataFrame, p: Params) -> pd.Series:
     return ((f > s) & strong).astype(float).where(s.notna() & strong.notna(), 0.0)
 
 
+def sma_cross_adx_1h(df: pd.DataFrame, p: Params) -> pd.Series:
+    """Tudo na escala de 1h (períodos em horas): SMA rápida x SMA lenta, habilitado só com ADX(n horas) acima do limite."""
+    fast, slow, n_adx, thr = int(p[0]), int(p[1]), int(p[2]), float(p[3])
+    f, s = df["close"].rolling(fast).mean(), df["close"].rolling(slow).mean()
+    a = adx(df, n_adx)
+    return ((f > s) & (a > thr)).astype(float).where(s.notna() & a.notna(), 0.0)
+
+
 @dataclass(frozen=True)
 class Family:
     name: str
     signal: Signal
     grid: list[Params]
     describe: Callable[[Params], str]
+    min_trades: int = MIN_TRADES_IS
 
 
 FAMILIES = [
@@ -150,6 +159,10 @@ FAMILIES = [
     Family("SMA cruz + ADX", sma_cross_adx,
            [(float(f * DAY), float(s * DAY), float(t)) for f, s, t in itertools.product((5, 10, 20), (40, 60, 100), (20, 25, 30))],
            lambda p: f"SMA {int(p[0]) // DAY}/{int(p[1]) // DAY}d ADX>{int(p[2])}"),
+    # tudo em 1h; exige >= 100 operações no IS em TODAS as moedas para ser elegível
+    Family("SMA+ADX 1h", sma_cross_adx_1h,
+           [(float(f), float(sl), float(n), float(t)) for f, sl, n, t in itertools.product((24, 48), (168, 336), (48, 72), (15, 20, 25))],
+           lambda p: f"SMA {int(p[0])}/{int(p[1])}h ADX{int(p[2])}h>{int(p[3])}", min_trades=100),
 ]
 
 
@@ -214,7 +227,11 @@ def select_in_sample(frames: dict[str, pd.DataFrame], fam: Family) -> tuple[Para
                      "maxdd_is%": float(np.nanmean([m["maxdd"] for m, _, _, _ in per])) * 100,
                      "min_ops": min(t for _, _, t, _ in per)})
     table = pd.DataFrame(rows)
-    ok = table[table["min_ops"] >= MIN_TRADES_IS]
+    ok = table[table["min_ops"] >= fam.min_trades]
+    table["elegivel"] = table["min_ops"] >= fam.min_trades
+    if ok.empty:
+        print(f"AVISO: nenhuma configuração de '{fam.name}' tem >= {fam.min_trades} operações no IS em todas as moedas; "
+              "escolha feita SEM o filtro (menos confiável).")
     best = (ok if not ok.empty else table).sort_values("calmar_is", ascending=False).iloc[0]
     return best["_p"], table.drop(columns="_p").sort_values("calmar_is", ascending=False)
 
