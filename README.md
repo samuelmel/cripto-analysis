@@ -4,8 +4,8 @@ Crypto Analyzer
 Sistema de análise quantitativa de criptomoedas desenvolvido em Python.
 Coleta dados históricos, calcula sinais e indicadores, avalia
 estratégias por backtesting e envia resumos pelo Telegram. Inclui um
-painel web para consultar o histórico, os resultados e as posições
-registradas manualmente.
+painel web somente leitura para consultar sinais, carteiras simuladas,
+pesquisa, mercado e metodologia.
 
     Aviso: projeto experimental e educacional. Não executa ordens em
     corretoras e não constitui recomendação financeira. Resultados
@@ -22,10 +22,10 @@ Funcionalidades
     Backtesting: simulação de estratégias com custos configuráveis e
     execução no candle seguinte.
     Gestão de risco simulada: orçamento configurável, limites de
-    alocação e acompanhamento manual de posições.
+    alocação e carteiras simuladas quando os Parquets existem.
     Notificações: resumo diário opcional pelo Telegram.
-    Painel web: visualização de sinais, histórico, resultados de
-    estratégias e posições.
+    Painel web: sinais, carteiras, mercado, pesquisa e metodologia,
+    sempre somente leitura.
     Pesquisa quantitativa: ferramentas para comparar estratégias e
     avaliar a robustez dos resultados.
 
@@ -53,24 +53,26 @@ Indicadores e sinais
       ▼
 Backtesting e análise de risco
       │
-      ├──► Painel web
+      ├──► API somente leitura ──► Painel web
       └──► Resumo no Telegram
 
-O pipeline Python concentra a coleta e a análise. O frontend consome os
-arquivos de dados publicados pelo pipeline; não calcula as recomendações
-de forma independente.
+O pipeline Python concentra a coleta e a análise. A API FastAPI lê os
+Parquets publicados e o frontend React consome essa API; nenhum dos dois
+calcula recomendações de forma independente nem envia ordens.
 Requisitos
 
     Python 3.12+
     uv
-    Node.js 20+ e npm para executar o painel
+    Node.js 20+ e pnpm 10 (via npx)
     Internet para atualizar os dados de mercado
 
 Instalação
 
-Na raiz do repositório:
+Na raiz do repositório (crypto-analyzer):
 uv sync
-npm --prefix frontend install
+cd frontend
+npx --yes pnpm@10 install
+cd ..
 
 Opcionalmente, configure COINGECKO_API_KEY para aumentar o limite de
 acesso à API do CoinGecko.
@@ -85,12 +87,22 @@ uv run python -m src.pipeline --offline
 Validar a mensagem do Telegram sem enviar nada:
 uv run python -m src.pipeline --dry-run
 
-Executar o painel em desenvolvimento:
-npm --prefix frontend run dev
+Executar o painel em desenvolvimento (dois terminais, na raiz do projeto):
 
-Use o endereço local mostrado pelo Vite no terminal. Para gerar o build
-de produção:
-npm --prefix frontend run build
+Terminal 1, API:
+uv run python -m src.api
+
+Terminal 2, frontend:
+cd frontend
+npx --yes pnpm@10 dev
+
+Use o endereço mostrado pelo Vite (http://localhost:5173). Para gerar o
+build de produção:
+cd frontend
+npx --yes pnpm@10 build
+
+Em produção, a API serve frontend/dist na mesma origem:
+uv run python -m src.api
 Telegram
 
 Para habilitar notificações, configure estas variáveis de ambiente:
@@ -110,6 +122,13 @@ uv run mypy --strict src/ mcp_server.py
 
 Verificar o ambiente Python:
 uv lock --check
+
+Verificar o frontend:
+cd frontend
+npx --yes pnpm@10 typecheck
+npx --yes pnpm@10 test
+npx --yes pnpm@10 build
+npx --yes pnpm@10 e2e
 Configuração
 
 As principais configurações ficam em src/config.py, incluindo o
@@ -133,6 +152,7 @@ Limitações
 
 Estrutura do projeto
 src/
+  api/              # API FastAPI somente leitura para o painel
   extractors/       # Adaptadores das fontes de dados
   transformers/     # Indicadores, sinais, seleção e backtesting
   loaders/          # Persistência e leitura de dados
