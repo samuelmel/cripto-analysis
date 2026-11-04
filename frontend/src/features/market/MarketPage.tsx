@@ -191,9 +191,9 @@ function MarketBody({ data }: { data: MarketData }): ReactNode {
             description="Distância da média e volatilidade classificam o contexto. O regime muda devagar."
           />
           <div className="mt-4 flex gap-1">
-            {regimes.map((regime) => (
+            {regimes.map((regime, index) => (
               <div
-                key={regime.timestamp}
+                key={`${index}-${regime.timestamp}`}
                 title={`${dateShort(regime.timestamp)} · ${regime.trend_regime} · ${regime.vol_regime} · ${pct(regime.dist_ma_pct)}`}
                 className={`h-14 flex-1 rounded-sm ${
                   regime.trend_regime.toLowerCase().includes("alta")
@@ -257,8 +257,8 @@ function MarketBody({ data }: { data: MarketData }): ReactNode {
       <Panel className="p-5">
         <SectionHeader eyebrow="Procedência" title="Saúde das fontes" description="Cada arquivo declara status, linhas e última data. Erros não são ocultados." />
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {data.sources.map((source) => (
-            <div key={source.source} className="flex items-start justify-between gap-3 border-t border-hairline pt-3">
+          {data.sources.map((source, index) => (
+            <div key={`${index}-${source.source}`} className="flex items-start justify-between gap-3 border-t border-hairline pt-3">
               <div className="min-w-0">
                 <div className="text-[12px] font-medium text-ink">{source.source}</div>
                 <div className="mt-0.5 text-[11px] text-muted">{source.scope}</div>

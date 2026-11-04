@@ -68,8 +68,8 @@ function MethodologyBody({ data }: { data: Overview }): ReactNode {
         <div className="min-w-0">
           <SectionHeader eyebrow="Limites" title="O que não é feito" />
           <ul className="mt-4 space-y-3">
-            {LIMITS.map((limit) => (
-              <li key={limit} className="flex gap-2 border-b border-hairline/70 pb-3 text-[12px] leading-relaxed text-muted">
+            {LIMITS.map((limit, index) => (
+              <li key={`${index}-${limit}`} className="flex gap-2 border-b border-hairline/70 pb-3 text-[12px] leading-relaxed text-muted">
                 <TriangleAlert size={14} className="mt-0.5 shrink-0 text-warning" />
                 {limit}
               </li>
@@ -129,8 +129,8 @@ function MethodologyBody({ data }: { data: Overview }): ReactNode {
           actions={<GitBranch size={17} className="text-faint" />}
         />
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {system.source_health.map((source) => (
-            <div key={source.source} className="border border-hairline bg-surface p-4">
+          {system.source_health.map((source, index) => (
+            <div key={`${index}-${source.source}`} className="border border-hairline bg-surface p-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="text-[12px] font-medium text-ink">{source.source}</div>
                 <Badge tone={source.status === "ok" ? "positive" : "critical"}>{source.status}</Badge>

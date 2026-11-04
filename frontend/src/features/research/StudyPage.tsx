@@ -62,8 +62,8 @@ function StudyDetail({ study }: { study: ResearchStudy }): ReactNode {
           <section>
             <SectionHeader eyebrow="Achados" title="O que os números mostram" />
             <div className="mt-4 space-y-0 border-b border-hairline">
-              {study.findings.map((finding) => (
-                <div key={finding.title} className="border-t border-hairline py-4">
+              {study.findings.map((finding, index) => (
+                <div key={`${index}-${finding.title}`} className="border-t border-hairline py-4">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={finding.tone}>{finding.tone === "positive" ? "favorável" : finding.tone}</Badge>
                     <h3 className="text-[14px] font-semibold text-ink">{finding.title}</h3>
@@ -111,8 +111,8 @@ function StudyDetail({ study }: { study: ResearchStudy }): ReactNode {
               <h2 className="text-[14px] font-semibold text-ink">Limitações</h2>
             </div>
             <ul className="mt-3 space-y-2">
-              {study.limitations.map((limitation) => (
-                <li key={limitation} className="flex gap-2 text-[12px] leading-relaxed text-muted">
+              {study.limitations.map((limitation, index) => (
+                <li key={`${index}-${limitation}`} className="flex gap-2 text-[12px] leading-relaxed text-muted">
                   <span className="mt-1.5 size-1 shrink-0 rounded-full bg-warning" />
                   {limitation}
                 </li>
@@ -128,8 +128,8 @@ function StudyDetail({ study }: { study: ResearchStudy }): ReactNode {
               </div>
             ) : (
               <ul className="mt-4 space-y-2">
-                {study.docs.map((doc) => (
-                  <li key={doc} className="flex items-start gap-2 border-b border-hairline/70 pb-2 text-[12px] text-muted">
+                {study.docs.map((doc, index) => (
+                  <li key={`${index}-${doc}`} className="flex items-start gap-2 border-b border-hairline/70 pb-2 text-[12px] text-muted">
                     <FileText size={14} className="mt-0.5 shrink-0 text-faint" />
                     <code className="break-all font-mono text-[11px]">{doc}</code>
                   </li>

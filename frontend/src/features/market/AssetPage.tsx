@@ -161,8 +161,8 @@ function ReasonList({
         <p className="mt-2 text-[12px] text-faint">{empty}</p>
       ) : (
         <ul className="mt-2 space-y-1.5">
-          {items.map((item) => (
-            <li key={item} className="flex gap-2 text-[12px] leading-relaxed text-muted">
+          {items.map((item, index) => (
+            <li key={`${index}-${item}`} className="flex gap-2 text-[12px] leading-relaxed text-muted">
               <span className={`mt-1.5 size-1 shrink-0 rounded-full ${dot}`} />
               {item}
             </li>

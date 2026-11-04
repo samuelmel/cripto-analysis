@@ -131,8 +131,8 @@ function EntryTable({ rows }: { rows: readonly EntryLevel[] }): ReactNode {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={`${row.combo}-${row.candidate}`} className="border-b border-hairline/70">
+          {rows.map((row, index) => (
+            <tr key={`${index}-${row.combo}-${row.candidate}`} className="border-b border-hairline/70">
               <td className="py-2.5 pr-3 text-ink">{row.combo.replaceAll("_", " ")}</td>
               <td className="py-2.5 pr-3">{row.candidate}</td>
               <td className="py-2.5 pr-3">
