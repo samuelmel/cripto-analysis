@@ -14,18 +14,23 @@ As regras completas estão em [CLAUDE.md](../CLAUDE.md). Código que viola uma d
 ## Comandos
 
 ```bash
-uv sync                                # dependências Python, incluindo as de desenvolvimento
-uv run pytest                          # testes
-uv run mypy --strict src/              # tipagem estrita do Python
-npm --prefix frontend install          # dependências do painel
-npm --prefix frontend run typecheck    # tipagem do painel (app e config do Vite)
-npm --prefix frontend run build        # typecheck + build de produção em frontend/dist
-npm --prefix frontend run dev          # painel em modo de desenvolvimento
+uv sync --locked                       # dependências Python, incluindo as de desenvolvimento
+uv run pytest -q                       # testes (sem rede)
+uv run mypy --strict src/ mcp_server.py  # tipagem estrita do Python
+uv run python -m src.api               # API em http://127.0.0.1:8000
+
+cd frontend
+npx --yes pnpm@10 install              # dependências do painel
+npx --yes pnpm@10 typecheck            # tipagem do app e das configs
+npx --yes pnpm@10 test                 # testes unitários (Vitest)
+npx --yes pnpm@10 build                # typecheck + build em frontend/dist
+npx --yes pnpm@10 e2e                  # smoke Playwright (API + build)
 ```
 
-Em 2026-10-16 (auditoria de consolidação e redesign do painel), os comandos de verificação passaram: 242 testes, `mypy --strict` sem erros em 42 arquivos, `uv lock --check` consistente e o build do painel (`tsc` estrito + `vite build`).
-
-O workflow `.github/workflows/ci.yml` roda `uv lock --check`, `uv sync --locked`, `mypy --strict`, `pytest` e o build do painel a cada push na `main` e em pull requests. Ele foi escrito nesta auditoria e **ainda não foi executado no GitHub**; a primeira rodada pode revelar diferenças entre Windows e Linux. O `daily.yml` continua sendo só o pipeline diário.
+O workflow `.github/workflows/ci.yml` roda `uv lock --check`, `uv sync --locked`, `mypy --strict`, `pytest` e, no
+frontend, `pnpm install --frozen-lockfile`, `typecheck`, `test` e `build` a cada push na `main` e em pull requests. Os
+testes de integração da API que dependem dos Parquets publicados são ignorados no CI, onde esses artefatos não são
+versionados. O `daily.yml` continua sendo só o pipeline diário.
 
 ## Testes
 
@@ -46,6 +51,7 @@ O workflow `.github/workflows/ci.yml` roda `uv lock --check`, `uv sync --locked`
 | `test_loaders.py` | Escrita atômica, snappy, snapshots, upsert idempotente e consistência das duas definições do filtro do BTC |
 | `test_frontend_contract.py` | Contrato do painel: todo campo dos tipos TypeScript existe no schema Python e o leitor só consome campos declarados |
 | `test_regime_policy.py` | Fase 5 (pesquisa): políticas por regime, custos de transição, baselines, bootstrap, registro de experimentos e isolamento da produção |
+| `tests/api/test_api.py` | API somente leitura: consistência da execução, ativos, pesquisa, carteiras indisponíveis, status e ausência de rotas de escrita. Ignorado quando os Parquets publicados não existem. |
 
 ## Mudanças comuns
 
@@ -74,12 +80,12 @@ uv run python -m src.pipeline --offline
 
 ## Frontend
 
-- **Stack:** React 19, TypeScript, Vite, Tailwind CSS 4, `lightweight-charts` nos gráficos e `hyparquet` para ler Parquet no navegador.
-- **Organização:** componentes em `frontend/src/components/` não fazem `fetch`. O carregamento fica em `frontend/src/data/loadSignals.ts`, e os cálculos e textos ficam em funções puras de `frontend/src/data/` (`analytics.ts`, `selection.ts`, `kpis.ts` para a faixa de indicadores e `regimes.ts` para os regimes). A casca é `Dashboard.tsx` (barra superior, indicadores, avisos e as cinco visões); cada visão é um componente (`OverviewView`, `SelectionView`, `ForecastView`, `ResearchView`) montado com as primitivas de `ui.tsx` (`Panel`, `Table`, `Segmented`, `Collapsible`).
+- **Stack:** React 19, TypeScript estrito, Vite, Tailwind CSS 4, Radix UI, Lucide, ECharts, TanStack Query, Zod e React Router. O painel consome a API em `/api/v1`; `hyparquet` permanece apenas para o contrato legado de `loadSignals.ts`.
+- **Organização:** componentes não fazem `fetch`. O carregamento fica em `frontend/src/services/` (cliente HTTP + hooks TanStack Query) e os contratos são validados com Zod em `frontend/src/schemas/api.ts`. Formatação e cálculos de apresentação são funções puras em `frontend/src/lib/`.
+- **Rotas:** `HashRouter` com Visão geral, Carteiras, Pesquisa, Mercado e Metodologia. A API serve `frontend/dist` na mesma origem em produção.
 - **Contrato com o backend:** todo campo que um tipo de `frontend/src/types/signals.ts` declara precisa existir no schema Python que gera o arquivo, e o leitor só consome campos declarados (`tests/test_frontend_contract.py`).
-- **Rota local de posições:** `frontend/server/positionsApi.ts` só existe no `npm run dev` e só aceita pedidos da própria página.
-- **Design:** cores, tipografia e componentes estão em [frontend/DESIGN.md](../frontend/DESIGN.md).
+- **Design:** tokens, componentes e regras visuais estão em [frontend/DESIGN.md](../frontend/DESIGN.md); a arquitetura de dados e endpoints está em [frontend-architecture.md](frontend-architecture.md).
 
 ## Arquivos que não vão para o Git
 
-Definidos em [`.gitignore`](../.gitignore) e [`frontend/.gitignore`](../frontend/.gitignore): `data/`, `logs/`, `frontend/public/*.parquet`, `frontend/node_modules/`, `frontend/dist/`, `.venv/`, `.env` e `.env.*`, arquivos `*.tmp` e caches do Python. Nunca versione tokens nem chaves de API.
+Definidos em [`.gitignore`](../.gitignore) e [`frontend/.gitignore`](../frontend/.gitignore): `data/`, `logs/`, `frontend/public/*.parquet`, `frontend/node_modules/`, `frontend/dist/`, `frontend/test-results/`, `frontend/playwright-report/`, `frontend/package-lock.json`, `.venv/`, `.env` e `.env.*`, arquivos `*.tmp` e caches do Python. Nunca versione tokens nem chaves de API.

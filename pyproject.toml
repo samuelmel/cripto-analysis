@@ -5,10 +5,12 @@ description = "Extração e análise de OHLCV histórico de criptomoedas em Parq
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "fastapi>=0.162.0",
     "mcp>=2.3.0",
     "numpy>=2.0",
     "pandas>=2.2",
     "pyarrow>=15.0",
+    "uvicorn[standard]>=0.54.0",
 ]
 
 [tool.uv]
@@ -16,6 +18,7 @@ package = false
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "mypy>=2.4.0",
     "pandas-stubs>=3.0.5.260914",
     "pytest>=9.1.1",

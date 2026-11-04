@@ -48,14 +48,34 @@ jobs:
         run: uv run pytest -q
 
   frontend:
-    name: Frontend (tsc estrito e build)
+    name: Frontend (tsc estrito, testes e build)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
 
-      - name: Instalar as dependências (package-lock.json)
-        run: npm --prefix frontend ci
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Instalar as dependências (pnpm-lock.yaml)
+        run: pnpm install --frozen-lockfile
+        working-directory: frontend
+
+      - name: Tipos estritos
+        run: pnpm run typecheck
+        working-directory: frontend
+
+      - name: Testes unitários
+        run: pnpm test
+        working-directory: frontend
 
       - name: Build (tsc --noEmit estrito + vite build)
-        run: npm --prefix frontend run build
+        run: pnpm run build
+        working-directory: frontend

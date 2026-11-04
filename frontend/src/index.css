@@ -1,78 +1,153 @@
 @import "@fontsource/ibm-plex-sans/400.css";
 @import "@fontsource/ibm-plex-sans/500.css";
 @import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
 @import "tailwindcss";
 
-/* Tokens: frontend/DESIGN.md é o contrato. Novo token entra lá primeiro. */
 @theme {
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
-  --color-ground: #f4f5f2;
-  --color-surface: #fcfcfb;
-  --color-ink: #121417;
-  --color-muted: #55544f;
-  --color-hairline: #e1e0d9;
-  --color-signal: #1c5cab;
-  --color-signal-bg: #e3ecf7;
-  --color-signal-hover: #184f95;
-  --color-signal-active: #104281;
-
-  --color-good: #006300;
-  --color-good-mark: #0ca30c;
-  --color-good-bg: #e3f1e3;
-  --color-critical: #b42d2d;
-  --color-critical-mark: #d03b3b;
-  --color-critical-bg: #f8e5e4;
-  --color-warning: #7a4f00;
-  --color-warning-mark: #fab219;
-  --color-warning-bg: #fbf0d3;
-
-  --color-neutral-mark: #8a897f;
-
-  --color-series-price: #2a78d6;
-  --color-series-average: #eb6834;
-  --color-series-trend: #4a3aa7;
+  --color-ground: #f3f2ed;
+  --color-surface: #fbfaf7;
+  --color-raised: #ffffff;
+  --color-sunken: #ebe9e2;
+  --color-ink: #151613;
+  --color-muted: #5d5c55;
+  --color-faint: #8a887e;
+  --color-hairline: #dcdad1;
+  --color-hairline-strong: #c7c4b8;
+  --color-signal: #0d6b63;
+  --color-signal-deep: #094d47;
+  --color-signal-wash: #e2efec;
+  --color-good: #176a3a;
+  --color-good-wash: #e4f0e8;
+  --color-critical: #a43131;
+  --color-critical-wash: #f6e5e3;
+  --color-warning: #7c5300;
+  --color-warning-wash: #f7eed6;
+  --color-series-1: #0d6b63;
+  --color-series-2: #b05e34;
+  --color-series-3: #7161a8;
+  --color-series-4: #4f7188;
 
   --radius-sm: 4px;
-  --radius-md: 6px;
+  --radius-md: 7px;
+  --radius-lg: 12px;
+
+  --shadow-float: 0 18px 45px rgb(21 22 19 / 0.10), 0 2px 8px rgb(21 22 19 / 0.06);
 }
 
 :root {
   color-scheme: light;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--color-ground);
 }
 
 body {
+  margin: 0;
+  min-width: 320px;
   background: var(--color-ground);
   color: var(--color-ink);
   font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.45;
-  /* A página nunca rola na horizontal: dicas e conteúdo largo ficam contidos (clip não cria contêiner de rolagem,
-     então o cabeçalho fixo continua funcionando). */
+  line-height: 1.5;
   overflow-x: clip;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Barras de rolagem finas nas áreas com rolagem interna (tabelas e listas com altura limitada). */
-.scroll-thin {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-hairline) transparent;
+::selection {
+  background: var(--color-signal-wash);
+  color: var(--color-signal-deep);
 }
 
 :focus-visible {
   outline: 2px solid var(--color-signal);
   outline-offset: 2px;
+  border-radius: 3px;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
 }
 
 .num {
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.display {
+  letter-spacing: -0.035em;
+  line-height: 1.03;
+}
+
+.hairline {
+  border-color: var(--color-hairline);
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-hairline-strong) transparent;
+}
+
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--color-hairline-strong);
+  border-radius: 99px;
+}
+
+.grid-paper {
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--color-hairline) 50%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--color-hairline) 50%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+.reveal {
+  animation: reveal 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    transition: none !important;
     animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
   }
 }

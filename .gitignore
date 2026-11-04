@@ -8,3 +8,6 @@ logs/
 frontend/public/*.parquet
 .env
 .env.*
+frontend/test-results/
+frontend/playwright-report/
+frontend/package-lock.json

@@ -1,102 +1,85 @@
----
-version: alpha
-name: crypto-analyzer
-description: Painel diário de análise quantitativa que diz, em português simples, o que fazer com cada criptomoeda hoje, com a informação essencial na primeira tela.
-colors:
-  ground: "#f4f5f2"      # página
-  surface: "#fcfcfb"     # blocos e gráfico
-  ink: "#121417"         # 16.9:1 no ground
-  muted: "#55544f"       # 6.9:1 no ground
-  hairline: "#e1e0d9"
-  signal: "#1c5cab"      # 6.1:1 — seleção, links, foco, botão principal
-  signal-hover: "#184f95"
-  signal-active: "#104281"
-  series-price: "#2a78d6"
-  series-average: "#eb6834"
-  series-trend: "#4a3aa7"   # 3ª série (média de 200 dias)
-  good: "#006300"        # texto de ganho / SEGURAR · marca #0ca30c
-  good-bg: "#e3f1e3"
-  critical: "#b42d2d"    # texto de perda / VENDER · marca #d03b3b
-  critical-bg: "#f8e5e4"
-  warning: "#7a4f00"     # texto de PREPARAR · marca #fab219
-  warning-bg: "#fbf0d3"
-  neutral-mark: "#8a897f"   # faixa de regime lateral e marcas neutras (nunca texto)
-typography:
-  body: { family: "IBM Plex Sans", size: 14px, line-height: 1.45, weights: [400, 500, 600] }
-  title: { family: "IBM Plex Sans", size: 15px, weight: 600, letter-spacing: -0.01em }
-  figure: { family: "IBM Plex Sans", size: 22px, weight: 500, numeric: tabular }
-  table-numbers: { numeric: tabular-nums }
-rounded: { sm: 4px, md: 6px }
-spacing: { xs: 4px, sm: 8px, md: 12px, lg: 16px, xl: 24px }
----
+# Crypto Analyzer — sistema visual
 
-## Overview
+Painel quantitativo somente leitura. A interface existe para responder o que os dados publicados mostram, com que
+confiança e o que continua indisponível. Nenhuma tela sugere ordem real, promessa de retorno ou certeza.
 
-Ferramenta pessoal de monitoramento e análise quantitativa de criptomoedas, que precisa ser entendida por quem não conhece o assunto. O visual vem do material do próprio produto, as mesas de cotação e os terminais de análise: grade rígida, alta densidade com hierarquia clara, uma família tipográfica em vários pesos, cor só onde carrega significado. A tela inicial ("Hoje") responde em uma frase o que fazer, em português simples e sem jargão; os números técnicos ficam nas outras abas ou recolhidos. A informação que se consulta todo dia cabe na primeira tela de um desktop comum; o resto fica a uma aba, uma seção recolhível ou a uma rolagem interna de distância. A explicação para leigos continua presente, mas recolhida (dicas de glossário e textos "Como ler"), nunca no caminho do número.
+## Princípios
 
-## Colors
+- **Decisão primeiro, densidade depois.** A Visão geral abre com a decisão publicada e o orçamento; tabelas e detalhes
+  vêm abaixo.
+- **Dados reais ou estado explícito.** Valor ausente vira "Indisponível", nunca zero, média ou estimativa inventada.
+- **Terminal editorial, não dashboard genérico.** Tipografia, tabelas, hairlines e gráficos no lugar de uma grade de
+  cartões coloridos.
+- **Cor só quando carrega significado.** Teal marca ação e seleção; verde e vermelho marcam sinal e variação; âmbar
+  marca atenção e defasagem.
+- **Leitura confortável em qualquer largura.** Conteúdo ocupa a tela; abaixo de `lg` a navegação vira barra inferior.
 
-- **ground / surface** — cinza-claro neutro (não creme) para a página e quase-branco para painéis; o contraste entre os dois separa áreas sem sombra.
-- **ink / muted** — texto principal e secundário, ambos acima de 4.5:1.
-- **signal** (azul profundo) — um único trabalho: indicar o que é interativo ou selecionado (aba ativa, moeda escolhida, foco, links).
-- **series-price / series-average / series-trend** — azul, laranja e violeta da paleta categórica validada (`validate_palette.js --pairs all`: CVD ΔE ≥ 13, normal ≥ 16, contraste ≥ 3:1). Usados no gráfico e na barra do orçamento, sempre com legenda.
-- **good / critical / warning** — status. Sempre acompanhados de texto; nunca a cor sozinha. Verde/vermelho também significam ganho/perda em números com sinal + ou −.
-- **marcas de regime** — a faixa do tempo dos regimes usa as marcas dos status (`good-mark` alta, `critical-mark` baixa, `warning-mark` misto ou volatilidade alta, `neutral-mark` lateral, `hairline` sem classificação) com legenda de texto ao lado. É descrição experimental: a cor nunca sugere compra ou venda.
+## Tokens
 
-## Typography
+Definidos em `src/index.css` (`@theme`) e usados como classes Tailwind.
 
-IBM Plex Sans, self-hosted via @fontsource (400/500/600). Escala: 11 (rótulos de indicador e notas), 12 (cabeçalhos de tabela, legendas, notas de painel), 13 (corpo de tabela e título de painel), 14 (corpo), 15 (título do app), 22 (número de destaque dentro de um painel). Algarismos tabulares (`num`) em tudo que se compara em coluna ou linha.
+| Token | Valor | Uso |
+|---|---|---|
+| `ground` | `#f3f2ed` | fundo da página |
+| `surface` | `#fbfaf7` | painéis e barras |
+| `raised` | `#ffffff` | controles e superfícies elevadas |
+| `sunken` | `#ebe9e2` | hover, esqueletos e faixas |
+| `ink` | `#151613` | texto principal |
+| `muted` | `#5d5c55` | texto secundário |
+| `faint` | `#8a887e` | rótulos e metadados |
+| `hairline` | `#dcdad1` | bordas de 1px |
+| `hairline-strong` | `#c7c4b8` | bordas de controles |
+| `signal` | `#0d6b63` | links, seleção, ação principal |
+| `signal-deep` | `#094d47` | hover e texto sobre lavagem |
+| `signal-wash` | `#e2efec` | fundo selecionado |
+| `good` / `good-wash` | `#176a3a` / `#e4f0e8` | ganho, estado positivo |
+| `critical` / `critical-wash` | `#a43131` / `#f6e5e3` | perda, erro, risco |
+| `warning` / `warning-wash` | `#7c5300` / `#f7eed6` | atenção, defasagem |
+| `series-1..4` | teal, terracota, violeta, azul | séries de gráfico |
+
+Raios: `sm` 4px, `md` 7px, `lg` 12px. A sombra `float` é reservada a sobreposições, não a painéis.
+
+## Tipografia
+
+IBM Plex Sans (400/500/600) para texto e títulos; IBM Plex Mono (400/500) para números, datas, tickers e valores
+tabulares via `.num`. Títulos usam `.display` com `letter-spacing` negativo. Escala principal: 10–11px para rótulos,
+12–13px para corpo e tabelas, 14–15px para títulos de seção, 22px para números de destaque e 24–40px para o hero.
 
 ## Layout
 
-Largura útil de até 1760px, alinhada à esquerda, em **grade de 12 colunas** com espaçamento `md` (12px) entre painéis. O painel nunca rola na horizontal; qualquer conteúdo largo (tabelas, abas) rola **dentro** do próprio painel.
+- **Desktop (`lg`+):** sidebar fixa de 236px, topbar sticky de 48px, conteúdo com padding lateral de 24–40px e largura
+  total disponível. Sem coluna central estreita.
+- **Mobile:** topbar compacta com marca e status; barra inferior fixa com cinco destinos; conteúdo em uma coluna.
+- Grades usam `min-w-0` nos filhos para que gráficos e tabelas rolem dentro do painel, nunca na página.
+- Tabelas longas têm rolagem interna e cabeçalho fixo; colunas secundárias desaparecem no celular.
 
-- **Barra superior fixa** (uma linha, 44px): nome do app, as cinco visões como abas (Hoje, Seleção, Histórico, Previsões, Pesquisa) e, à direita, "Dados de <dia> (em dia/atrasado)" e o botão de recarregar. Hora da coleta e estado da execução ficam na dica (title), não na tela.
-- **Hoje** (tela inicial, pensada para leigos):
-  1. **Resumo de hoje**: uma frase de ação ("Considere aplicar R$ X de R$ Y em N moedas, ou espere"), três linhas curtas do porquê (mercado, sinais de entrada, "é simulação") e três indicadores: mercado, humor do mercado e suas posições.
-  2. **Avisos**: uma frase por aviso; moedas sem dado viram uma linha só ("1 moeda ficou de fora hoje por falta de dados: TON") e o detalhe técnico fica em "detalhes". Sem aviso, uma linha tranquila.
-  3. **Três cartões**: Onde aplicar (moeda, valor, nota), Em observação (candidatas dos sinais de entrada, desde quando, com o "por quê" e o aviso de que não é compra) e Suas posições.
-  4. **"Ver gráfico e todas as moedas"**, recolhido: gráfico com seletor de moeda e a tabela de todas as moedas.
-  A antiga faixa de oito indicadores e o painel da regra SMA 200 saíram da tela inicial (a SMA 200 é só contexto desde 2026-10-17; o detalhe está em Histórico e Pesquisa).
-- **Seleção**: ranking completo (altura limitada, cabeçalho fixo) e, abaixo, o backtest da seleção ao lado de "Como a seleção decide".
-- **Histórico**: tabela de todas as moedas ao lado do gráfico e da lista de operações da moeda escolhida.
-- **Previsões**: BTC e ETH lado a lado, cada um com gráfico e tabela de avaliação; colunas de detalhe só a partir de 1536px.
-- **Pesquisa**: um seletor segmentado escolhe um grupo por vez: sinais de entrada (padrão), regra de tendência, validação por moeda, laboratório, regimes (experimental), como funciona e glossário.
+## Componentes
 
-Abaixo de 768px tudo vira uma coluna, na mesma ordem; toda grade declara `grid-cols-1` no tamanho base para nenhum filho largo empurrar a página. Colunas secundárias das tabelas somem no celular (`hidden md:table-cell`); nada deixa a página rolar na horizontal.
+- **Panel:** superfície `surface` com borda `hairline` e raio `md`. É o único nível de container; não aninha painéis.
+- **SectionHeader:** eyebrow em teal, título `.display` e descrição curta; ações alinhadas à direita.
+- **Badge:** texto + tom + ponto opcional. O ponto nunca substitui o texto.
+- **Button:** primário teal, secundário com borda, fantasma sem borda. Altura de 36px e foco visível.
+- **Stat:** rótulo em caixa alta, número mono de 22px e nota. Tom semântico apenas quando o dado justifica.
+- **InlineNote:** faixa com borda esquerda de 2px para ressalvas, defasagem e limitações.
+- **LoadingBlock / EmptyState / ErrorState:** estados explícitos, com rótulo acessível e ação de nova tentativa quando
+  aplicável.
+- **SegmentedTabs:** Radix Tabs; setas do teclado mudam a aba, estado ativo em `signal-wash`.
+- **Hint:** Radix Tooltip para explicar termos sem esconder o número principal.
+- **Gráficos ECharts:** linha de preço, performance, faixa P10–P90 e sparkline. Séries sempre legendadas; estimativas
+  tracejadas e visualmente distintas do histórico.
 
-## Elevation & Depth
+## Acessibilidade
 
-Plano. Nenhuma sombra. Painéis se separam por fundo (surface sobre ground) e hairline de 1px.
+- Foco visível global de 2px em teal.
+- Contraste mínimo de 4.5:1 para texto e 3:1 para elementos de interface.
+- `aria-current`, `aria-selected`, `role="status"` e rótulos em ícones de navegação.
+- `prefers-reduced-motion` desliga animações e transições.
+- Navegação completa por teclado; tabelas mantêm cabeçalhos semânticos.
 
-## Shapes
+## Evitar
 
-`sm` 4px em etiquetas de status, botões e controles; `md` 6px em painéis. Nada além disso.
-
-## Components
-
-- **Painel** — surface, hairline, `md`. Cabeçalho de uma linha (título 13px peso 600, nota `muted` 12px e ações à direita) separado do corpo por hairline; corpo com padding `md`, ou sem padding quando contém uma tabela. Um nível só: painel nunca contém painel nem cartão com borda própria.
-- **Barra superior** — fixa no topo, surface com hairline embaixo. Abas em texto 13px: a ativa tem fundo `signal-bg`, texto `signal` e `aria-selected`; setas do teclado trocam de visão. No celular o conjunto quebra em linhas e as abas rolam dentro da própria faixa.
-- **Resumo de hoje** — surface com padding `lg`: rótulo `muted` 12px em caixa alta, frase de ação 20–22px peso 600, linhas do porquê `muted` 14px e três indicadores em células divididas por hairline (rótulo 12px, valor 15px peso 600 no tom de status). A explicação completa de cada indicador fica no `title`.
-- **Faixa de avisos** — uma caixa surface com uma linha por aviso (ícone Phosphor de 16px, título em `warning` ou `critical`, texto `muted`); diz que avisos não são recomendações. Sem avisos, uma linha `muted` com ícone de confirmação.
-- **Tabela** — compacta (linhas de 28px, texto 13px), cabeçalho `muted` 12px peso 500 **fixo** durante a rolagem interna, `max-height` por painel, números à direita em tabulares, linha selecionável com foco visível. Colunas secundárias: `narrow: "hide"` (some no celular) e `narrow: "wide"` (só a partir de 1536px).
-- **Recomendação** — frase de decisão, barra do orçamento (cores de série, sempre mostrando o que fica sem investir) e uma linha por moeda selecionada (classificação, aporte, score e motivo principal); o detalhe (componentes do score, motivos, riscos, indicadores) abre sob demanda. Classificação usa `signal` (boa oportunidade relativa), neutro (moderada e evitar) e `warning` (aguardar). **Nunca** `good`/verde para oportunidade: verde sugeriria certeza de ganho.
-- **Faixa de previsão** — uma linha por horizonte: nome, trilho `ground` com o zero marcado, segmento tracejado de P10 a P90 e um traço no P50. Sempre rotulada "estimativa". Quando o modelo não vence a referência, vem junto a etiqueta `warning` "sem vantagem demonstrada".
-- **Regimes (experimental)** — células do estado de hoje, faixa do tempo da tendência e da volatilidade (largura proporcional aos dias, legenda de texto, eixo de anos), frequência por regime e as limitações conhecidas. Sempre rotulado experimental e descritivo: não gera sinal e não altera aporte, compra ou venda.
-- **Seletor segmentado** — grupo de botões 12px com hairline; o selecionado tem fundo `signal-bg` e `aria-pressed`. Substitui grupos de botões grandes.
-- **Recolhível** — `details` com resumo `muted` 13px: o texto longo de ajuda ("Como ler", validação, limitações) fica a um clique, sem ocupar altura.
-- **Dica de glossário** — o termo com sublinhado pontilhado e um balão `surface` com borda `hairline`; abre ao passar o mouse, ao focar com o teclado e some com Esc; abre para a esquerda quando o termo está perto da borda direita; no celular vira uma faixa fixa na base da tela. O texto longo mora em `src/data/glossary.ts`.
-- **Tooltip do gráfico** — balão `surface` com data, valor e fonte (Binance para preço, "calculada aqui" para médias, "modelo estatístico" para estimativas). Estimativas aparecem tracejadas e nunca se confundem com o histórico. Altura do gráfico controlada pelo painel (260 a 320px).
-- **Estados** — carregando: mensagem e esqueleto estático (sem animação) com o formato da página; dados ausentes: painel com o comando do terminal que gera o arquivo; erro: painel com a mensagem; sem dado de uma moeda ou série: "—", nunca zero.
-- **Etiqueta de status** — texto + fundo tint da cor de status, `sm`, 12px peso 500.
-- **Botão** — principal: fundo signal, texto surface; secundário: hairline; perigo: borda e texto critical; fantasma: só texto. Ícone de 14 a 18px à esquerda quando ajuda a reconhecer a ação.
-- **Ícones** — Phosphor, peso regular, sem moldura; cada ícone tem um significado fixo (escudo = limite de perda, seta de queda = tendência acabou, moeda Bitcoin = mercado virou, olho = ficar de olho, mão com moedas = comprar ou segurar).
-- **Logos das moedas** — SVG oficial (cryptocurrency-icons, CC0) em 18 a 30px, sempre ao lado do ticker.
-
-## Do's and Don'ts
-
-- Do: reutilizar tokens e componentes acima; adicionar token aqui antes de usá-lo.
-- Do: escrever como se explica para um amigo: frases curtas, sem jargão sem explicação, sentence case; o texto longo vai em recolhível ou glossário.
-- Do: foco visível em tudo que é clicável; respeitar `prefers-reduced-motion`; altura limitada e rolagem interna em tabelas longas.
-- Don't use: fundo preto com verde neon, fonte mono decorativa, rótulos em caixa-alta, separadores "·", setas em botões, numeração 01/02/03, gradientes, glassmorphism, sombras grandes, cartões com faixa colorida na lateral, ícones em quadradinho, animação de contagem.
-- Don't change: Parquet como fonte de dados; regras de negócio fora dos componentes (CLAUDE.md).
+- Fundo preto com verde neon, gradientes, glassmorphism e sombras pesadas.
+- Cartões com faixa colorida lateral, excesso de cards e números sem contexto.
+- Verde para oportunidade ou previsão de alta; cor nunca promete retorno.
+- Truncar valores sem indicar unidade, data ou fonte.
+- Mostrar "R$ 0" quando a cotação ou o Parquet está ausente.

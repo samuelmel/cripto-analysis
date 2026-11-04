@@ -1,16 +1,40 @@
 # Painel do Crypto Analyzer
 
-Painel em React + TypeScript que lê os arquivos Parquet gravados pelo pipeline em `public/`.
+Frontend React + TypeScript do monitor quantitativo. Ele consome a API FastAPI somente leitura em `/api/v1`; não lê
+Parquet no navegador, não calcula sinais e não envia ordens. A arquitetura completa está em
+[`docs/frontend-architecture.md`](../docs/frontend-architecture.md).
+
+## Desenvolvimento
+
+Na raiz do projeto, inicie a API:
 
 ```bash
-npm install          # nesta pasta, ou npm --prefix frontend install na raiz
-npm run dev          # painel em http://localhost:5173 (endereço exato na linha "Local:")
-npm run typecheck    # tipagem estrita
-npm run build        # typecheck + build de produção em dist/
+uv run python -m src.api
 ```
 
-Rode o pipeline antes (`uv run python -m src.pipeline`, na raiz). Sem os arquivos, o painel mostra "Ainda não há dados para mostrar".
+Em outro terminal:
 
-- Uso das abas e registro de posições: [docs/usage.md](../docs/usage.md)
-- Organização do código e regras: [docs/development.md](../docs/development.md#frontend)
-- Contrato visual: [DESIGN.md](DESIGN.md)
+```bash
+cd frontend
+npx --yes pnpm@10 install
+npx --yes pnpm@10 dev
+```
+
+O Vite roda em `http://localhost:5173` e encaminha `/api` para `http://127.0.0.1:8000`.
+
+## Verificação
+
+```bash
+npx --yes pnpm@10 typecheck
+npx --yes pnpm@10 test
+npx --yes pnpm@10 build
+npx --yes pnpm@10 e2e
+```
+
+O build fica em `dist/`. Em produção, `uv run python -m src.api` serve esse diretório na mesma origem da API.
+
+## Dados ausentes
+
+Algumas telas dependem de Parquets que podem não existir no worktree atual, como `sim_wallets.parquet` e
+`sim_wallet_positions.parquet`. Nesses casos a interface mostra estado indisponível; ela não inventa patrimônio,
+posições ou cotações.
