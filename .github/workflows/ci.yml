@@ -42,7 +42,7 @@ jobs:
         run: uv sync --locked
 
       - name: Tipos estritos
-        run: uv run mypy --strict src/ mcp_server.py
+        run: uv run mypy --strict src/ mcp_server.py run.py
 
       - name: Testes (nenhum acessa a rede)
         run: uv run pytest -q

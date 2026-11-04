@@ -130,7 +130,13 @@ Componentes de UI seguem o padrão shadcn/ui (primitivas Radix + classes locais)
 ## 5. Execução
 
 ```bash
-# API (mesma origem do build em produção)
+# atalho: API + Vite + navegador
+uv run run.py
+
+# produção local: build servido pela API em :8000
+uv run run.py --prod
+
+# manualmente
 uv run python -m src.api
 
 # frontend em desenvolvimento, com proxy /api para 127.0.0.1:8000

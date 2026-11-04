@@ -16,8 +16,10 @@ As regras completas estão em [CLAUDE.md](../CLAUDE.md). Código que viola uma d
 ```bash
 uv sync --locked                       # dependências Python, incluindo as de desenvolvimento
 uv run pytest -q                       # testes (sem rede)
-uv run mypy --strict src/ mcp_server.py  # tipagem estrita do Python
-uv run python -m src.api               # API em http://127.0.0.1:8000
+uv run mypy --strict src/ mcp_server.py run.py  # tipagem estrita do Python
+uv run run.py                          # API + Vite + navegador
+uv run run.py --prod                   # build servido pela API em :8000
+uv run python -m src.api               # somente a API
 
 cd frontend
 npx --yes pnpm@10 install              # dependências do painel

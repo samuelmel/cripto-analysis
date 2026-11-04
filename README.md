@@ -87,22 +87,18 @@ uv run python -m src.pipeline --offline
 Validar a mensagem do Telegram sem enviar nada:
 uv run python -m src.pipeline --dry-run
 
-Executar o painel em desenvolvimento (dois terminais, na raiz do projeto):
+Atalho: sobe API e painel juntos e abre o navegador:
+uv run run.py
 
-Terminal 1, API:
-uv run python -m src.api
+Variações:
+uv run run.py --no-browser        # sem abrir o navegador
+uv run run.py --prod              # usa o build e serve tudo em :8000
+uv run run.py --prod --build      # gera o build antes de servir
 
-Terminal 2, frontend:
-cd frontend
-npx --yes pnpm@10 dev
-
-Use o endereço mostrado pelo Vite (http://localhost:5173). Para gerar o
-build de produção:
-cd frontend
-npx --yes pnpm@10 build
-
-Em produção, a API serve frontend/dist na mesma origem:
-uv run python -m src.api
+O modo padrão usa Vite em http://localhost:5173 com proxy para a API em
+:8000. O modo `--prod` gera o build quando necessário e a API serve
+frontend/dist na mesma origem. Para executar manualmente, use
+`uv run python -m src.api` e `npx --yes pnpm@10 dev` dentro de frontend/.
 Telegram
 
 Para habilitar notificações, configure estas variáveis de ambiente:
@@ -118,7 +114,7 @@ Executar os testes Python:
 uv run pytest
 
 Verificar tipagem estrita:
-uv run mypy --strict src/ mcp_server.py
+uv run mypy --strict src/ mcp_server.py run.py
 
 Verificar o ambiente Python:
 uv lock --check
@@ -151,6 +147,7 @@ Limitações
     O projeto não envia ordens para corretoras.
 
 Estrutura do projeto
+run.py               # Atalho para subir API e painel
 src/
   api/              # API FastAPI somente leitura para o painel
   extractors/       # Adaptadores das fontes de dados

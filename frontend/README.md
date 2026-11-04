@@ -6,13 +6,13 @@ Parquet no navegador, não calcula sinais e não envia ordens. A arquitetura com
 
 ## Desenvolvimento
 
-Na raiz do projeto, inicie a API:
+Na raiz do projeto, o atalho sobe API, Vite e navegador:
 
 ```bash
-uv run python -m src.api
+uv run run.py
 ```
 
-Em outro terminal:
+Para iniciar separadamente, rode `uv run python -m src.api` em um terminal e, em outro:
 
 ```bash
 cd frontend
