@@ -71,3 +71,36 @@ O estudo é considerado negativo se nenhuma das 9 configurações for `FUNCIONA`
 - O "acaso" inclui a tendência de alta de cada moeda; o excesso é conservador de propósito.
 - Custo fixo de 0,2%, sem modelar spread por liquidez.
 - A ideia nasceu de um olhar exploratório nos mesmos dados; por isso o teste final de 2023+ **não é virgem**.
+
+## Resultado da execução de 2026-11-05
+
+`uv run python research/bottom_confirmation_study.py`: 32 moedas, dados até 2026-10-17, 16.169 operações nas 9 configurações.
+Saída em `evidence/bottom_confirmation/` (`trades.parquet`, `results.parquet`). Semente 20261105, 2.000 reamostras.
+
+**Veredito: as 9 configurações são `NAO_DEMONSTRADO`. O estudo é negativo.**
+
+Configuração central (fundo de 20 dias, segurar 10 dias, todas as 1.769 operações, retorno líquido de 0,2% de custo):
+
+| Entrada | Retorno médio por operação |
+|---|---|
+| Com viés (compra no fechamento do fundo) | **+8,2%** |
+| Honesta (compra na abertura de t+3) | **+0,2%** |
+| Acaso (qualquer dia, mesmo prazo) | **+1,5%** |
+
+Entrada honesta, desenvolvimento (2017 a 2022), excesso médio sobre o acaso por operação (IC de 90%):
+
+| Fundo | Segurar 5 d | Segurar 10 d | Segurar 20 d |
+|---|---|---|---|
+| 10 dias | −0,61 pp (−1,97 a +0,83) | −0,98 pp (−3,27 a +1,38) | +0,92 pp (−4,69 a +6,89) |
+| 20 dias | −1,01 pp (−2,23 a +0,46) | −1,88 pp (−4,11 a +0,65) | −1,30 pp (−6,53 a +4,51) |
+| 50 dias | −0,81 pp (−1,98 a +0,46) | −1,73 pp (−3,81 a +0,56) | −4,25 pp (−9,27 a +1,83) |
+
+Em nenhuma o limite inferior do IC ficou acima de zero; o p ajustado de Holm foi 1,0 nas 9. No teste final (2023+), o
+excesso da entrada honesta foi negativo em 8 das 9 (só 50/20 deu +0,72 pp, com IC de −4,26 a +6,70).
+
+A entrada **com viés** parece ótima (+5 a +10 pp sobre o acaso em quase todas as configurações), mas é uma ilusão: ela
+pressupõe saber que os dois dias seguintes subirão. **A diferença entre +8,2% e +0,2% é o preço de saber o futuro.**
+
+Observação: o teste informal de 05/11 dizia que a versão honesta "perdeu em todas as 5 configurações". No estudo
+formal, com 9 configurações, ela perdeu para o acaso em 8 no desenvolvimento (a exceção, fundo de 10 dias e 20 dias de
+prazo, ganhou +0,92 pp com IC que inclui zero). A conclusão é a mesma: nada se sustenta.
