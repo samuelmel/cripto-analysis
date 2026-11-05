@@ -11,3 +11,6 @@ frontend/public/*.parquet
 frontend/test-results/
 frontend/playwright-report/
 frontend/package-lock.json
+
+# Material pessoal de divulgação (LinkedIn): fora do repositório público
+/linkedin/
