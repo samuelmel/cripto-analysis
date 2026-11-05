@@ -9,8 +9,9 @@ Modelos (hiperparâmetros fixos, sem ajuste):
     G_GBM_SEM_FNG    o mesmo, sem o Fear & Greed
 Alvo e features: os de `entry_model` (supera o BTC em 30 dias, líquido, nas aberturas; features só até `t`).
 
-Modo sombra: as previsões são calculadas e REGISTRADAS todo dia (branch `state`, `model_predictions.parquet`), mas não
-entram na recomendação, no estágio nem no Telegram. O registro tem cadeia de hash e nunca reescreve (dia, moeda,
+Modo sombra: as previsões são calculadas e REGISTRADAS todo dia (branch `state`, `model_predictions.parquet`) e a opinião da
+IA aparece como "IA (em teste)" no Telegram e no painel. Só influenciam o aporte simulado se a trava de promoção
+(`promotion_gate`, docs/promocao_ia.md) aprovar; do contrário não entram na recomendação nem no estágio. O registro tem cadeia de hash e nunca reescreve (dia, moeda,
 modelo) já gravado: é o teste prospectivo. Sem Fear & Greed no dia, os modelos com F&G não preveem (ausência não vira
 zero) e os SEM_FNG continuam.
 """
@@ -25,6 +26,7 @@ from dataclasses import asdict, dataclass
 import numpy as np
 import pandas as pd
 
+from .bootstrap import BootstrapConfig, bootstrap_statistic, make_resampler
 from .entry_model import FEATURES, L2_LAMBDA, PURGE_DAYS, TARGET_HORIZON, fit_logistic, predict
 from .entry_signals import Panel, forward_returns, universe_reference
 from .gbm import GBMParams, fit_gbm, predict_gbm
@@ -308,3 +310,144 @@ def fng_series(fng: pd.DataFrame) -> pd.Series | None:
         return None
     s = fng.assign(timestamp=pd.to_datetime(fng["timestamp"], utc=True).dt.floor("D")).drop_duplicates("timestamp", keep="last")
     return s.set_index("timestamp")["fng_value"].astype("float64")
+
+
+# ---------------------------------------------------------------------------------------------
+# Trava de promoção da IA (docs/promocao_ia.md, `promotion-gate-v1`: critério fixado antes de qualquer avaliação)
+# ---------------------------------------------------------------------------------------------
+
+GATE_ID = "promotion-gate-v1"
+GATE_MIN_DAYS = 90        # dias de previsões ao vivo já maduras
+GATE_CI_LEVEL = 0.90
+GATE_RESAMPLES = 2000
+GATE_SEED = 20261105
+GATE_BLOCK_DAYS = 30.0    # as janelas de 30 dias se sobrepõem
+AI_MODEL = "G_GBM"
+AI_FALLBACK_MODEL = "G_GBM_SEM_FNG"
+AI_LABEL = "IA (em teste)"
+
+GATE_APPROVED = "APROVADA"
+GATE_REJECTED = "REPROVADA"
+GATE_FEW_DAYS = "DADOS_INSUFICIENTES"
+GATE_BAD_CHAIN = "CADEIA_INVALIDA"
+
+
+@dataclass(frozen=True)
+class GateResult:
+    status: str
+    n_days: int
+    min_days: int
+    mean_excess: float        # fração (0,01 = 1 ponto percentual)
+    ci_low: float
+    ci_high: float
+    problems: tuple[str, ...] = ()
+
+    @property
+    def approved(self) -> bool:
+        return self.status == GATE_APPROVED
+
+
+def ai_rows(frame: pd.DataFrame) -> pd.DataFrame:
+    """Linhas da IA: por dia vale o `G_GBM`; se ele não previu nesse dia, o `G_GBM_SEM_FNG` (sem escolher modelo depois)."""
+    if frame.empty:
+        return frame
+    main = frame[frame["model"].astype(str).eq(AI_MODEL)]
+    fallback = frame[frame["model"].astype(str).eq(AI_FALLBACK_MODEL) & ~frame["day"].isin(main["day"])]
+    return pd.concat([main, fallback], ignore_index=True)
+
+
+def daily_excess(outcomes: pd.DataFrame) -> pd.Series:
+    """Por dia maduro: média do retorno líquido de 30 dias das escolhas da IA (top k) menos a média do universo."""
+    rows = ai_rows(outcomes)
+    if rows.empty:
+        return pd.Series(dtype="float64")
+    top = rows[rows["in_top_k"].astype(bool)]
+    grouped = top.groupby("day")
+    return (grouped["forward_30"].mean() - grouped["universe_30"].first()).dropna().sort_index().astype("float64")
+
+
+def promotion_gate(
+    log: pd.DataFrame,
+    outcomes: pd.DataFrame,
+    *,
+    min_days: int = GATE_MIN_DAYS,
+    n_boot: int = GATE_RESAMPLES,
+    seed: int = GATE_SEED,
+) -> GateResult:
+    """Aprova a IA só se TODAS as condições valem: cadeia de hash íntegra, pelo menos `min_days` dias de previsões ao vivo
+    já maduras e excesso médio das escolhas sobre o universo, líquido de custos, com o limite inferior do IC de 90% > 0.
+
+    `log`: registro de previsões (PREDICTION_LOG_SCHEMA). `outcomes`: `realized_outcomes(log, panel)`, só previsões maduras.
+    Só olha previsões ao vivo do registro (nunca o walk-forward do estudo). Pura e determinística."""
+    problems = tuple(verify_chain(log)) if not log.empty else ()
+    excess = daily_excess(outcomes)
+    n = int(excess.size)
+    nan = float("nan")
+    if problems:
+        return GateResult(GATE_BAD_CHAIN, n, min_days, nan, nan, nan, problems)
+    if n < min_days:
+        mean = float(excess.mean()) if n else nan
+        return GateResult(GATE_FEW_DAYS, n, min_days, mean, nan, nan)
+    x = excess.to_numpy(dtype="float64")
+    cfg = BootstrapConfig(n_boot=n_boot, seed=seed, ci_level=GATE_CI_LEVEL, block=GATE_BLOCK_DAYS)
+    estimate = bootstrap_statistic(x, lambda m: np.asarray(m.mean(axis=1), dtype="float64"), make_resampler([x], cfg))
+    ok = estimate.estimate > 0.0 and estimate.ci_low > 0.0
+    return GateResult(GATE_APPROVED if ok else GATE_REJECTED, n, min_days, estimate.estimate, estimate.ci_low, estimate.ci_high)
+
+
+def ai_picks_today(today: pd.DataFrame, top_k: int = SHADOW_TOP_K) -> list[str]:
+    """Moedas que a IA escolhe hoje (as `top_k` de maior probabilidade do dia), na ordem do ranking."""
+    rows = ai_rows(today)
+    if rows.empty:
+        return []
+    latest = rows[rows["day"].eq(rows["day"].max())].sort_values("rank")
+    return [str(s) for s in latest["symbol"].head(top_k)]
+
+
+def apply_ai_selection(assessed: pd.DataFrame, picks: Sequence[str], *, regime: str, regime_filter: str,
+                       max_candidates: int) -> pd.DataFrame:
+    """Com a trava aprovada, as moedas do aporte simulado passam a ser as da IA (na ordem dela), no lugar da seleção por
+    score. Mantém os filtros duros: moeda EVITAR (dado, liquidez, volatilidade, queda, tendência de baixa, bloqueio manual) e
+    mercado defensivo com filtro de bloqueio nunca entram. Valor e dimensionamento seguem `allocate`. Nunca envia ordem."""
+    out = assessed.copy()
+    blocked_market = regime == "DEFENSIVO" and regime_filter == "bloquear"
+    ok = {str(r.symbol) for r in out.itertuples() if str(r.opportunity) != "EVITAR"}
+    chosen = [] if blocked_market else [s for s in picks if s in ok][:max_candidates]
+    rank = {s: i + 1 for i, s in enumerate(chosen)}
+    out["selected"] = out["symbol"].astype(str).isin(rank)
+    out["candidate_rank"] = pd.array([rank.get(str(s)) for s in out["symbol"]], dtype="Int64")
+    take = out["selected"]
+    out.loc[take & ~out["opportunity"].astype(str).isin(["BOA_RELATIVA", "MODERADA"]), "opportunity"] = "MODERADA"
+    reasons = [[f"escolhida pela {AI_LABEL}, aprovada na trava de promoção", *list(r)] if t else list(r)
+               for r, t in zip(out["reasons"], take, strict=True)]
+    out["reasons"] = pd.Series(reasons, index=out.index, dtype="object")
+    return out.sort_values(["candidate_rank", "symbol"], na_position="last", ignore_index=True)
+
+
+AI_STATUS_SCHEMA: dict[str, str] = {
+    "model": "string", "label": "string", "status": "string", "approved": "bool", "n_days": "int64", "min_days": "int64",
+    "mean_excess_pp": "float64", "ci_low_pp": "float64", "ci_high_pp": "float64", "picks": "string", "message": "string",
+    "criterion": "string",
+}
+
+
+def gate_message(gate: GateResult) -> str:
+    """Uma linha em português simples com o estado da IA."""
+    if gate.status == GATE_APPROVED:
+        return f"{AI_LABEL}: aprovada na trava, ela escolhe as moedas do aporte simulado."
+    if gate.status == GATE_REJECTED:
+        return f"{AI_LABEL}: só opina, não superou o acaso em {gate.n_days} dias avaliados."
+    if gate.status == GATE_BAD_CHAIN:
+        return f"{AI_LABEL}: só opina, o registro de previsões tem problema."
+    return f"{AI_LABEL}: só opina, ainda sem prova ({gate.n_days} de {gate.min_days} dias avaliados)."
+
+
+def ai_status_table(gate: GateResult, picks: Sequence[str]) -> pd.DataFrame:
+    """Uma linha para o painel e o Telegram (AI_STATUS_SCHEMA): estado da trava e opinião do dia."""
+    row = {
+        "model": AI_MODEL, "label": AI_LABEL, "status": gate.status, "approved": gate.approved, "n_days": gate.n_days,
+        "min_days": gate.min_days, "mean_excess_pp": gate.mean_excess * 100.0, "ci_low_pp": gate.ci_low * 100.0,
+        "ci_high_pp": gate.ci_high * 100.0, "picks": ", ".join(s.split("/")[0] for s in picks),
+        "message": gate_message(gate), "criterion": GATE_ID,
+    }
+    return pd.DataFrame([row], columns=list(AI_STATUS_SCHEMA)).astype(AI_STATUS_SCHEMA)

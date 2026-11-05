@@ -482,11 +482,28 @@ class PortfolioDetail(ApiModel):
     note: str
 
 
+class AiStatus(ApiModel):
+    """Estado da IA (trava de promoção, docs/promocao_ia.md): opinião do dia e se ela já pode influenciar o aporte simulado."""
+
+    label: str
+    status: str
+    approved: bool
+    n_days: int
+    min_days: int
+    mean_excess_pp: float | None = None
+    ci_low_pp: float | None = None
+    ci_high_pp: float | None = None
+    picks: str = ""
+    message: str
+    criterion: str
+
+
 class PortfolioListResponse(ApiModel):
     portfolios: list[PortfolioSummary]
     data_available: bool
     note: str
     generated_at: datetime
+    ai: AiStatus | None = None
 
 class SimWalletSummaryRow(ApiModel):
     wallet: str

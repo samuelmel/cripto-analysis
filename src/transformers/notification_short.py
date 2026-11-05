@@ -78,6 +78,16 @@ def _wallets_line(summary: pd.DataFrame | None, *, since_start: bool) -> str | N
     return f"{head}: " + " · ".join(parts)
 
 
+def format_ai_line(status: pd.DataFrame | None) -> str | None:
+    """Uma linha com o estado da IA (trava de promoção) e a opinião do dia; None sem a tabela `ai_status`."""
+    if status is None or status.empty:
+        return None
+    row = status.iloc[0]
+    message = str(row["message"]).rstrip(".")
+    picks = str(row["picks"]).strip()
+    return f"{message}. Hoje ela prefere: {picks}." if picks else f"{message}."
+
+
 def _changes(rec: Mapping[str, object], previous_regime: str | None, lag_days: int | None, n_position_changes: int,
              n_entry_changes: int) -> list[str]:
     """Avisos extras: só o que MUDOU desde ontem (mais o atraso dos dados, que afeta a confiança de tudo)."""

@@ -28,6 +28,7 @@ Detalhes no painel. Simulação, não é recomendação.
 - **Mercado:** em alta 🟢, indefinido 🟡 ou em baixa 🔴, pela posição do BTC em relação à média de 200 dias.
 - **Hoje:** o aporte é sempre simulado (dinheiro fictício). Sem oportunidade, a linha diz "nada a fazer".
 - **Carteiras simuladas:** o resultado desde o início da Regra (recomendação do painel), da IA (marcada "em teste") e de só segurar BTC.
+- **IA em teste:** uma linha diz em que estado ela está e o que prefere hoje, por exemplo *"IA (em teste): só opina, ainda sem prova (12 de 90 dias avaliados). Hoje ela prefere: NEAR, SOL."* A IA só passa a escolher as moedas do aporte simulado se a trava de promoção aprovar (`docs/promocao_ia.md`); então a linha diz *"aprovada na trava"*.
 - **Avisos extras** só aparecem quando algo **mudou desde ontem**: o mercado virou, uma posição sua mudou de estado, surgiu um sinal de entrada novo, ou os dados estão atrasados.
 - Se algo estourar 600 caracteres, a mensagem se encurta (menos moedas, sem o "desde o início") em vez de virar várias mensagens.
 - Erros do pipeline continuam com um alerta curto.

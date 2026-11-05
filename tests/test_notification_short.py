@@ -5,7 +5,8 @@ from __future__ import annotations
 import pandas as pd
 
 from src.transformers.notification import validate_messages
-from src.transformers.notification_short import SHORT_LIMIT, format_short_report
+from src.transformers.model_shadow import ai_status_table, promotion_gate
+from src.transformers.notification_short import SHORT_LIMIT, format_ai_line, format_short_report
 from tests.test_notifications import LAST, NOW, coin, pick, rec, signals
 
 SUMMARY = pd.DataFrame({
@@ -87,3 +88,13 @@ def test_missing_data_is_not_shown_as_a_number() -> None:
 
 def test_no_simulated_wallets_means_no_wallet_line() -> None:
     assert "Carteiras" not in short(signals(coin("BTC/USDT")), market(), sim_summary=None)
+
+
+def test_ai_line_says_in_one_line_what_state_the_ai_is_in() -> None:
+    gate = promotion_gate(pd.DataFrame(), pd.DataFrame(columns=["model", "day", "symbol", "in_top_k", "forward_30", "universe_30"]))
+    status = ai_status_table(gate, ["NEAR/USDT", "SOL/USDT"])
+    line = format_ai_line(status)
+    assert line == "IA (em teste): só opina, ainda sem prova (0 de 90 dias avaliados). Hoje ela prefere: NEAR, SOL."
+    text = short(signals(coin("BTC/USDT")), market(), sim_summary=SUMMARY, ai_line=line)
+    assert line in text and text.count("\n" + line) == 1
+    assert format_ai_line(None) is None

@@ -6,7 +6,7 @@ import { Async } from "../../components/data-display/Async";
 import { PageHeader } from "../../components/layout/PageHeader";
 import { Badge, EmptyState, InlineNote, Panel, SectionHeader, Stat } from "../../components/ui/primitives";
 import { brl, dateShort, number, pct, toneForNumber } from "../../lib/format";
-import type { PortfolioDetail, PortfolioSummary, PortfoliosData } from "../../schemas/api";
+import type { AiStatus, PortfolioDetail, PortfolioSummary, PortfoliosData } from "../../schemas/api";
 import { usePortfolio, usePortfolios } from "../../services/queries";
 
 function statusTone(status: PortfolioSummary["status"]): "positive" | "neutral" | "warning" {
@@ -189,6 +189,51 @@ function DetailBody({ detail }: { detail: PortfolioDetail }): ReactNode {
   );
 }
 
+function aiTone(ai: AiStatus): "positive" | "neutral" | "warning" {
+  if (ai.approved) return "positive";
+  return ai.status === "DADOS_INSUFICIENTES" ? "neutral" : "warning";
+}
+
+function aiStatusLabel(ai: AiStatus): string {
+  if (ai.approved) return "aprovada na trava";
+  if (ai.status === "DADOS_INSUFICIENTES") return "só opina, sem prova ainda";
+  if (ai.status === "REPROVADA") return "só opina, reprovada";
+  return "só opina";
+}
+
+function AiCard({ ai, portfolios }: { ai: AiStatus; portfolios: PortfolioSummary[] }): ReactNode {
+  const wallet = portfolios.find((item) => item.id === "IA");
+  const hold = portfolios.find((item) => item.id === "SO_BTC");
+  return (
+    <Panel className="p-5 sm:p-7">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.14em] text-faint">{ai.label}</div>
+          <h2 className="mt-1 text-[18px] font-semibold text-ink">{ai.message}</h2>
+        </div>
+        <Badge tone={aiTone(ai)}>{aiStatusLabel(ai)}</Badge>
+      </div>
+      <div className="mt-5 grid gap-5 sm:grid-cols-3">
+        <Stat label="Opinião de hoje" value={ai.picks || "sem previsão"} />
+        <Stat label="Dias avaliados na trava" value={`${ai.n_days} de ${ai.min_days}`} />
+        <Stat
+          label="Carteira da IA contra só segurar BTC"
+          value={
+            wallet?.return_pct != null && hold?.return_pct != null
+              ? `${pct(wallet.return_pct)} contra ${pct(hold.return_pct)}`
+              : "sem placar publicado"
+          }
+        />
+      </div>
+      <p className="mt-4 text-[12px] leading-relaxed text-muted">
+        A IA só passa a escolher as moedas do aporte simulado se a trava aprovar: pelo menos {ai.min_days} dias de previsões
+        ao vivo, com ganho sobre o acaso já descontados os custos e o limite inferior do intervalo de 90% acima de zero.
+        Dinheiro fictício, nenhuma ordem real é enviada.
+      </p>
+    </Panel>
+  );
+}
+
 function PortfoliosBody({ data }: { data: PortfoliosData }): ReactNode {
   const params = useParams<{ portfolioId?: string }>();
   const navigate = useNavigate();
@@ -212,6 +257,8 @@ function PortfoliosBody({ data }: { data: PortfoliosData }): ReactNode {
       />
 
       {!data.data_available ? <InlineNote tone="warning">{data.note}</InlineNote> : null}
+
+      {data.ai ? <AiCard ai={data.ai} portfolios={data.portfolios} /> : null}
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {data.portfolios.map((portfolio) => (

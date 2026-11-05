@@ -23,7 +23,20 @@ from src.transformers.entry_model import PURGE_DAYS, model_features, outperform_
 from src.transformers.entry_signals import EntryRules, build_panel
 from src.transformers.gbm import GBMParams, fit_gbm, predict_gbm
 from src.transformers.model_shadow import (
+    AI_STATUS_SCHEMA,
+    GATE_APPROVED,
+    GATE_BAD_CHAIN,
+    GATE_FEW_DAYS,
+    GATE_ID,
+    GATE_MIN_DAYS,
+    GATE_REJECTED,
     MODELS,
+    ai_picks_today,
+    ai_status_table,
+    apply_ai_selection,
+    chain_rows,
+    daily_excess,
+    promotion_gate,
     latest_fng,
     live_predictions,
     new_fng_rows,
@@ -195,3 +208,182 @@ def test_pipeline_uses_the_saved_fng_copy_when_the_source_fails(tmp_path: Path, 
     append_fng_history(fng, RUN_TS, tmp_path / "data" / "state" / "fng_history.parquet")
     result = pipeline.analyze(RUN_TS)                              # data/market sem F&G: a fonte "falhou"
     assert set(result["shadow_predictions"]["model"]) >= {"F_LOGIT", "G_GBM"}
+
+
+# ------------------------------------------------------------------------------------ trava de promoção da IA
+
+def gate_outcomes(n_days: int, edge: float, *, noise: float = 0.01, seed: int = 4, model: str = "G_GBM") -> pd.DataFrame:
+    """Previsões maduras: 5 escolhas por dia com retorno = universo + `edge` + ruído; o resto do universo no próprio universo."""
+    rng = np.random.default_rng(seed)
+    days = pd.date_range("2026-01-01", periods=n_days, freq="D", tz=UTC)
+    rows = []
+    for d in days:
+        universe = float(rng.normal(0.0, 0.02))
+        day_noise = float(rng.normal(0.0, noise))
+        for k in range(8):
+            top = k < 5
+            rows.append({"model": model, "day": d, "symbol": f"C{k}/USDT", "prob": 0.9 - k * 0.05, "in_top_k": top, "target": 1.0,
+                         "forward_30": universe + (edge + day_noise if top else 0.0), "universe_30": universe})
+    return pd.DataFrame(rows)
+
+
+def test_gate_approves_only_with_enough_days_and_a_positive_lower_bound() -> None:
+    result = promotion_gate(pd.DataFrame(), gate_outcomes(120, edge=0.05), n_boot=400)
+    assert result.status == GATE_APPROVED and result.approved
+    assert result.ci_low > 0 and result.mean_excess > 0 and result.n_days == 120
+
+
+def test_gate_rejects_when_the_edge_is_noise() -> None:
+    out = gate_outcomes(120, edge=0.0, noise=0.05)
+    out.loc[out["in_top_k"], "forward_30"] -= float(daily_excess(out).mean())   # amostra sem vantagem nenhuma (média exatamente 0)
+    result = promotion_gate(pd.DataFrame(), out, n_boot=400)
+    assert result.status == GATE_REJECTED and not result.approved
+    assert result.ci_low < 0 < result.ci_high
+
+
+def test_gate_rejects_a_model_that_loses_to_the_universe() -> None:
+    result = promotion_gate(pd.DataFrame(), gate_outcomes(120, edge=-0.04), n_boot=400)
+    assert result.status == GATE_REJECTED
+
+
+def test_gate_needs_ninety_mature_days_even_with_a_huge_edge() -> None:
+    result = promotion_gate(pd.DataFrame(), gate_outcomes(GATE_MIN_DAYS - 1, edge=0.20), n_boot=400)
+    assert result.status == GATE_FEW_DAYS and not result.approved
+    assert result.n_days == GATE_MIN_DAYS - 1 and np.isnan(result.ci_low)
+    assert promotion_gate(pd.DataFrame(), gate_outcomes(GATE_MIN_DAYS, edge=0.20), n_boot=400).approved
+
+
+def test_gate_with_no_data_is_insufficient() -> None:
+    result = promotion_gate(pd.DataFrame(), pd.DataFrame(columns=["model", "day", "symbol", "in_top_k", "forward_30", "universe_30"]))
+    assert result.status == GATE_FEW_DAYS and result.n_days == 0
+
+
+def test_gate_is_deterministic() -> None:
+    out = gate_outcomes(100, edge=0.02, noise=0.03)
+    assert promotion_gate(pd.DataFrame(), out, n_boot=300) == promotion_gate(pd.DataFrame(), out, n_boot=300)
+
+
+def test_gate_refuses_a_tampered_prediction_chain() -> None:
+    base = pd.DataFrame({
+        "day": [pd.Timestamp("2026-01-01", tz=UTC)] * 2, "symbol": ["A/USDT", "B/USDT"], "model": "G_GBM", "model_version": "v",
+        "prob": [0.6, 0.4], "rank": [1, 2], "in_top_k": [True, True], "n_universe": [2, 2], "n_train": [10, 10],
+        "train_end": pd.Timestamp("2025-11-01", tz=UTC), "run_ts": pd.Timestamp("2026-01-02", tz=UTC),
+        "data_fingerprint": "f", "code_version": "c",
+    })
+    log = chain_rows(pd.DataFrame(), base)
+    assert verify_chain(log) == []
+    assert promotion_gate(log, gate_outcomes(120, edge=0.05), n_boot=300).approved
+    forged = log.copy()
+    forged.loc[0, "prob"] = 0.99
+    result = promotion_gate(forged, gate_outcomes(120, edge=0.05), n_boot=300)
+    assert result.status == GATE_BAD_CHAIN and not result.approved and result.problems
+
+
+def test_ai_uses_the_main_model_and_falls_back_only_on_days_it_is_missing() -> None:
+    main = gate_outcomes(3, edge=0.1, model="G_GBM")
+    fallback = gate_outcomes(5, edge=-0.1, model="G_GBM_SEM_FNG")
+    excess = daily_excess(pd.concat([main, fallback], ignore_index=True))
+    assert len(excess) == 5
+    assert (excess.iloc[:3] > 0.05).all() and (excess.iloc[3:] < -0.05).all()
+    other = gate_outcomes(5, edge=0.5, model="F_LOGIT")
+    assert daily_excess(other).empty
+
+
+def pred_today(model: str, ranks: dict[str, int], day: str = "2026-11-05") -> pd.DataFrame:
+    return pd.DataFrame({"day": pd.Timestamp(day, tz=UTC), "symbol": list(ranks), "model": model, "rank": list(ranks.values())})
+
+
+def test_ai_picks_are_the_top_five_of_the_latest_day_in_rank_order() -> None:
+    today = pred_today("G_GBM", {f"C{i}/USDT": 8 - i for i in range(8)})
+    assert ai_picks_today(today) == ["C7/USDT", "C6/USDT", "C5/USDT", "C4/USDT", "C3/USDT"]
+    assert ai_picks_today(pd.DataFrame()) == []
+
+
+def assessed_frame() -> pd.DataFrame:
+    rows = [("BTC/USDT", "MODERADA", True, 1), ("ETH/USDT", "AGUARDAR", False, None), ("SOL/USDT", "EVITAR", False, None),
+            ("NEAR/USDT", "BOA_RELATIVA", True, 2), ("ADA/USDT", "AGUARDAR", False, None)]
+    return pd.DataFrame({
+        "symbol": [r[0] for r in rows], "opportunity": [r[1] for r in rows], "selected": [r[2] for r in rows],
+        "candidate_rank": pd.array([r[3] for r in rows], dtype="Int64"),
+        "reasons": [["motivo"] for _ in rows], "score": [80.0, 50.0, 10.0, 90.0, 55.0],
+    })
+
+
+def test_approved_ai_replaces_the_coins_and_keeps_the_hard_filters() -> None:
+    out = apply_ai_selection(assessed_frame(), ["SOL/USDT", "ADA/USDT", "ETH/USDT", "BTC/USDT"], regime="FAVORAVEL",
+                             regime_filter="bloquear", max_candidates=3)
+    chosen = out[out["selected"]]
+    assert chosen["symbol"].tolist() == ["ADA/USDT", "ETH/USDT", "BTC/USDT"]   # SOL é EVITAR: nunca entra
+    assert chosen["candidate_rank"].tolist() == [1, 2, 3]
+    assert not out.loc[out["symbol"].eq("NEAR/USDT"), "selected"].item()      # a regra antiga deixa de decidir
+    assert chosen["opportunity"].isin(["BOA_RELATIVA", "MODERADA"]).all()
+    assert all("IA (em teste)" in r[0] for r in chosen["reasons"])
+
+
+def test_ai_selection_never_buys_in_a_blocked_defensive_market() -> None:
+    out = apply_ai_selection(assessed_frame(), ["BTC/USDT", "ETH/USDT"], regime="DEFENSIVO", regime_filter="bloquear",
+                             max_candidates=3)
+    assert not out["selected"].any()
+
+
+def test_ai_status_table_is_one_plain_row_and_documents_the_criterion() -> None:
+    gate = promotion_gate(pd.DataFrame(), gate_outcomes(30, edge=0.05), n_boot=300)
+    table = ai_status_table(gate, ["NEAR/USDT", "SOL/USDT"])
+    assert list(table.columns) == list(AI_STATUS_SCHEMA) and len(table) == 1
+    row = table.iloc[0]
+    assert row["status"] == GATE_FEW_DAYS and not row["approved"] and row["picks"] == "NEAR, SOL"
+    assert "IA (em teste)" in row["message"] and "30 de 90" in row["message"]
+    assert row["criterion"] == GATE_ID
+    approved = ai_status_table(promotion_gate(pd.DataFrame(), gate_outcomes(120, edge=0.05), n_boot=300), [])
+    assert "aprovada" in approved["message"].iloc[0]
+
+
+def test_gate_criterion_is_written_in_docs_before_use() -> None:
+    doc = (Path(__file__).resolve().parent.parent / "docs" / "promocao_ia.md").read_text(encoding="utf-8")
+    assert GATE_ID in doc and "pelo menos 90" in doc and "90%" in doc and "Nunca há ordem real" in doc
+
+
+def _synthetic_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    candles = synthetic_candles()
+    write_ohlcv(candles)
+    write_fng(synthetic_fng(candles))
+
+
+def test_pipeline_publishes_the_ai_state_and_the_ai_does_not_choose_coins_before_approval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _synthetic_run(tmp_path, monkeypatch)
+    result = pipeline.analyze(RUN_TS)
+    status = result["ai_status"].iloc[0]
+    assert status["status"] == GATE_FEW_DAYS and not status["approved"] and status["criterion"] == GATE_ID
+    assert (tmp_path / "frontend" / "public" / "ai_status.parquet").is_file()
+    assert not any("IA (em teste)" in r[0] for r in result["signals"]["reasons"] if len(r))
+    assert "IA (em teste)" in pipeline.format_ai_line(result["ai_status"])  # type: ignore[attr-defined]
+    assert not any("trava de promoção falhou" in n for n in result["shadow_notes"]["note"])
+
+
+def test_pipeline_lets_the_ai_choose_the_simulated_coins_only_when_the_gate_approves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _synthetic_run(tmp_path, monkeypatch)
+    calls: list[list[str]] = []
+    real = pipeline.apply_ai_selection
+
+    def spy(assessed: pd.DataFrame, picks: list[str], **kwargs: object) -> pd.DataFrame:
+        calls.append(list(picks))
+        return real(assessed, picks, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(pipeline, "apply_ai_selection", spy)
+    pipeline.analyze(RUN_TS)
+    assert calls == []                                            # sem aprovação a IA nunca escolhe moedas
+
+    approved = pipeline.GateResult(GATE_APPROVED, 120, 90, 0.03, 0.01, 0.05)
+    monkeypatch.setattr(pipeline, "evaluate_gate", lambda log, panel: (approved, []))
+    result = pipeline.analyze(RUN_TS)
+    expected = result["shadow_predictions"].query("model == 'G_GBM'").sort_values("rank")["symbol"].head(5).tolist()
+    assert calls == [expected]                                    # aprovada: as escolhas são as da IA, na ordem dela
+    assert result["ai_status"]["approved"].item() is True
+    chosen = result["signals"][result["signals"]["selected"]]
+    assert set(chosen["symbol"]) <= set(expected)                 # filtros duros mantidos (mercado sintético é defensivo)
+    assert float(result["recommendation"]["total_brl"].iloc[0]) <= float(result["recommendation"]["budget_brl"].iloc[0])

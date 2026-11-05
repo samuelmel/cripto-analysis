@@ -393,11 +393,26 @@ export const portfolioDetailSchema = z.object({
   note: z.string(),
 });
 
+export const aiStatusSchema = z.object({
+  label: z.string(),
+  status: z.string(),
+  approved: z.boolean(),
+  n_days: z.number(),
+  min_days: z.number(),
+  mean_excess_pp: z.number().nullable().optional(),
+  ci_low_pp: z.number().nullable().optional(),
+  ci_high_pp: z.number().nullable().optional(),
+  picks: z.string(),
+  message: z.string(),
+  criterion: z.string(),
+});
+
 export const portfoliosSchema = z.object({
   portfolios: z.array(portfolioSummarySchema),
   data_available: z.boolean(),
   note: z.string(),
   generated_at: z.string(),
+  ai: aiStatusSchema.nullable().optional(),
 });
 
 export type Stage = z.infer<typeof stageSchema>;
@@ -428,3 +443,4 @@ export type PortfolioMetric = z.infer<typeof portfolioMetricSchema>;
 export type SimPosition = z.infer<typeof simPositionSchema>;
 export type PortfolioDetail = z.infer<typeof portfolioDetailSchema>;
 export type PortfoliosData = z.infer<typeof portfoliosSchema>;
+export type AiStatus = z.infer<typeof aiStatusSchema>;

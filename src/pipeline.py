@@ -43,6 +43,7 @@ from .config import (
     FX_SYMBOL,
     REBALANCE_BAND,
     RECOMMENDED,
+    MAX_CANDIDATES,
     REGIME_FILTER,
     REGIME_SYMBOL,
     SELECTION_REBALANCE_DAYS,
@@ -90,7 +91,7 @@ from .transformers.notification import (
     redact,
     validate_messages,
 )
-from .transformers.notification_short import format_short_report
+from .transformers.notification_short import format_ai_line, format_short_report
 from .transformers.recommendation import build_recommendation, validate_recommendation
 from .transformers.regimes import classify_market_regimes
 from .transformers.selection import REGIME_UNAVAILABLE, assess, compute_features, features_on, regime_series
@@ -109,7 +110,19 @@ from .transformers.data_quality import audit_candles, availability, clean_candle
 from .transformers.dataset import combined_fingerprint, dataset_manifest
 from .transformers.entry_model import model_features, outperform_target
 from .transformers.entry_signals import EntryRules, Panel, build_panel, trailing_return
-from .transformers.model_shadow import fng_series, latest_fng, live_predictions, realized_outcomes, stack_all
+from .transformers.model_shadow import (
+    GATE_FEW_DAYS,
+    GateResult,
+    ai_picks_today,
+    ai_status_table,
+    apply_ai_selection,
+    fng_series,
+    latest_fng,
+    live_predictions,
+    promotion_gate,
+    realized_outcomes,
+    stack_all,
+)
 from .transformers.paper_portfolio import MODEL_LABELS, run_paper, track_record
 from .transformers.sim_wallet import SimState, decide_all, empty_state, replay, sim_market, stamp, with_new
 from .transformers.daily_alerts import ALERT_BUY, ALERT_EXIT, ALERT_SELL, ALERT_WATCH, compare_with_previous
@@ -286,7 +299,20 @@ def analyze(
         pd.Series(ref["close"].to_numpy(dtype="float64"), index=pd.DatetimeIndex(ref["timestamp"])),
         pd.Timestamp(today), legacy=regimes,
     )
+    # IA em teste (docs/promocao_ia.md): previsões de hoje e trava de promoção. Só com a trava APROVADA a IA escolhe as
+    # moedas do aporte simulado; do contrário só opina. Nunca há ordem real.
+    entry_panel = build_panel(candles, EntryRules())
+    shadow, shadow_notes = shadow_predictions(entry_panel, fng, day, run_ts=pd.Timestamp(today),
+                                              data_fingerprint=combined_fingerprint(dataset))
+    stored_log = read_predictions()   # a trava só olha o registro gravado (com cadeia de hash), nunca as linhas do dia em memória
+    ai_log = merged_log(stored_log, shadow)
+    gate, gate_notes = evaluate_gate(stored_log, entry_panel)
+    shadow_notes += gate_notes
+    ai_picks = ai_picks_today(shadow)
     assessed = assess(features_on(features, day), regime, unavailable=unavailable)
+    if gate.approved:
+        assessed = apply_ai_selection(assessed, ai_picks, regime=regime, regime_filter=REGIME_FILTER,
+                                      max_candidates=MAX_CANDIDATES)
     allocation, summary = allocate(assessed, budget, regime)
     # Backtests: motor único, mesmas premissas para todas as estratégias e referências, universo point-in-time.
     bt = backtest_inputs(raw, fng)
@@ -341,20 +367,19 @@ def analyze(
         state_log = pd.concat([state_log, today_rows], ignore_index=True) if not state_log.empty else today_rows
     changes = pending_changes(state_log, read_notifications())
     write_parquet(state_log, PUBLIC_DIR / "position_states.parquet")
-    entry_panel = build_panel(candles, EntryRules())
-    shadow, shadow_notes = shadow_predictions(entry_panel, fng, day, run_ts=pd.Timestamp(today),
-                                              data_fingerprint=combined_fingerprint(dataset))
     if record_state:
         append_fng_history(fng_fresh, pd.Timestamp(today))
         if not shadow.empty:
             append_predictions(shadow)
-    paper_summary, paper_track, paper_equity, paper_notes = paper_outputs(candles, entry_panel, merged_log(read_predictions(), shadow))
+    paper_summary, paper_track, paper_equity, paper_notes = paper_outputs(candles, entry_panel, ai_log)
+    ai_status = ai_status_table(gate, ai_picks)
+    write_parquet(ai_status, PUBLIC_DIR / "ai_status.parquet")
     shadow_notes += paper_notes
     write_parquet(paper_summary, PUBLIC_DIR / "paper_portfolio.parquet")
     write_parquet(paper_equity, PUBLIC_DIR / "paper_equity.parquet")
     sim, sim_notes = sim_outputs(
         candles, read_ohlcv([FX_SYMBOL]), entry_panel, signals, history, available, read_exit_rules(),
-        merged_log(read_predictions(), shadow), day, run_ts=pd.Timestamp(today), record_state=record_state,
+        ai_log, day, run_ts=pd.Timestamp(today), record_state=record_state,
     )
     write_parquet(sim.summary, PUBLIC_DIR / "sim_wallets.parquet")
     write_parquet(sim.positions, PUBLIC_DIR / "sim_wallet_positions.parquet")
@@ -365,6 +390,7 @@ def analyze(
         "availability": available, "issues": issues, "dropped": dropped, "recommendation": recommendation,
         "selection_backtest": selection_perf, "market_regimes": market_regimes, "dataset": dataset,
         "position_changes": changes, "entry_levels": entry_levels, "entry_changes": changes_today,
+        "ai_status": ai_status,
         "regime_previous": pd.DataFrame({"regime": pd.Series([regime_before], dtype="string")}),
         "signal_evidence": signal_evidence, "shadow_predictions": shadow,
         "paper_summary": paper_summary, "paper_track": paper_track,
@@ -386,6 +412,18 @@ def shadow_predictions(
     except Exception as exc:  # modo sombra: o erro é registrado, a análise do dia segue
         logger.exception("modelos em sombra falharam")
         return pd.DataFrame(), [f"modelos em sombra falharam: {type(exc).__name__}: {exc}"]
+
+
+def evaluate_gate(log: pd.DataFrame, panel: Panel) -> tuple[GateResult, list[str]]:
+    """Trava de promoção da IA sobre as previsões ao vivo já maduras. Uma falha aqui nunca derruba o pipeline nem aprova a
+    IA: vira "dados insuficientes" com uma nota no relatório."""
+    try:
+        return promotion_gate(log, realized_outcomes(log, panel)), []
+    except Exception as exc:  # na dúvida a IA não é promovida
+        logger.exception("trava de promoção da IA falhou")
+        return GateResult(GATE_FEW_DAYS, 0, 90, float("nan"), float("nan"), float("nan")), [
+            f"trava de promoção falhou: {type(exc).__name__}: {exc}"
+        ]
 
 
 def merged_log(stored: pd.DataFrame, today: pd.DataFrame) -> pd.DataFrame:
@@ -601,7 +639,7 @@ def _short_texts(result: dict[str, pd.DataFrame], now: datetime) -> list[str]:
     return format_short_report(
         result["signals"], result["recommendation"], now=pd.Timestamp(now), sim_summary=result.get("sim_summary"),
         previous_regime=_previous_regime(result), n_position_changes=len(changes),
-        n_entry_changes=0 if entry is None else len(entry),
+        n_entry_changes=0 if entry is None else len(entry), ai_line=format_ai_line(result.get("ai_status")),
     )
 
 

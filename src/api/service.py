@@ -16,6 +16,7 @@ from .domain import (
 )
 from .readers import frame, latest_date, optional_records, records, to_records
 from .schemas import (
+    AiStatus,
     ArtifactStatus,
     AssetDetail,
     Candle,
@@ -352,9 +353,15 @@ def _dca_metrics() -> list[PortfolioMetric]:
     return metrics
 
 
+def _ai_status() -> AiStatus | None:
+    rows = optional_records(public_file("ai_status.parquet"))
+    return AiStatus.model_validate(rows[0]) if rows else None
+
+
 def portfolios() -> PortfolioListResponse:
     catalog = _catalog()
     return PortfolioListResponse(
+        ai=_ai_status(),
         portfolios=catalog,
         data_available=any(item.status == "available" for item in catalog),
         note=(
