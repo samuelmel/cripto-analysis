@@ -74,13 +74,15 @@ def test_portfolios_do_not_invent_values(client: TestClient) -> None:
     body = client.get("/api/v1/portfolios").json()
     ids = [row["id"] for row in body["portfolios"]]
     assert ids == ["PAINEL", "IA", "REVERSAO", "SO_BTC", "DCA"]
-    assert body["data_available"] is False
+    published = (PUBLIC_DIR / "sim_wallets.parquet").is_file()  # o teste não pode supor que o pipeline nunca rodou
+    assert body["data_available"] is published
     dca = client.get("/api/v1/portfolios/DCA").json()
     assert dca["portfolio"]["status"] == "reference"
     assert {metric["period"] for metric in dca["metrics"]} == {"TREINO", "VALIDACAO", "TESTE"}
     painel = client.get("/api/v1/portfolios/PAINEL").json()
-    assert painel["portfolio"]["status"] == "unavailable"
-    assert painel["positions"] == []
+    assert painel["portfolio"]["status"] == ("available" if published else "unavailable")
+    if not published:
+        assert painel["positions"] == []
 
 
 def test_system_status_lists_artifacts_and_read_only_state(client: TestClient) -> None:
