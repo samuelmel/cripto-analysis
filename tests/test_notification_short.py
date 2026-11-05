@@ -98,3 +98,8 @@ def test_ai_line_says_in_one_line_what_state_the_ai_is_in() -> None:
     text = short(signals(coin("BTC/USDT")), market(), sim_summary=SUMMARY, ai_line=line)
     assert line in text and text.count("\n" + line) == 1
     assert format_ai_line(None) is None
+
+
+def test_unavailable_market_shows_no_btc_number() -> None:
+    text = short(signals(coin("BTC/USDT")), market(close=112.0, sma=100.0, regime="INDISPONIVEL"))
+    assert "Mercado: sem dados ⚪\n" in text and "média de 200 dias" not in text

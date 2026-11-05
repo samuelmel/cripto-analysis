@@ -43,6 +43,8 @@ def _signed(value: float) -> str:
 def _market_line(rec: Mapping[str, object]) -> str:
     regime = str(rec.get("regime", ""))
     text = MARKET_TEXT.get(regime, MARKET_UNAVAILABLE)
+    if regime not in MARKET_TEXT:  # sem dados confiáveis, nenhum número do BTC é mostrado como se valesse
+        return f"Mercado: {text}"
     close, sma = rec.get("regime_close"), rec.get("regime_sma_200")
     if isinstance(close, int | float) and isinstance(sma, int | float) and math.isfinite(close) and math.isfinite(sma) and sma > 0:
         gap = (close / sma - 1.0) * 100.0
