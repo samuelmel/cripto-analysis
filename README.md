@@ -1,44 +1,58 @@
+# Crypto Analyzer
 
-Crypto Analyzer
+[![CI](https://github.com/samuelmel/cripto-analysis/actions/workflows/ci.yml/badge.svg)](https://github.com/samuelmel/cripto-analysis/actions/workflows/ci.yml)
+[![Licença: MIT](https://img.shields.io/badge/licen%C3%A7a-MIT-blue.svg)](LICENSE)
 
-Sistema de análise quantitativa de criptomoedas desenvolvido em Python.
-Coleta dados históricos, calcula sinais e indicadores, avalia
-estratégias por backtesting e envia resumos pelo Telegram. Inclui um
-painel web somente leitura para consultar sinais, carteiras simuladas,
-pesquisa, mercado e metodologia.
+Pipeline em Python que testa, com método estatístico, se dá para vencer o "comprar e segurar" em criptomoedas, e mostra
+os resultados num painel web e num resumo diário no Telegram. O achado central é honesto: **quase nada vence comprar e
+segurar**, e o projeto existe para mostrar o que não funciona e por quê.
 
-    Aviso: projeto experimental e educacional. Não executa ordens em
-    corretoras e não constitui recomendação financeira. Resultados
-    históricos não garantem desempenho futuro.
+![Painel: visão geral](docs/img/07_painel_hoje.png)
 
-Funcionalidades
+> **Aviso:** projeto experimental e educacional. Não executa ordens em corretoras e não é recomendação financeira.
+> Resultados históricos não garantem desempenho futuro.
 
-    Dados de mercado: ingestão e armazenamento de candles diários da
-    Binance em Parquet.
-    Qualidade e rastreabilidade: validação dos dados, registro de
-    falhas e identificação das entradas utilizadas em cada execução.
-    Sinais e análise: indicadores técnicos, regras de tendência e
-    classificação de oportunidades.
-    Backtesting: simulação de estratégias com custos configuráveis e
-    execução no candle seguinte.
-    Gestão de risco simulada: orçamento configurável, limites de
-    alocação e carteiras simuladas quando os Parquets existem.
-    Notificações: resumo diário opcional pelo Telegram.
-    Painel web: sinais, carteiras, mercado, pesquisa e metodologia,
-    sempre somente leitura.
-    Pesquisa quantitativa: ferramentas para comparar estratégias e
-    avaliar a robustez dos resultados.
+## Principais achados
 
-Tecnologias
+Todos os estudos têm o protocolo escrito **antes** de rodar, comparam com "comprar e segurar" ou com o acaso, usam
+intervalos de confiança por bootstrap e corrigem para múltiplos testes. Os períodos de 2023 em diante já foram
+consultados durante o desenvolvimento, então tudo é **exploratório**.
 
-    Python 3.12+
-    pandas, NumPy e PyArrow
-    Parquet para armazenamento de dados
-    React, TypeScript, Vite e Tailwind CSS
-    pytest e mypy
-    uv para gerenciamento do ambiente Python
+1. **Quase nenhuma estratégia vence comprar e segurar.** De 14 regras testadas (tendência, rompimento, momento, RSI,
+   Bollinger, seleção de moedas), nenhuma mostrou vantagem confirmada depois da correção para testes múltiplos; três
+   foram significativamente piores. [Detalhes](docs/pesquisa_quantitativa.md)
 
-Arquitetura
+   ![Estratégias contra comprar e segurar](docs/img/01_estrategias_vs_segurar_16x9.png)
+
+2. **A média de 200 dias reduz as quedas.** Ficar em dinheiro quando o preço está abaixo da média de 200 dias baixou a
+   queda máxima média de 80% para 65% e a oscilação de 122% para 92% (47 moedas, 2017–2024), e o resultado se repetiu
+   em 2025+. [Detalhes](docs/sma200_risk.md)
+
+   ![Média de 200 dias](docs/img/02_media_200_dias_16x9.png)
+
+3. **A IA ainda não provou vencer o acaso.** Os modelos ordenam as moedas um pouco melhor que o acaso, mas as 5 escolhas
+   deles não superaram o conjunto de forma confiável no desenvolvimento. Por isso ela continua em teste, só
+   opinando. [Detalhes](docs/ml_study_v2.md)
+
+   ![IA contra o acaso](docs/img/03_ia_vs_acaso_16x9.png)
+
+4. **"Comprar no fundo" só funciona se você souber o futuro.** A regra "fundo de 20 dias confirmado por 2 candles em
+   alta" rende +8,2% por operação quando se compra no preço do fundo, mas só +0,2% quando se compra depois da
+   confirmação, abaixo dos +1,5% de comprar num dia qualquer. [Detalhes](docs/fundo_confirmado.md)
+
+   ![A ilusão do fundo](docs/img/04_ilusao_do_fundo_16x9.png)
+
+5. **DCA "inteligente" não bate o DCA fixo.** Comprar mais nas quedas perdeu no BTC (−2,6% a −3,2% no valor final por
+   real aportado) e só empatou no ETH, com poucas janelas. [Detalhes](docs/dca_study.md)
+
+   ![DCA inteligente contra DCA fixo](docs/img/05_dca_inteligente_16x9.png)
+
+Também testado e encerrado: o gráfico Renko (21% a 43% das regras bateram comprar e segurar; o critério era 50%),
+[em docs/renko_estudo.md](docs/renko_estudo.md). As imagens são geradas por `research/make_figures.py`.
+
+## Como funciona
+
+```
 Fontes de mercado
       │
       ▼
@@ -55,115 +69,81 @@ Backtesting e análise de risco
       │
       ├──► API somente leitura ──► Painel web
       └──► Resumo no Telegram
+```
 
-O pipeline Python concentra a coleta e a análise. A API FastAPI lê os
-Parquets publicados e o frontend React consome essa API; nenhum dos dois
-calcula recomendações de forma independente nem envia ordens.
-Requisitos
+O pipeline Python concentra a coleta e a análise. A API FastAPI lê os Parquets publicados e o frontend React consome essa
+API; nenhum dos dois calcula recomendações de forma independente nem envia ordens. A regra de negócio é função pura em
+`src/transformers/`; rede e disco ficam só nas bordas (extratores, loaders, notificadores e entrypoints).
 
-    Python 3.12+
-    uv
-    Node.js 20+ e pnpm 10 (via npx)
-    Internet para atualizar os dados de mercado
+Tecnologias: Python 3.12+, pandas, NumPy, PyArrow (Parquet), React, TypeScript, Vite, Tailwind CSS, pytest, mypy
+(`--strict`) e uv.
 
-Instalação
+## Como rodar
 
-Na raiz do repositório (crypto-analyzer):
+Requisitos: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 20+ e pnpm 10 (via `npx`), internet para atualizar
+os dados.
+
+```bash
 uv sync
-cd frontend
-npx --yes pnpm@10 install
-cd ..
+cd frontend && npx --yes pnpm@10 install && cd ..
+```
 
-Opcionalmente, configure COINGECKO_API_KEY para aumentar o limite de
-acesso à API do CoinGecko.
-Executar
+```bash
+uv run python -m src.pipeline            # atualiza os dados e roda a análise
+uv run python -m src.pipeline --offline  # só com dados locais
+uv run python -m src.pipeline --dry-run  # mostra a mensagem do Telegram sem enviar
+uv run run.py                            # sobe API e painel e abre o navegador
+```
 
-Atualizar os dados e executar a análise:
-uv run python -m src.pipeline
+Variações do atalho: `--no-browser`, `--prod` (serve o build em :8000) e `--prod --build` (gera o build antes).
+O modo padrão usa Vite em http://localhost:5173 com proxy para a API em :8000.
 
-Recalcular usando somente os dados locais:
-uv run python -m src.pipeline --offline
+**Telegram (opcional):** defina as variáveis de ambiente `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`. Nunca coloque tokens
+ou chaves no código, em arquivos versionados ou em logs. `COINGECKO_API_KEY` é opcional e aumenta o limite do CoinGecko.
 
-Validar a mensagem do Telegram sem enviar nada:
-uv run python -m src.pipeline --dry-run
+**Testes e qualidade:**
 
-Atalho: sobe API e painel juntos e abre o navegador:
-uv run run.py
-
-Variações:
-uv run run.py --no-browser        # sem abrir o navegador
-uv run run.py --prod              # usa o build e serve tudo em :8000
-uv run run.py --prod --build      # gera o build antes de servir
-
-O modo padrão usa Vite em http://localhost:5173 com proxy para a API em
-:8000. O modo `--prod` gera o build quando necessário e a API serve
-frontend/dist na mesma origem. Para executar manualmente, use
-`uv run python -m src.api` e `npx --yes pnpm@10 dev` dentro de frontend/.
-Telegram
-
-Para habilitar notificações, configure estas variáveis de ambiente:
-
-    TELEGRAM_BOT_TOKEN
-    TELEGRAM_CHAT_ID
-
-Nunca armazene tokens ou chaves diretamente no código, nos arquivos
-versionados ou nos logs.
-Testes e qualidade
-
-Executar os testes Python:
+```bash
 uv run pytest
-
-Verificar tipagem estrita:
 uv run mypy --strict src/ mcp_server.py run.py
-
-Verificar o ambiente Python:
 uv lock --check
+cd frontend && npx --yes pnpm@10 typecheck && npx --yes pnpm@10 test && npx --yes pnpm@10 build
+```
 
-Verificar o frontend:
-cd frontend
-npx --yes pnpm@10 typecheck
-npx --yes pnpm@10 test
-npx --yes pnpm@10 build
-npx --yes pnpm@10 e2e
-Configuração
+As configurações principais (universo de moedas, filtros, orçamento simulado e premissas de custo) ficam em
+`src/config.py`.
 
-As principais configurações ficam em src/config.py, incluindo o
-universo de moedas, filtros, parâmetros de tendência, orçamento simulado
-e premissas de custo. Confira os valores atuais no código antes de
-executar uma análise.
-Limitações
+## Limitações
 
-    O mercado de criptomoedas é volátil; perdas substanciais são
-    possíveis.
-    Backtests dependem das premissas de execução, dos custos e da
-    qualidade dos dados.
-    Spread e slippage podem ser estimados, não necessariamente
-    observados.
-    A disponibilidade e a cobertura histórica das fontes variam; o
-    universo histórico pode não representar todos os ativos que existiam
-    em cada período.
-    Resultados exploratórios não são prova de vantagem estatística nem
-    garantia de rentabilidade.
-    O projeto não envia ordens para corretoras.
+- O mercado de criptomoedas é volátil; perdas substanciais são possíveis.
+- Backtests dependem das premissas de execução, dos custos e da qualidade dos dados; spread e slippage são estimados.
+- Há viés de sobrevivência no universo de moedas e uma única história de mercado, com poucos ciclos.
+- Os resultados são exploratórios: não provam vantagem estatística nem garantem rentabilidade.
+- O projeto não envia ordens para corretoras.
 
-Estrutura do projeto
-run.py               # Atalho para subir API e painel
+## Estrutura do projeto
+
+```
+run.py               # atalho para subir API e painel
 src/
-  api/              # API FastAPI somente leitura para o painel
-  extractors/       # Adaptadores das fontes de dados
-  transformers/     # Indicadores, sinais, seleção e backtesting
-  loaders/          # Persistência e leitura de dados
-  pipeline.py       # Orquestração da execução
-  config.py         # Configuração
-research/            # Experimentos e estudos quantitativos
-frontend/            # Painel React/TypeScript
-tests/               # Testes automatizados
-docs/                # Metodologia, arquitetura e progresso técnico
+  api/               # API FastAPI somente leitura para o painel
+  extractors/        # adaptadores das fontes de dados
+  transformers/      # indicadores, sinais, seleção e backtesting (funções puras)
+  loaders/           # persistência e leitura de dados
+  notifiers/         # envio de notificações (Telegram)
+  pipeline.py        # orquestração da execução
+  config.py          # configuração
+research/            # estudos quantitativos e geração das figuras
+evidence/            # resultados dos estudos (Parquet)
+frontend/            # painel React/TypeScript
+tests/               # testes automatizados
+docs/                # metodologia, arquitetura e estudos
+```
 
-Consulte docs/ para detalhes metodológicos e decisões de
-implementação. O README mantém apenas as informações necessárias para
-entender, instalar e executar o projeto.
+Mais detalhes em [docs/](docs/): [pesquisa quantitativa](docs/pesquisa_quantitativa.md),
+[validação de sinais](docs/signal_validation.md) e [sinais de entrada](docs/entry_signals.md) (nenhum sinal validado,
+então nenhuma moeda mostra COMPRAR).
 
-Pesquisa quantitativa (dados point-in-time, motor de backtest de referência, validação estatística e a validação do COMPRAR por moeda): [docs/pesquisa_quantitativa.md](docs/pesquisa_quantitativa.md) e [docs/signal_validation.md](docs/signal_validation.md).
+## Licença
 
-Sinais de entrada (desde 2026-10-17 o COMPRAR depende do sinal, não da moeda): protocolo, resultado e uso no produto em [docs/entry_signals.md](docs/entry_signals.md). Resultado atual: nenhum sinal validado, então nenhuma moeda mostra COMPRAR; o score de seleção (E) fica em observação como promissor.
+[MIT](LICENSE).
