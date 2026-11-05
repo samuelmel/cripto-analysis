@@ -267,7 +267,7 @@ def test_simulated_wallets_are_published_recorded_once_and_shown_without_changin
     assert (workdir / "frontend" / "public" / "sim_wallets.parquet").is_file()
     assert (workdir / "frontend" / "public" / "sim_wallet_positions.parquet").is_file()
 
-    assert pipeline._notify(result, now.to_pydatetime(), dry_run=True) == 0
+    assert pipeline._notify(result, now.to_pydatetime(), dry_run=True, detailed=True) == 0
     out = capsys.readouterr().out
     assert "CARTEIRAS SIMULADAS (dinheiro fictício, sem ordens reais)" in out and "nenhuma ordem real é enviada" in out
     assert out.index("CARTEIRAS SIMULADAS") > out.index("--- mensagem 1/")  # numa mensagem separada, depois do resumo
@@ -291,5 +291,5 @@ def test_simulated_wallets_without_the_real_quote_say_so_and_never_invent_one(wo
     result = pipeline.analyze(now)
     assert result["sim_summary"]["currency"].eq("USDT").all() and result["sim_summary"]["fx_close"].isna().all()
     assert result["sim_trades"]["status"].isin(["PENDENTE", "NAO_EXECUTADA"]).all()
-    assert pipeline._notify(result, now.to_pydatetime(), dry_run=True) == 0
+    assert pipeline._notify(result, now.to_pydatetime(), dry_run=True, detailed=True) == 0
     assert "cotação do real indisponível" in capsys.readouterr().out

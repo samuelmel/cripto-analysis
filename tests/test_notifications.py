@@ -368,9 +368,26 @@ def test_dry_run_needs_no_token_and_no_network(workdir: Path, capsys: pytest.Cap
     assert pipeline.main(["--offline", "--dry-run"]) == 0
     out = capsys.readouterr().out
     assert "dry-run: mensagem válida, nada foi enviado" in out
+    assert "Cripto hoje (" in out and "mensagem 1/1" in out  # padrão: uma única mensagem curta
+    assert "CRIPTO — ANÁLISE DO DIA" not in out
+
+
+def test_detailed_mode_is_opt_in_by_environment_variable(
+    workdir: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TELEGRAM_DETALHADO", "1")
+    assert pipeline.main(["--offline", "--dry-run"]) == 0
+    out = capsys.readouterr().out
     assert "CRIPTO — ANÁLISE DO DIA" in out
     assert "Orçamento disponível na simulação: R$ 100" in out
     assert "Validação histórica:" in out
+
+
+def test_detailed_requested_only_for_exactly_one() -> None:
+    assert pipeline.detailed_requested({"TELEGRAM_DETALHADO": "1"})
+    assert not pipeline.detailed_requested({})
+    assert not pipeline.detailed_requested({"TELEGRAM_DETALHADO": "0"})
+    assert not pipeline.detailed_requested({"TELEGRAM_DETALHADO": "true"})
 
 
 def test_notify_without_credentials_fails_loudly(workdir: Path) -> None:

@@ -108,7 +108,7 @@ def test_pipeline_shows_the_simulation_in_telegram_without_touching_the_recommen
     result = pipeline.analyze(RUN_TS)
     assert not result["paper_summary"].empty
     assert set(result["paper_summary"]["portfolio"]) >= {REF_MARKET, REF_MOMENTUM}
-    assert pipeline._notify(result, RUN_TS.to_pydatetime(), dry_run=True) == 0
+    assert pipeline._notify(result, RUN_TS.to_pydatetime(), dry_run=True, detailed=True) == 0
     out = capsys.readouterr().out
     assert "IA EM TESTE" in out and "sem dinheiro real" in out
     assert "prob" not in result["recommendation"].columns

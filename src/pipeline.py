@@ -29,6 +29,7 @@ import argparse
 import logging
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -89,6 +90,7 @@ from .transformers.notification import (
     redact,
     validate_messages,
 )
+from .transformers.notification_short import format_short_report
 from .transformers.recommendation import build_recommendation, validate_recommendation
 from .transformers.regimes import classify_market_regimes
 from .transformers.selection import REGIME_UNAVAILABLE, assess, compute_features, features_on, regime_series
@@ -276,6 +278,7 @@ def analyze(
     regimes = regime_series(features)
     unavailable = {str(r.symbol): str(r.reason) for r in available.itertuples() if not bool(r.available)}
     regime = REGIME_UNAVAILABLE if REGIME_SYMBOL in unavailable else str(regimes.get(day, REGIME_UNAVAILABLE))
+    regime_before = str(regimes.get(day - pd.Timedelta(days=1), REGIME_UNAVAILABLE))
     # Regimes de mercado (Fase 4): descrição causal publicada ao lado do regime antigo. Só leitura: não entra em
     # assess/allocate/evaluate_selection nem em nenhuma regra de compra, venda ou risco.
     ref = candles[candles["symbol"].eq(REGIME_SYMBOL)]
@@ -362,6 +365,7 @@ def analyze(
         "availability": available, "issues": issues, "dropped": dropped, "recommendation": recommendation,
         "selection_backtest": selection_perf, "market_regimes": market_regimes, "dataset": dataset,
         "position_changes": changes, "entry_levels": entry_levels, "entry_changes": changes_today,
+        "regime_previous": pd.DataFrame({"regime": pd.Series([regime_before], dtype="string")}),
         "signal_evidence": signal_evidence, "shadow_predictions": shadow,
         "paper_summary": paper_summary, "paper_track": paper_track,
         "shadow_notes": pd.DataFrame({"note": shadow_notes}, dtype="string"),
@@ -575,18 +579,48 @@ def _secrets() -> list[str]:
     return [v for name in SECRET_ENV if (v := os.environ.get(name, "").strip())]
 
 
-def _notify(result: dict[str, pd.DataFrame], now: datetime, *, dry_run: bool, record_state: bool = False) -> int:
+DETAILED_ENV = "TELEGRAM_DETALHADO"
+
+
+def detailed_requested(environ: Mapping[str, str]) -> bool:
+    """Modo detalhado (várias mensagens longas) só com TELEGRAM_DETALHADO=1; o padrão é a mensagem curta."""
+    return environ.get(DETAILED_ENV, "").strip() == "1"
+
+
+def _previous_regime(result: dict[str, pd.DataFrame]) -> str | None:
+    table = result.get("regime_previous")
+    if table is None or table.empty:
+        return None
+    value = str(table["regime"].iloc[0])
+    return None if value == REGIME_UNAVAILABLE else value
+
+
+def _short_texts(result: dict[str, pd.DataFrame], now: datetime) -> list[str]:
+    changes = result.get("position_changes", pd.DataFrame())
+    entry = result.get("entry_changes")
+    return format_short_report(
+        result["signals"], result["recommendation"], now=pd.Timestamp(now), sim_summary=result.get("sim_summary"),
+        previous_regime=_previous_regime(result), n_position_changes=len(changes),
+        n_entry_changes=0 if entry is None else len(entry),
+    )
+
+
+def _notify(result: dict[str, pd.DataFrame], now: datetime, *, dry_run: bool, record_state: bool = False,
+            detailed: bool = False) -> int:
     """Resumo do dia no Telegram mais, só quando o estado de alguma posição mudou, o aviso das posições (ou, com dry_run, só
     gerado, validado e impresso). 0 = ok, 1 = mensagem inválida, 2 = sem credenciais ou envio falhou (o job deve ficar
     vermelho). A mudança só é marcada como avisada depois do envio: se falhar, é reenviada na próxima execução."""
-    texts = format_report(result["signals"], result["recommendation"], now=pd.Timestamp(now), recommended=RECOMMENDED,
-                          entry_levels=result.get("entry_levels"), signal_evidence=result.get("signal_evidence"))
     changes = result.get("position_changes", pd.DataFrame())
-    texts += format_position_changes(changes, now=pd.Timestamp(now))
-    texts += format_entry_changes(result.get("entry_changes"), result["signals"], now=pd.Timestamp(now))
-    texts += format_paper_report(result.get("shadow_predictions"), result.get("paper_summary"), result.get("paper_track"),
-                                 now=pd.Timestamp(now), labels=MODEL_LABELS)
-    texts += format_sim_wallets(result.get("sim_summary"), result.get("sim_positions"), result.get("sim_trades"), now=pd.Timestamp(now))
+    if detailed:
+        texts = format_report(result["signals"], result["recommendation"], now=pd.Timestamp(now), recommended=RECOMMENDED,
+                              entry_levels=result.get("entry_levels"), signal_evidence=result.get("signal_evidence"))
+        texts += format_position_changes(changes, now=pd.Timestamp(now))
+        texts += format_entry_changes(result.get("entry_changes"), result["signals"], now=pd.Timestamp(now))
+        texts += format_paper_report(result.get("shadow_predictions"), result.get("paper_summary"), result.get("paper_track"),
+                                     now=pd.Timestamp(now), labels=MODEL_LABELS)
+        texts += format_sim_wallets(result.get("sim_summary"), result.get("sim_positions"), result.get("sim_trades"), now=pd.Timestamp(now))
+    else:
+        texts = _short_texts(result, now)
     problems = validate_messages(texts, _secrets())
     if problems:
         logger.error("mensagem do Telegram inválida: %s", "; ".join(problems))
@@ -662,7 +696,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(report(result, failures))
     if args.notify or args.dry_run:
-        return _notify(result, now, dry_run=args.dry_run, record_state=args.record_state)
+        return _notify(result, now, dry_run=args.dry_run, record_state=args.record_state,
+                       detailed=detailed_requested(os.environ))
     return 0
 
 

@@ -14,7 +14,32 @@ O envio é **só uma mensagem**. O projeto não executa ordens, não acessa nenh
 
 ## O que a mensagem traz
 
-Ela é curta, para ler em um minuto, e tem esta estrutura (os valores abaixo são ilustrativos):
+**Padrão: uma única mensagem curta, de até 600 caracteres, em português simples.** Os valores abaixo são ilustrativos:
+
+```
+📊 Cripto hoje (05/11)
+Mercado: em alta 🟢 (BTC 12% acima da média de 200 dias)
+Hoje: aporte simulado de R$ 50 em NEAR, SOL, BTC      (ou: Hoje: nada a fazer)
+Carteiras simuladas (desde o início): Regra +12,0% · IA (em teste) +8,0% · Só segurar BTC +15,3%
+⚠️ Mudou: o mercado virou para baixa.                 (só aparece quando algo mudou desde ontem)
+Detalhes no painel. Simulação, não é recomendação.
+```
+
+- **Mercado:** em alta 🟢, indefinido 🟡 ou em baixa 🔴, pela posição do BTC em relação à média de 200 dias.
+- **Hoje:** o aporte é sempre simulado (dinheiro fictício). Sem oportunidade, a linha diz "nada a fazer".
+- **Carteiras simuladas:** o resultado desde o início da Regra (recomendação do painel), da IA (marcada "em teste") e de só segurar BTC.
+- **Avisos extras** só aparecem quando algo **mudou desde ontem**: o mercado virou, uma posição sua mudou de estado, surgiu um sinal de entrada novo, ou os dados estão atrasados.
+- Se algo estourar 600 caracteres, a mensagem se encurta (menos moedas, sem o "desde o início") em vez de virar várias mensagens.
+- Erros do pipeline continuam com um alerta curto.
+- Função pura: `format_short_report` em `src/transformers/notification_short.py` (testes em `tests/test_notification_short.py`).
+
+### Modo detalhado (opcional)
+
+A mensagem longa de antes (oportunidades, motivos, alertas, validação histórica, posições, carteiras simuladas) continua
+disponível: defina a variável de ambiente `TELEGRAM_DETALHADO=1`. Ela é lida só no entrypoint (`src/pipeline.py`);
+qualquer outro valor mantém o padrão curto. A descrição abaixo vale para o modo detalhado.
+
+A mensagem detalhada tem esta estrutura (os valores abaixo são ilustrativos):
 
 ```
 📊 CRIPTO — ANÁLISE DO DIA
@@ -81,6 +106,7 @@ Se a mensagem chegar no celular, está pronto. Fechar o PowerShell apaga as vari
 |---|---|
 | `TELEGRAM_BOT_TOKEN` | Token do bot. É segredo: nunca entra em código, log, mensagem ou erro. |
 | `TELEGRAM_CHAT_ID` | Número do chat que recebe as mensagens |
+| `TELEGRAM_DETALHADO` | Opcional: `1` envia a versão detalhada (várias mensagens longas) em vez da curta |
 | `COINGECKO_API_KEY` | Opcional: chave Demo gratuita do CoinGecko |
 | `BINANCE_API_HOST` | Opcional: `https://data-api.binance.vision` quando a `api.binance.com` responde HTTP 451. Só esses dois hosts são aceitos. |
 

@@ -271,7 +271,7 @@ def test_position_in_any_coin_is_tracked_and_notified_once(workdir: Path, monkey
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123456:ABC-DEF-segredo")
     monkeypatch.setenv("TELEGRAM_CHAT_ID", "987654321")
     monkeypatch.setattr(pipeline, "send_messages", lambda settings, texts: sent.append(list(texts)))
-    assert pipeline._notify(first, RUN_TS.to_pydatetime(), dry_run=False, record_state=True) == 0
+    assert pipeline._notify(first, RUN_TS.to_pydatetime(), dry_run=False, record_state=True, detailed=True) == 0
     assert any("MUDANÇA DE ESTADO" in t for t in sent[0])
     assert not any("123456:ABC-DEF-segredo" in t or "987654321" in t for t in sent[0])
     assert len(read_notifications(workdir / "data" / "state" / "notifications.parquet")) == 1
@@ -279,7 +279,7 @@ def test_position_in_any_coin_is_tracked_and_notified_once(workdir: Path, monkey
     second = pipeline.analyze(RUN_TS + pd.Timedelta(days=0), record_state=True)  # mesma situação no dia seguinte (mesmo dado)
     assert second["position_changes"].empty                                      # não repete o aviso
     sent.clear()
-    assert pipeline._notify(second, RUN_TS.to_pydatetime(), dry_run=False, record_state=True) == 0
+    assert pipeline._notify(second, RUN_TS.to_pydatetime(), dry_run=False, record_state=True, detailed=True) == 0
     assert not any("MUDANÇA DE ESTADO" in t for t in sent[0])
     history = read_state_log(workdir / "data" / "state" / "position_states.parquet")
     assert history["changed"].sum() == 1
