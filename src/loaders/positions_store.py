@@ -1,4 +1,4 @@
-"""Suas posições (compras reais) em data/state/positions.parquet (branch `state`, ver `state_store`)."""
+"""Suas posições (compras reais) em data/state/positions.parquet (repositório de estado, ver `state_store`)."""
 
 from __future__ import annotations
 

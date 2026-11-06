@@ -17,7 +17,7 @@ produto (ordenar candidatas).
 - Candles diários de todos os pares USDT do arquivo oficial da Binance (`data/archive`, inclusive os que pararam de
   negociar), com o filtro de continuidade `continuidade-v1` (`series_continuity.split_discontinuities`).
 - Universo de cada dia: o point-in-time do estudo dos sinais de entrada (`entry_signals.build_panel`, `EntryRules`).
-- Fear & Greed: `data/market/fng` ou, na falta, a cópia da branch `state` (`fng_history.parquet`). **Sem o índice, os
+- Fear & Greed: `data/market/fng` ou, na falta, a cópia do repositório de estado (`fng_history.parquet`). **Sem o índice, os
   dois modelos que o usam não são executados** (resultado NAO_EXECUTADO, p = 1 na família); nada é imputado.
 
 ## Modelos (`src/transformers/model_shadow.py`), hiperparâmetros fixos, sem nenhum ajuste
@@ -42,7 +42,7 @@ vêm só das linhas de treino de cada dobra.
   para os quatro modelos (não se escolhe quem vai ao teste). O teste final já foi consultado por outros estudos do
   projeto (para outros sinais); para estes modelos, não.
 - Todo o período é histórico já explorado no desenvolvimento das regras do projeto. A confirmação real é prospectiva:
-  as previsões diárias ficam registradas em `model_predictions.parquet` (branch `state`) desde a implantação.
+  as previsões diárias ficam registradas em `model_predictions.parquet` (repositório de estado) desde a implantação.
 
 ## Métricas
 
@@ -145,11 +145,11 @@ Leitura, sem exagerar:
   fica em +2,0 pp. O sinal concentra-se nas poucas moedas de maior probabilidade.
 
 Consequência (fixada antes): nenhum modelo sai do modo sombra. Os quatro modelos já registram previsões diárias em
-`model_predictions.parquet` (branch `state`); a avaliação prospectiva, com o mesmo teste, só depois de 365 dias.
+`model_predictions.parquet` (repositório de estado); a avaliação prospectiva, com o mesmo teste, só depois de 365 dias.
 
 ## Resultado da execução de 2026-11-03 (completa: com Fear & Greed)
 
-Mesmo protocolo `ml-v1`, agora com o histórico do Fear & Greed guardado pelo GitHub Actions na branch `state`
+Mesmo protocolo `ml-v1`, agora com o histórico do Fear & Greed guardado pelo GitHub Actions no repositório de estado
 (`fng_history.parquet`, 3.193 dias de 2018-02-01 a 2026-11-02). Os 4 modelos executados; as tabelas de
 `evidence/ml_study/` passam a ser as desta execução (a anterior continua no histórico do Git e no registro).
 

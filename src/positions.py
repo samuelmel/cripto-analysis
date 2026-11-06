@@ -7,7 +7,7 @@ Uso (da raiz do projeto):
     uv run python -m src.positions close <id> 95000                    vendeu a 95000
     uv run python -m src.positions remove <id>                         apaga um registro errado
 
-As posições ficam em `data/state/positions.parquet`, um worktree da branch `state` (ver `src/state_sync.py`). Cada
+As posições ficam em `data/state/positions.parquet`, um clone do repositório privado de estado (ver `src/state_sync.py`). Cada
 comando que altera algo traz a branch antes e envia o resultado depois, para o GitHub Actions avisar mesmo com o PC
 desligado. Use `--no-sync` para trabalhar só localmente.
 """
@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     parser = argparse.ArgumentParser(description="Registro das suas posições")
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--no-sync", action="store_true", help="não traz nem envia a branch `state` (só local)")
+    common.add_argument("--no-sync", action="store_true", help="não traz nem envia o repositório de estado (só local)")
     sub = parser.add_subparsers(dest="cmd", required=True)
     p_add = sub.add_parser("add", help="registra uma compra", parents=[common])
     p_add.add_argument("symbol")
@@ -138,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
         except state_sync.StateSyncError as exc:
             print(f"erro ao enviar o estado (a alteração ficou só neste computador): {exc}")
             return 1
-        print("estado enviado à branch `state`." if sent else "estado já estava em dia no GitHub.")
+        print("estado enviado ao repositório de estado." if sent else "estado já estava em dia no GitHub.")
     refresh_positions(datetime.now(timezone.utc))  # atualiza as posições no painel com a base local, sem rede
     print(show())
     return 0

@@ -113,6 +113,13 @@ cd frontend && npx --yes pnpm@10 typecheck && npx --yes pnpm@10 test && npx --ye
 As configurações principais (universo de moedas, filtros, orçamento simulado e premissas de custo) ficam em
 `src/config.py`.
 
+## Rodando no seu fork
+
+O pipeline diário grava o estado (posições, registro de sinais, avisos) num repositório privado separado,
+`samuelmel/cripto-analysis-state`, com acesso por deploy key no secret `STATE_DEPLOY_KEY`. Sem esse secret e sem um repositório de
+estado próprio, o pipeline diário falha logo no início com uma mensagem clara. O restante (CI, pesquisa, painel local) funciona sem
+segredo. Para configurar o seu, veja [docs/state.md](docs/state.md).
+
 ## Limitações
 
 - O mercado de criptomoedas é volátil; perdas substanciais são possíveis.

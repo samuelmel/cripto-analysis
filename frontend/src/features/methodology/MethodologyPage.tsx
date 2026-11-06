@@ -164,7 +164,7 @@ function MethodologyBody({ data }: { data: Overview }): ReactNode {
           <GitBranch size={18} className="mt-0.5 shrink-0 text-signal" />
           <div>
             <div className="text-[13px] font-medium text-ink">Estado isolado</div>
-            <div className="mt-1 text-[12px] text-muted">A branch state é lida, nunca escrita pelo painel.</div>
+            <div className="mt-1 text-[12px] text-muted">O repositório de estado é lido, nunca escrito pelo painel.</div>
           </div>
         </div>
       </Panel>

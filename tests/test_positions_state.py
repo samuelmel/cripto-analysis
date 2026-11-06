@@ -1,4 +1,4 @@
-"""Estados das posições (SEGURAR, ATENÇÃO, VENDER), histórico, aviso só na mudança, registro imutável de sinais e a branch `state`."""
+"""Estados das posições (SEGURAR, ATENÇÃO, VENDER), histórico, aviso só na mudança, registro imutável de sinais e o repositório de estado."""
 
 from __future__ import annotations
 
@@ -306,38 +306,128 @@ def test_failed_send_is_retried_on_the_next_run(workdir: Path, monkeypatch: pyte
     assert len(pipeline.analyze(RUN_TS, record_state=True)["position_changes"]) == 1       # reenvia na próxima execução
 
 
-# ------------------------------------------------------------------------------------------------- branch `state`
+# ------------------------------------------------------------------------------------------ repositório de estado (git)
+# Todos os testes usam repositórios locais (bare) em tmp_path; nenhum acessa a rede.
+
+@pytest.fixture
+def git_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    for var in ("GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"):
+        monkeypatch.setenv(var, "t")
+    for var in ("GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"):
+        monkeypatch.setenv(var, "t@example.com")
+
 
 def git(args: list[str], cwd: Path) -> str:
     return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
 
 
-def test_state_branch_is_created_pushed_and_pulled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    remote = tmp_path / "remote.git"
+def bare_remote(tmp_path: Path, name: str) -> Path:
+    remote = tmp_path / name
     git(["init", "--bare", "-q", str(remote)], tmp_path)
-    mine, other = tmp_path / "mine", tmp_path / "other"
-    for repo in (mine, other):
-        git(["init", "-q", str(repo)], tmp_path)
-        git(["config", "user.email", "t@example.com"], repo)
-        git(["config", "user.name", "t"], repo)
-        git(["remote", "add", "origin", str(remote)], repo)
-        (repo / "x.txt").write_text("x", encoding="utf-8")
-        git(["add", "-A"], repo)
-        git(["commit", "-q", "-m", "base"], repo)
+    return remote
 
-    monkeypatch.chdir(mine)
-    assert "criada" in state_sync.init()
-    (mine / "data" / "state" / "positions.parquet").write_bytes(b"dados")
-    assert state_sync.push("posições: add") is True
-    assert state_sync.push("nada mudou") is False                              # nada a enviar
-    assert "state" in git(["branch", "--list", "state"], remote)               # a branch existe no remoto
 
-    monkeypatch.chdir(other)
-    assert "ligado" in state_sync.init()
-    assert (other / "data" / "state" / "positions.parquet").read_bytes() == b"dados"
-    (other / "data" / "state" / "positions.parquet").write_bytes(b"dados2")
-    assert state_sync.push("outra máquina") is True
-    monkeypatch.chdir(mine)
-    assert state_sync.pull() is True
-    assert (mine / "data" / "state" / "positions.parquet").read_bytes() == b"dados2"
-    assert git(["rev-parse", "--abbrev-ref", "HEAD"], mine) != "state"          # a branch do trabalho não foi tocada
+def seed_remote(remote: Path, files: dict[str, bytes], scratch: Path) -> None:
+    """Coloca `files` como primeiro commit da branch `main` do remoto (que está vazio)."""
+    work = scratch / "seed"
+    git(["clone", "-q", str(remote), str(work)], scratch)
+    for name, data in files.items():
+        (work / name).write_bytes(data)
+    git(["symbolic-ref", "HEAD", "refs/heads/main"], work)
+    git(["add", "-A"], work)
+    git(["commit", "-q", "-m", "estado inicial"], work)
+    git(["push", "-q", "origin", "HEAD:main"], work)
+
+
+def legacy_project(tmp_path: Path, positions: bytes) -> Path:
+    """Projeto com o worktree ANTIGO: `data/state` é um worktree da branch local `state`, com um parquet commitado."""
+    project = tmp_path / "projeto"
+    git(["init", "-q", str(project)], tmp_path)
+    (project / "x.txt").write_text("x", encoding="utf-8")
+    git(["add", "-A"], project)
+    git(["commit", "-q", "-m", "base"], project)
+    worktree = project / "data" / "state"
+    git(["worktree", "add", "--detach", str(worktree)], project)
+    git(["checkout", "-q", "--orphan", "state"], worktree)
+    (worktree / "positions.parquet").write_bytes(positions)
+    git(["add", "-A"], worktree)
+    git(["commit", "-q", "-m", "estado antigo"], worktree)
+    return project
+
+
+def test_empty_remote_is_initialised_and_pushed(tmp_path: Path, git_identity: None) -> None:
+    remote = bare_remote(tmp_path, "estado.git")
+    local = tmp_path / "data" / "state"
+    assert "vazio" in state_sync.init(str(remote), local)
+    assert (local / "README.md").is_file()
+    assert "main" in git(["branch", "--list", "main"], remote)           # o README foi enviado para a main
+    (local / "positions.parquet").write_bytes(b"dados")
+    assert state_sync.push("posições: add", str(remote), local) is True
+    assert state_sync.push("nada mudou", str(remote), local) is False     # nada a enviar
+
+
+def test_second_machine_clones_pushes_and_the_first_one_pulls(tmp_path: Path, git_identity: None) -> None:
+    remote = bare_remote(tmp_path, "estado.git")
+    mine, other = tmp_path / "mine" / "state", tmp_path / "other" / "state"
+    state_sync.init(str(remote), mine)
+    (mine / "positions.parquet").write_bytes(b"dados")
+    assert state_sync.push("posições: add", str(remote), mine) is True
+
+    state_sync.init(str(remote), other)                                    # outra máquina: clone do que já existe
+    assert (other / "positions.parquet").read_bytes() == b"dados"
+    (other / "positions.parquet").write_bytes(b"dados2")
+    assert state_sync.push("outra máquina", str(remote), other) is True
+
+    assert state_sync.pull(str(remote), mine) is True
+    assert (mine / "positions.parquet").read_bytes() == b"dados2"
+
+
+def test_migration_replaces_the_legacy_worktree_without_losing_data(tmp_path: Path, git_identity: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    remote = bare_remote(tmp_path, "estado.git")
+    seed_remote(remote, {"positions.parquet": b"dados"}, tmp_path)
+    project = legacy_project(tmp_path, b"dados")
+    monkeypatch.chdir(project)
+    head_before = git(["rev-parse", "HEAD"], project)
+
+    message = state_sync.init(str(remote), Path("data/state"))
+    assert "migrado" in message and "NÃO foram sobrescritos" not in message
+    assert state_sync.is_checkout(Path("data/state")) and not state_sync.is_legacy_worktree(Path("data/state"))
+    assert Path("data/state/positions.parquet").read_bytes() == b"dados"
+    assert "state" not in git(["branch", "--list", "state"], project)     # branch local antiga removida
+    assert git(["rev-parse", "HEAD"], project) == head_before             # a branch de trabalho não foi tocada
+
+
+def test_migration_keeps_a_different_local_copy_as_backup(tmp_path: Path, git_identity: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    remote = bare_remote(tmp_path, "estado.git")
+    seed_remote(remote, {"positions.parquet": b"remoto"}, tmp_path)
+    project = legacy_project(tmp_path, b"local")
+    monkeypatch.chdir(project)
+
+    message = state_sync.init(str(remote), Path("data/state"))
+    assert "NÃO foram sobrescritos" in message
+    assert Path("data/state/positions.parquet").read_bytes() == b"remoto"  # o que já está no repositório de estado prevalece
+    assert Path("data/state_migracao_backup/positions.parquet").read_bytes() == b"local"
+
+
+def test_migration_refuses_uncommitted_changes_and_removes_nothing(tmp_path: Path, git_identity: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    remote = bare_remote(tmp_path, "estado.git")
+    seed_remote(remote, {"positions.parquet": b"dados"}, tmp_path)
+    project = legacy_project(tmp_path, b"dados")
+    monkeypatch.chdir(project)
+    (project / "data" / "state" / "positions.parquet").write_bytes(b"mudou sem commit")
+
+    with pytest.raises(state_sync.StateSyncError):
+        state_sync.init(str(remote), Path("data/state"))
+    assert (project / "data" / "state" / ".git").is_file()                 # o worktree continua lá
+    assert (project / "data" / "state" / "positions.parquet").read_bytes() == b"mudou sem commit"
+
+
+def test_clone_pointing_to_another_remote_is_an_explicit_error(tmp_path: Path, git_identity: None) -> None:
+    remote = bare_remote(tmp_path, "estado.git")
+    wrong = bare_remote(tmp_path, "outro.git")
+    local = tmp_path / "data" / "state"
+    state_sync.init(str(remote), local)
+    with pytest.raises(state_sync.StateSyncError, match="não aponta"):
+        state_sync.init(str(wrong), local)
+    with pytest.raises(state_sync.StateSyncError, match="não aponta"):
+        state_sync.pull(str(wrong), local)

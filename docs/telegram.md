@@ -144,7 +144,7 @@ O gatilho é `cron: "7 21 * * *"`, ou seja, **21:07 UTC = 18:07 em Brasília e F
 ### O que não existe no runner
 
 - **Base histórica:** o runner começa sem a pasta `data/`. A cada execução, o pipeline baixa o histórico inteiro de novo e recalcula tudo. O sinal de "ontem", usado nos alertas de virada, é recalculado a partir do histórico.
-- **Suas posições:** ficam na branch `state` (ver [state.md](state.md)), acessível ao Actions. A mensagem diária continua cobrindo sinais e seleção; uma mensagem **separada** só aparece quando o estado de alguma posição muda (SEGURAR, ATENÇÃO, VENDER), com a regra e o histórico dela.
+- **Suas posições:** ficam no repositório privado de estado (ver [state.md](state.md)), acessível ao Actions. A mensagem diária continua cobrindo sinais e seleção; uma mensagem **separada** só aparece quando o estado de alguma posição muda (SEGURAR, ATENÇÃO, VENDER), com a regra e o histórico dela.
 
 ---
 

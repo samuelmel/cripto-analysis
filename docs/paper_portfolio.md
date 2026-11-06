@@ -5,7 +5,7 @@ sem afetar a recomendação. Nenhuma ordem é enviada a corretora; o sistema nã
 
 ## Como funciona (`src/transformers/paper_portfolio.py`)
 
-- **Início:** no primeiro dia com previsão registrada em `model_predictions.parquet` (branch `state`). Só dados
+- **Início:** no primeiro dia com previsão registrada em `model_predictions.parquet` (repositório de estado). Só dados
   posteriores à implantação: nada do passado entra no placar.
 - **Compra simulada:** todo dia, cada modelo "compra" as 5 moedas de maior probabilidade com 1/30 do capital
   fictício (uma fatia por dia), dividido igualmente entre elas.

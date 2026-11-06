@@ -50,7 +50,7 @@ Os preços são em USDT; os valores são mostrados em reais pela cotação do **
 ## Registro e replay
 
 - Todo dia só as **decisões** de cada robô (carteira, dia, moeda, lote, COMPRA/VENDA, valor em R$) vão para
-  `data/state/sim_decisions.parquet` (branch `state`, `docs/state.md`). É append-only, **idempotente por chave** (carteira,
+  `data/state/sim_decisions.parquet` (repositório de estado, `docs/state.md`). É append-only, **idempotente por chave** (carteira,
   dia, moeda, lado), com cadeia de hash igual à das previsões da IA (`model_shadow`), e só grava com `--record-state`.
   Reexecutar o mesmo dia não muda nada; alterar uma linha antiga quebra a cadeia e nada é gravado.
 - Posições, caixa e valor **não são guardados**: a cada execução `sim_wallet.replay` refaz as carteiras do zero a partir das

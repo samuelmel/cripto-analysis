@@ -115,7 +115,7 @@ uv run python -m src.positions close <id> 95000                         # regist
 uv run python -m src.positions remove <id>                              # apaga um registro errado
 ```
 
-Os preços são em USDT, como os pares da Binance. Cada comando atualiza os arquivos do painel na hora, sem internet; recarregue a página. As posições ficam em `data/state/positions.parquet`, que é a branch `state` do repositório (ver [state.md](state.md)): cada comando traz a branch antes e envia depois, para o aviso do Telegram funcionar com o PC desligado. `--no-sync` trabalha só local. A moeda precisa estar em `UNIVERSE` (`src/config.py`).
+Os preços são em USDT, como os pares da Binance. Cada comando atualiza os arquivos do painel na hora, sem internet; recarregue a página. As posições ficam em `data/state/positions.parquet`, que fica no repositório privado de estado (ver [state.md](state.md)): cada comando traz o repositório de estado antes e envia depois, para o aviso do Telegram funcionar com o PC desligado. `--no-sync` trabalha só local. A moeda precisa estar em `UNIVERSE` (`src/config.py`).
 
 ---
 

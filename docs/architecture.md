@@ -81,7 +81,7 @@ Todos são Parquet. Os de `frontend/public/` usam compressão snappy e estão fo
 |---|---|
 | `data/market/` | Base histórica e registro de fontes |
 | `data/signals/history/` | Snapshot diário dos sinais |
-| `data/state/` | Estado persistente (worktree da branch `state`): posições, registro de sinais, estados e avisos |
+| `data/state/` | Estado persistente (clone do repositório privado de estado): posições, registro de sinais, estados e avisos |
 | `data/research/` | Saídas dos estudos (`strategy_lab*.parquet`, `selection_study.parquet`) |
 
 O tipo de uma linha de `daily_signals.parquet` (e dos demais arquivos) é declarado em um único módulo TypeScript, [`frontend/src/types/signals.ts`](../frontend/src/types/signals.ts), que espelha o schema do Python.

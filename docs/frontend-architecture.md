@@ -2,12 +2,12 @@
 
 Este documento descreve a camada de apresentação do Crypto Analyzer: uma API FastAPI **somente leitura** sobre os
 Parquets publicados e um frontend React/TypeScript. Ele não altera o pipeline, o motor de backtest, as regras de
-investimento nem a branch `state`.
+investimento nem o repositório de estado.
 
 ## 1. Princípios
 
 - A API lê artefatos; não calcula sinais, aportes, scores ou elegibilidade. Indicadores continuam em `src/transformers/`.
-- Nenhum endpoint escreve arquivo, envia ordem ou acessa a branch `state`.
+- Nenhum endpoint escreve arquivo, envia ordem ou acessa o repositório de estado.
 - Nenhum valor é inventado. Se um Parquet opcional não existe, a resposta traz estado indisponível.
 - Toda resposta é tipada em Pydantic e espelhada em TypeScript com Zod na borda do navegador.
 - A API não carrega o histórico inteiro para qualquer tela. Séries são limitadas por consulta; arquivos publicados são
@@ -36,7 +36,7 @@ investimento nem a branch `state`.
 ### Limitações atuais dos dados
 
 - `sim_wallets.parquet`, `sim_wallet_positions.parquet`, `data/state/sim_decisions.parquet` e
-  `data/state/model_predictions.parquet` não estão publicados neste worktree. A página de carteiras mostra estado
+  `data/state/model_predictions.parquet` não estão publicados nesta cópia. A página de carteiras mostra estado
   indisponível para `PAINEL`, `IA`, `REVERSAO` e `SO_BTC`.
 - O DCA fixo aparece como **referência do laboratório** (`strategy_lab.parquet`), não como carteira simulada em reais.
 - `USDT/BRL` não está presente em `data/market/ohlcv_1d`. A API não converte valores sem cotação.
