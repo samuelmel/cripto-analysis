@@ -226,7 +226,7 @@ uv run python -m src.positions remove <id>
 O candle diário da Binance fecha às 00:00 UTC (21:00 em Brasília). Agende para 21:10:
 
 ```bash
-schtasks /Create /TN "crypto-analyzer diario" /SC DAILY /ST 21:10 /TR "\"D:\Downloads\pastas codigo\projeto cripto\crypto-analyzer\run_daily.cmd\""
+schtasks /Create /TN "crypto-analyzer diario" /SC DAILY /ST 21:10 /TR "\"<pasta do projeto>\run_daily.cmd\""
 ```
 
 Ajuste o caminho se o projeto estiver em outra pasta. O log fica em `logs/pipeline.log`.

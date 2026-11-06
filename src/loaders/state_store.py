@@ -1,4 +1,4 @@
-"""Pasta de estado persistente (`data/state/`): checkout local da branch `state` do repositório.
+"""Pasta de estado persistente (`data/state/`): clone local do repositório privado de estado (`samuelmel/cripto-analysis-state`).
 
 Guarda o que precisa sobreviver entre execuções e ficar acessível ao GitHub Actions (CLAUDE.md §3: tudo em Parquet):
 
@@ -10,7 +10,7 @@ Guarda o que precisa sobreviver entre execuções e ficar acessível ao GitHub A
     sim_decisions.parquet       decisões das carteiras simuladas em reais (dinheiro fictício), com cadeia de hash (append-only)
     fng_history.parquet         cópia do histórico do Fear & Greed visto em cada execução (append-only, com revisões)
 
-A sincronização com a branch (git) fica em `src/state_sync.py`. Esta pasta é ignorada pelo git da branch `main`.
+A sincronização com o repositório (git) fica em `src/state_sync.py`. Esta pasta é ignorada pelo git deste projeto (`/data/` no `.gitignore`).
 """
 
 from __future__ import annotations

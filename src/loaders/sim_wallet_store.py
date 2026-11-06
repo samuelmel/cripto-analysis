@@ -1,4 +1,4 @@
-"""Decisões das carteiras simuladas na pasta de estado (branch `state`), append-only.
+"""Decisões das carteiras simuladas na pasta de estado (repositório de estado), append-only.
 
 Regras puras (cadeia de hash, chave, replay): `transformers/sim_wallet.py`.
 """

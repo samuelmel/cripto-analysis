@@ -13,7 +13,8 @@ on:
     - cron: "7 21 * * *"
 
 permissions:
-  contents: write  # só para gravar a branch `state` (dados); o workflow nunca escreve na `main`
+  contents: read  # este repositório não recebe escrita do workflow; o estado vai ao repositório privado (deploy key)
+  actions: write  # só para manter os agendamentos ativos (ver o último passo)
 
 concurrency:
   group: crypto-analyzer-diario
@@ -24,6 +25,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      - name: Conferir o segredo do repositório de estado
+        env:
+          STATE_DEPLOY_KEY: ${{ secrets.STATE_DEPLOY_KEY }}
+        run: |
+          # Sem a deploy key o estado (posições, sinais, avisos) não pode ser lido nem gravado. Falha cedo, sem imprimir o valor.
+          if [ -z "${STATE_DEPLOY_KEY}" ]; then
+            echo "::error title=Segredo STATE_DEPLOY_KEY ausente::Crie a deploy key do repositório cripto-analysis-state e grave a chave privada no secret STATE_DEPLOY_KEY deste repositório (ver docs/state.md)."
+            exit 1
+          fi
+
       - name: Escolher o host da API da Binance que responde a este runner
         run: |
           # api.binance.com recusa data centers de algumas regiões (HTTP 451). data-api.binance.vision serve os
@@ -43,12 +54,15 @@ jobs:
       - uses: actions/checkout@v7
 
       # Estado persistente: suas posições, o registro imutável de sinais, o histórico de estados e os avisos já enviados.
-      # Vive na branch `state` (só dados). O PC grava as posições nela com `python -m src.positions`.
-      - name: Trazer o estado (branch state)
+      # Vive no repositório privado samuelmel/cripto-analysis-state (branch main, só dados), acessado por deploy key SSH.
+      # O PC grava as posições nele com `python -m src.positions`.
+      - name: Trazer o estado (repositório de estado)
         uses: actions/checkout@v7
         with:
-          ref: state
+          repository: samuelmel/cripto-analysis-state
+          ref: main
           path: data/state
+          ssh-key: ${{ secrets.STATE_DEPLOY_KEY }}
 
       - uses: actions/setup-python@v7
         with:
@@ -67,9 +81,10 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: uv run python -m src.pipeline --notify --record-state
 
-      # Grava o estado atualizado na branch `state` (registro de sinais, histórico de estados, avisos enviados). Só roda se o
-      # pipeline e o envio deram certo; se o push falhar, a mudança de estado é reavisada no dia seguinte (nunca se perde).
-      - name: Gravar o estado (branch state)
+      # Grava o estado atualizado no repositório de estado (registro de sinais, histórico de estados, avisos enviados). Só roda
+      # se o pipeline e o envio deram certo; se o push falhar, a mudança de estado é reavisada no dia seguinte (nunca se perde).
+      # O checkout com ssh-key já deixa o remoto `origin` de data/state autenticado pela deploy key.
+      - name: Gravar o estado (repositório de estado)
         if: success()
         working-directory: data/state
         run: |
@@ -80,12 +95,13 @@ jobs:
             echo "estado sem mudanças"
           else
             git commit -q -m "estado: execução ${GITHUB_RUN_ID}"
-            git push -q origin HEAD:state
+            git push -q origin HEAD:main
           fi
 
       # Estado de auditoria desta execução: o runner é descartado no fim do job. Só dados públicos de mercado e
       # metadados (registro de fontes, revisões de candles, fingerprint dos dados usados, snapshot dos sinais);
-      # nenhuma posição (não existem no runner) e nenhum segredo. Artefato privado do repositório, 90 dias.
+      # nenhuma posição (não existem no runner) e nenhum segredo. Artefato do repositório (público quando o
+      # repositório for público; só dados de mercado e metadados), 90 dias.
       # Não é a fonte de verdade dos preços (a Binance é: tudo é rebaixado a cada execução); serve para auditar
       # falhas de coleta e revisões. Falhar aqui nunca derruba o job.
       - name: Guardar o estado de auditoria da execução
@@ -101,3 +117,14 @@ jobs:
             data/signals/history/
           if-no-files-found: warn
           retention-days: 90
+
+      # Repositório público sem atividade por 60 dias tem os workflows agendados desligados. Este passo reativa os agendamentos
+      # a cada execução. Falhar aqui nunca derruba o job.
+      - name: Manter os agendamentos ativos
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X PUT "repos/${{ github.repository }}/actions/workflows/daily.yml/enable"
+          gh api -X PUT "repos/${{ github.repository }}/actions/workflows/base-pesquisa.yml/enable"

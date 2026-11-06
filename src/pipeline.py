@@ -261,11 +261,11 @@ def analyze(
     fng_fresh = read_fng()
     fng = fng_fresh
     if fng.empty:
-        # A fonte falhou nesta execução: usa a cópia guardada na branch `state` (só o que já foi visto antes; nada é
+        # A fonte falhou nesta execução: usa a cópia guardada no repositório de estado (só o que já foi visto antes; nada é
         # inventado para o dia de hoje). O registro de fontes continua mostrando a falha.
         fng = latest_fng(read_fng_history())
         if not fng.empty:
-            logger.warning("Fear & Greed indisponível: usando a cópia da branch state (até %s)", f"{fng['timestamp'].max():%Y-%m-%d}")
+            logger.warning("Fear & Greed indisponível: usando a cópia do repositório de estado (até %s)", f"{fng['timestamp'].max():%Y-%m-%d}")
 
     # COMPRAR depende do sinal, não da moeda (docs/entry_signals.md): aparece quando a moeda está na condição de um
     # sinal VALIDADO no estudo agregado (evidence/entry_signals/). O COMPRAR/PREPARAR da regra SMA 200 é sempre rebaixado;
@@ -356,7 +356,7 @@ def analyze(
         write_parquet(signal_evidence, PUBLIC_DIR / "signal_evidence.parquet")
     if not entry_levels.empty:
         write_parquet(entry_levels, PUBLIC_DIR / "entry_signal_levels.parquet")
-    # Estado persistente (branch `state`): registro imutável de sinais e histórico de estados das posições.
+    # Estado persistente (repositório de estado): registro imutável de sinais e histórico de estados das posições.
     state_log = read_state_log()
     today_rows = new_state_rows(positions, state_log, day)
     if record_state:

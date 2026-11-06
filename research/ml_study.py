@@ -1,11 +1,11 @@
 """Estudo da IA (modelos em sombra contra o universo e o momento simples). Protocolo: docs/ml_study.md (fixado antes).
 
 Entrypoint (CLAUDE.md §1): lê os candles do arquivo oficial (`data/archive`) com o filtro `continuidade-v1`, o Fear &
-Greed (`data/market/fng` ou a cópia da branch state, `data/state/fng_history.parquet`), chama `ml_study.run_study` e
+Greed (`data/market/fng` ou a cópia do repositório de estado, `data/state/fng_history.parquet`), chama `ml_study.run_study` e
 grava Parquet em `evidence/ml_study/`, com uma linha no registro `evidence/validation_registry.parquet`.
 
     uv run python research/ml_study.py
-    uv run python research/ml_study.py --fng caminho/fng_history.parquet   cópia do F&G tirada da branch state
+    uv run python research/ml_study.py --fng caminho/fng_history.parquet   cópia do F&G tirada do repositório de estado
     uv run python research/ml_study.py --v2     estudo v2 EXPLORATÓRIO (docs/ml_study_v2.md): base ampliada com os pares
                                                 em BTC de data/archive_btc e ranking de todas as moedas
 """
@@ -60,7 +60,7 @@ def load_fng(path: Path | None) -> pd.DataFrame:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Estudo da IA (docs/ml_study.md)")
-    parser.add_argument("--fng", type=Path, default=None, help="fng_history.parquet da branch state")
+    parser.add_argument("--fng", type=Path, default=None, help="fng_history.parquet do repositório de estado")
     parser.add_argument("--v2", action="store_true", help="estudo v2 exploratório (docs/ml_study_v2.md)")
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]

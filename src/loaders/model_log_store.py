@@ -1,4 +1,4 @@
-"""Previsões dos modelos em sombra e histórico do Fear & Greed na pasta de estado (branch `state`), append-only.
+"""Previsões dos modelos em sombra e histórico do Fear & Greed na pasta de estado (repositório de estado), append-only.
 
 Regras puras (cadeia de hash, revisões do F&G): `transformers/model_shadow.py`.
 """

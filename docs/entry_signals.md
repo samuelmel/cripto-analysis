@@ -103,7 +103,7 @@ com 11 combinações testadas tem alto risco de ser acaso (a melhor de várias),
 - **Só vira candidato se superar a regra simples com IC**: referência fixa = **A com N = 90** (a regra de ranking mais simples,
   que usa a feature principal do modelo). Diferença entre o excesso de F e o de A em 30 dias, pareada por janela de
   calendário e restrita ao período em que F existe (2020 a 2024 no desenvolvimento), IC 95% pelo mesmo bootstrap; exige limite inferior > 0 **e** F ter nível PROMISSOR ou VALIDADO. Caso contrário
-  o resultado negativo é publicado em `docs/` e o modelo fica só em sombra (previsões registradas na branch `state`, fora do Telegram).
+  o resultado negativo é publicado em `docs/` e o modelo fica só em sombra (previsões registradas no repositório de estado, fora do Telegram).
 
 ## Consequência para o produto
 
@@ -227,5 +227,5 @@ não como confirmação. A regra foi aplicada como escrita; o texto da limitaç�
   "Sinais de entrada" do painel (Pesquisa), com o aviso de "melhor de várias". O aviso de mudança só sai quando uma
   candidata entra ou sai da lista.
 - Pendências conhecidas: (1) o produto calcula o universo sobre as moedas analisadas, não sobre a base point-in-time inteira;
-  (2) as previsões do modelo F ainda não são registradas na branch `state` (o protocolo previa o registro em sombra); (3) a
+  (2) as previsões do modelo F ainda não são registradas no repositório de estado (o protocolo previa o registro em sombra); (3) a
   limitação escrita antes sobre o critério de contradição estava errada (ver acima).

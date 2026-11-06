@@ -9,7 +9,7 @@ Modelos (hiperparâmetros fixos, sem ajuste):
     G_GBM_SEM_FNG    o mesmo, sem o Fear & Greed
 Alvo e features: os de `entry_model` (supera o BTC em 30 dias, líquido, nas aberturas; features só até `t`).
 
-Modo sombra: as previsões são calculadas e REGISTRADAS todo dia (branch `state`, `model_predictions.parquet`) e a opinião da
+Modo sombra: as previsões são calculadas e REGISTRADAS todo dia (repositório de estado, `model_predictions.parquet`) e a opinião da
 IA aparece como "IA (em teste)" no Telegram e no painel. Só influenciam o aporte simulado se a trava de promoção
 (`promotion_gate`, docs/promocao_ia.md) aprovar; do contrário não entram na recomendação nem no estágio. O registro tem cadeia de hash e nunca reescreve (dia, moeda,
 modelo) já gravado: é o teste prospectivo. Sem Fear & Greed no dia, os modelos com F&G não preveem (ausência não vira
@@ -267,7 +267,7 @@ def realized_outcomes(log: pd.DataFrame, panel: Panel, horizon: int = TARGET_HOR
 
 
 # ---------------------------------------------------------------------------------------------
-# Histórico do Fear & Greed (cópia diária na branch `state`)
+# Histórico do Fear & Greed (cópia diária no repositório de estado)
 # ---------------------------------------------------------------------------------------------
 
 FNG_HISTORY_SCHEMA: dict[str, str] = {
